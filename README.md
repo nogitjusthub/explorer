@@ -33,7 +33,7 @@ powershell -ExecutionPolicy Bypass -File tools\scripts\test.ps1 -Filter smoke
 
 ```powershell
 # Игра (W/A/S/D — движение, Q/E — камера, F3 — отладка); параметры игры — после «--»
-.\play.cmd -- --seed=7
+.\play.cmd --seed=7
 
 # Бенчмарк: автопилот 40 с, печать FPS, стриминга и расхода топлива
 .\tools\godot\Godot_v4.7.2-stable_win64_console.exe --path . -- --seed=7 --bench=40
@@ -46,6 +46,8 @@ powershell -ExecutionPolicy Bypass -File tools\scripts\get_templates.ps1   # о�
 powershell -ExecutionPolicy Bypass -File tools\scripts\export_web.ps1
 python tools\scripts\web_server.py 8000
 ```
+
+**Нашёл баг в игре — нажми F12.** Снимок (скриншот, карта окрестностей, состояние машины, дамп тайлов и команда для воспроизведения) сохранится в `build/debug/<дата_время>/`.
 
 Все команды и параметры — в [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), §12.
 

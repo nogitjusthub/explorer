@@ -7,10 +7,10 @@ extends Resource
 @export var hp_max: int = 100
 
 @export_group("Movement")
-@export var max_speed: float = 8.0           ## тайл/с
-@export var accel: float = 6.0               ## тайл/с²
-@export var brake_decel: float = 10.0        ## тайл/с²
-@export var turn_rate_deg: float = 180.0     ## °/с
+@export var max_speed: float = 6.5           ## тайл/с
+@export var accel: float = 5.0               ## тайл/с²
+@export var brake_decel: float = 8.5         ## тайл/с²
+@export var turn_rate_deg: float = 150.0     ## °/с
 @export var turn_in_place: bool = false
 @export var drift: float = 0.0               ## боковое проскальзывание; только ховер
 @export var mass: float = 1.0

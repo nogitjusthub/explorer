@@ -2,7 +2,8 @@ class_name ChunkMesher
 extends RefCounted
 ## Меши чанка: 4 секции 16×16 тайлов (верх тайлов + стенки) и отдельный меш воды.
 ## Вершины — в координатах чанка (узел чанка стоит в его мировом углу).
-## Нормалей нет: плоское освещение считает шейдер. COLOR.a = 1 помечает стенку.
+## Освещение плоское — нормаль грани считает шейдер. Вершинные нормали (наклон тайла, стенка —
+## наружу) нужны только теням: смещение теней по нормали берётся из них. COLOR.a = 1 помечает стенку.
 ## Стенку на ребре рисует только более высокая сторона — без дублей и без соседних чанков.
 
 const SECTION := 16
@@ -41,9 +42,11 @@ static func build_section(data: ChunkData, s: int, _run_seed: int = 0) -> Array:
 
 	var quads := SECTION * SECTION + walls
 	var verts := PackedVector3Array()
+	var normals := PackedVector3Array()
 	var colors := PackedColorArray()
 	var indices := PackedInt32Array()
 	verts.resize(quads * 4)
+	normals.resize(quads * 4)
 	colors.resize(quads * 4)
 	indices.resize(quads * 6)
 	var vi := 0
@@ -67,6 +70,11 @@ static func build_section(data: ChunkData, s: int, _run_seed: int = 0) -> Array:
 			verts[vi + 1] = Vector3(x + 1.0, c1 * h, z)
 			verts[vi + 2] = Vector3(x + 1.0, c2 * h, z + 1.0)
 			verts[vi + 3] = Vector3(x, c3 * h, z + 1.0)
+			var tile_normal := Vector3(((c0 + c3) - (c1 + c2)) * 0.5 * h, 1.0, ((c0 + c1) - (c2 + c3)) * 0.5 * h).normalized()
+			normals[vi] = tile_normal
+			normals[vi + 1] = tile_normal
+			normals[vi + 2] = tile_normal
+			normals[vi + 3] = tile_normal
 			var hsh := (((origin.x + lx) * 374761393) ^ ((origin.y + lz) * 668265263)) & 0xFFFF
 			var col := MATERIAL_COLORS[mats[i]] * (0.94 + 0.12 * hsh / 65535.0)
 			col.a = 0.0
@@ -89,34 +97,40 @@ static func build_section(data: ChunkData, s: int, _run_seed: int = 0) -> Array:
 			var bn := b - n * 4
 			var bs := b + n * 4
 			if cs[b] > cs[bn + 3] or cs[b + 1] > cs[bn + 2]:   # север: слева NE, справа NW
-				vi = _wall(verts, colors, indices, vi, ii, wall_color, Vector2(x + 1.0, z), c1, mini(c1, cs[bn + 2] - off), Vector2(x, z), c0, mini(c0, cs[bn + 3] - off))
+				vi = _wall(verts, normals, Vector3.FORWARD, colors, indices, vi, ii, wall_color, Vector2(x + 1.0, z), c1, mini(c1, cs[bn + 2] - off), Vector2(x, z), c0, mini(c0, cs[bn + 3] - off))
 				ii += 6
 			if cs[b + 1] > cs[b + 4] or cs[b + 2] > cs[b + 7]:  # восток: слева SE, справа NE
-				vi = _wall(verts, colors, indices, vi, ii, wall_color, Vector2(x + 1.0, z + 1.0), c2, mini(c2, cs[b + 7] - off), Vector2(x + 1.0, z), c1, mini(c1, cs[b + 4] - off))
+				vi = _wall(verts, normals, Vector3.RIGHT, colors, indices, vi, ii, wall_color, Vector2(x + 1.0, z + 1.0), c2, mini(c2, cs[b + 7] - off), Vector2(x + 1.0, z), c1, mini(c1, cs[b + 4] - off))
 				ii += 6
 			if cs[b + 3] > cs[bs] or cs[b + 2] > cs[bs + 1]:    # юг: слева SW, справа SE
-				vi = _wall(verts, colors, indices, vi, ii, wall_color, Vector2(x, z + 1.0), c3, mini(c3, cs[bs] - off), Vector2(x + 1.0, z + 1.0), c2, mini(c2, cs[bs + 1] - off))
+				vi = _wall(verts, normals, Vector3.BACK, colors, indices, vi, ii, wall_color, Vector2(x, z + 1.0), c3, mini(c3, cs[bs] - off), Vector2(x + 1.0, z + 1.0), c2, mini(c2, cs[bs + 1] - off))
 				ii += 6
 			if cs[b] > cs[b - 3] or cs[b + 3] > cs[b - 2]:      # запад: слева NW, справа SW
-				vi = _wall(verts, colors, indices, vi, ii, wall_color, Vector2(x, z), c0, mini(c0, cs[b - 3] - off), Vector2(x, z + 1.0), c3, mini(c3, cs[b - 2] - off))
+				vi = _wall(verts, normals, Vector3.LEFT, colors, indices, vi, ii, wall_color, Vector2(x, z), c0, mini(c0, cs[b - 3] - off), Vector2(x, z + 1.0), c3, mini(c3, cs[b - 2] - off))
 				ii += 6
 
 	var arrays := []
 	arrays.resize(Mesh.ARRAY_MAX)
 	arrays[Mesh.ARRAY_VERTEX] = verts
+	arrays[Mesh.ARRAY_NORMAL] = normals
 	arrays[Mesh.ARRAY_COLOR] = colors
 	arrays[Mesh.ARRAY_INDEX] = indices
 	return arrays
 
 
 ## Квад стенки: p1 — левый край для наблюдателя снаружи, p2 — правый. Возвращает новый vi.
-static func _wall(verts: PackedVector3Array, colors: PackedColorArray, indices: PackedInt32Array, vi: int, ii: int,
-		color: Color, p1: Vector2, top1: int, bot1: int, p2: Vector2, top2: int, bot2: int) -> int:
+static func _wall(verts: PackedVector3Array, normals: PackedVector3Array, normal: Vector3, colors: PackedColorArray,
+		indices: PackedInt32Array, vi: int, ii: int, color: Color, p1: Vector2, top1: int, bot1: int,
+		p2: Vector2, top2: int, bot2: int) -> int:
 	var h := Grid.TIER_H
 	verts[vi] = Vector3(p1.x, top1 * h, p1.y)
 	verts[vi + 1] = Vector3(p2.x, top2 * h, p2.y)
 	verts[vi + 2] = Vector3(p2.x, bot2 * h, p2.y)
 	verts[vi + 3] = Vector3(p1.x, bot1 * h, p1.y)
+	normals[vi] = normal
+	normals[vi + 1] = normal
+	normals[vi + 2] = normal
+	normals[vi + 3] = normal
 	colors[vi] = color
 	colors[vi + 1] = color
 	colors[vi + 2] = color

@@ -1,21 +1,25 @@
 class_name IsoCameraRig
 extends Node3D
-## Изометрическая ортокамера (GDD §8): азимут 45°, наклон 33°, машина почти в центре кадра,
+## Изометрическая ортокамера (GDD §8): азимут 45°, наклон 45°; ромб тайла — 32 пикселя по ширине
+## при рендере 480×320 (по высоте ≈ 23). Машина почти в центре кадра,
 ## небольшое упреждение по движению, поворот шагом 90° (Q/E) с анимацией 0,3 с.
-## Камера следует за интерполированной позицией машины в _process, сама не интерполируется.
+## Камера следует за интерполированной позицией машины в _process и сдвигается шагом
+## в целый пиксель — иначе низкое разрешение «рябит» при движении.
 
-const ELEVATION_DEG := 33.0
+const ELEVATION_DEG := 45.0
 const DISTANCE := 60.0
-const ORTHO_SIZE := 13.0
-const LEAD := 0.06               ## доля размера кадра, на которую камера смещается по ходу
+const TILE_PX := 32.0            ## ширина ромба тайла в пикселях рендера
+const LEAD := 0.06               ## доля кадра, на которую камера смещается по ходу
 const TURN_TIME := 0.3
 
 var target: Vehicle
 var camera: Camera3D
+var zoom := 1.0                  ## крупность: 2 — вдвое ближе (отладка; пресеты зума — позже)
 
 var _quarter := 0
 var _yaw := deg_to_rad(45.0)
 var _focus := Vector3.ZERO
+var _ortho_size := 14.0
 
 
 func _init() -> void:
@@ -24,9 +28,12 @@ func _init() -> void:
 
 
 func _ready() -> void:
+	# Диагональ тайла (√2 мировых единиц) должна занять TILE_PX пикселей по ширине.
+	var render_h := float(ProjectSettings.get_setting("display/window/size/viewport_height", 320))
+	_ortho_size = render_h * sqrt(2.0) / TILE_PX / zoom
 	camera = Camera3D.new()
 	camera.projection = Camera3D.PROJECTION_ORTHOGONAL
-	camera.size = ORTHO_SIZE
+	camera.size = _ortho_size
 	camera.near = 1.0
 	camera.far = 200.0
 	camera.physics_interpolation_mode = Node.PHYSICS_INTERPOLATION_MODE_OFF
@@ -34,6 +41,11 @@ func _ready() -> void:
 	if target != null:
 		_focus = target.global_position
 	_update_camera()
+
+
+## Сколько раз камера повёрнута на 90° (для отладочного снимка).
+func quarter() -> int:
+	return _quarter
 
 
 func _process(dt: float) -> void:
@@ -49,7 +61,7 @@ func _process(dt: float) -> void:
 	if target != null:
 		var p := target.get_global_transform_interpolated().origin
 		var v := target.state.vel
-		var lead := Vector3(v.x, 0.0, v.y) / target.cls.max_speed * ORTHO_SIZE * LEAD * 2.0
+		var lead := Vector3(v.x, 0.0, v.y) / target.cls.max_speed * _ortho_size * LEAD * 2.0
 		_focus = _focus.lerp(p + lead, 1.0 - exp(-8.0 * dt))
 	_update_camera()
 
@@ -57,5 +69,12 @@ func _process(dt: float) -> void:
 func _update_camera() -> void:
 	var el := deg_to_rad(ELEVATION_DEG)
 	var dir := Vector3(sin(_yaw) * cos(el), sin(el), cos(_yaw) * cos(el))
-	camera.global_position = _focus + dir * DISTANCE
-	camera.look_at(_focus, Vector3.UP)
+	var basis := Basis.looking_at(-dir, Vector3.UP)
+	# Привязка к пиксельной сетке в плоскости экрана: статичный мир не «плывёт» между пикселями.
+	var pixel := _ortho_size / float(ProjectSettings.get_setting("display/window/size/viewport_height", 320))
+	var right := basis.x
+	var up := basis.y
+	var a := _focus.dot(right)
+	var b := _focus.dot(up)
+	var snapped := _focus + right * (roundf(a / pixel) * pixel - a) + up * (roundf(b / pixel) * pixel - b)
+	camera.global_transform = Transform3D(basis, snapped + dir * DISTANCE)

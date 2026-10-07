@@ -14,10 +14,15 @@ if (-not (Test-Path $godot)) {
 # В Windows PowerShell 5.1 stderr нативной программы не должен превращаться в прерывающую ошибку.
 $ErrorActionPreference = "Continue"
 
-$importLog = & $godot --headless --path $root --import 2>&1 | ForEach-Object { "$_" }
+# Headless-импорт после правки скриптов изредка падает с access violation (сбой редактора);
+# повторный запуск проходит, поэтому до трёх попыток.
+for ($attempt = 1; $attempt -le 3; $attempt++) {
+    $importLog = & $godot --headless --path $root --import 2>&1 | ForEach-Object { "$_" }
+    if ($LASTEXITCODE -eq 0) { break }
+    Write-Host "Import attempt $attempt failed (exit code $LASTEXITCODE)"
+}
 if ($LASTEXITCODE -ne 0) {
     $importLog | Write-Host
-    Write-Host "Import failed (exit code $LASTEXITCODE)"
     exit 1
 }
 

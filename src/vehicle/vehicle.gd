@@ -4,9 +4,10 @@ extends Node3D
 ## Позиция обновляется в _physics_process; плавность на высоких FPS даёт physics interpolation.
 
 signal landed(tiers: int, damage: int)
+signal died(cause: StringName)
 
 const BODY_COLOR := Color(0.88, 0.55, 0.18)
-const GLASS_COLOR := Color(0.45, 0.85, 0.9)
+const GLASS_COLOR := Color(0.4, 0.82, 0.98, 0.7)
 const WHEEL_COLOR := Color(0.16, 0.14, 0.18)
 const XRAY_COLOR := Color(1.0, 0.75, 0.25, 0.75)
 
@@ -35,6 +36,7 @@ func _ready() -> void:
 
 
 func place(pos: Vector2, heading: float = 0.0) -> void:
+	state = VehicleState.new()
 	state.pos = pos
 	state.heading = heading
 	state.tile = Grid.tile_of_world(pos.x, pos.y)
@@ -54,7 +56,10 @@ func _physics_process(dt: float) -> void:
 	if r.landed:
 		landed.emit(r.fell_tiers, r.fall_damage)
 		EventBus.vehicle_fell.emit(r.fell_tiers, r.fall_damage)
-	if not state.falling:
+	if r.drowned:
+		died.emit(&"drowned")
+		EventBus.vehicle_died.emit(&"drowned")
+	if not state.falling and not state.drowning:
 		_tilt = _tilt.slerp(_ground_basis(), minf(1.0, 12.0 * dt))
 	_apply_transform()
 	engine.update(state.vel.length() / cls.max_speed, state.throttle, dt)
@@ -80,7 +85,10 @@ func _ground_basis() -> Basis:
 	return Basis.looking_at(f3, up)
 
 
-## Модель ровера из примитивов; перед — по −Z.
+## Модель ровера из примитивов; перед — по −Z. Шесть колёс, кабина — стеклянная полусфера.
+## Корпус виден сквозь препятствия силуэтом (stencil XRAY: силуэт рисуется там, где в stencil не 1).
+## Колёса и мачта пишут в stencil ту же 1 — иначе силуэт корпуса ложился бы поверх них и колёса
+## казались бы прозрачными. Стекло прозрачное само и в stencil не пишет.
 func _build_model() -> Node3D:
 	var root := Node3D.new()
 	root.name = "Model"
@@ -88,22 +96,45 @@ func _build_model() -> Node3D:
 	var body_mat := _material(BODY_COLOR)
 	body_mat.stencil_mode = BaseMaterial3D.STENCIL_MODE_XRAY
 	body_mat.stencil_color = XRAY_COLOR
-	_box(root, Vector3(0.5, 0.18, 0.8), Vector3(0, 0.24, 0), body_mat)
-	_box(root, Vector3(0.38, 0.14, 0.3), Vector3(0, 0.4, -0.12), _material(GLASS_COLOR))
+	body_mat.stencil_reference = 1
+	_box(root, Vector3(0.52, 0.16, 0.68), Vector3(0, 0.22, 0), body_mat)
+
+	var glass := StandardMaterial3D.new()
+	glass.albedo_color = GLASS_COLOR
+	glass.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	glass.roughness = 0.1
+	glass.metallic = 0.3
+	var dome := MeshInstance3D.new()
+	var dome_mesh := SphereMesh.new()
+	dome_mesh.radius = 0.17
+	dome_mesh.height = 0.17
+	dome_mesh.is_hemisphere = true
+	dome_mesh.radial_segments = 12
+	dome_mesh.rings = 4
+	dome.mesh = dome_mesh
+	dome.material_override = glass
+	dome.position = Vector3(0, 0.30, -0.08)
+	root.add_child(dome)
+
 	var wheel_mat := _material(WHEEL_COLOR)
-	for x in [-0.28, 0.28]:
-		for z in [-0.27, 0.27]:
+	wheel_mat.stencil_mode = BaseMaterial3D.STENCIL_MODE_CUSTOM
+	wheel_mat.stencil_flags = BaseMaterial3D.STENCIL_FLAG_WRITE
+	wheel_mat.stencil_compare = BaseMaterial3D.STENCIL_COMPARE_ALWAYS
+	wheel_mat.stencil_reference = 1
+	# Колёса почти вплотную: шаг 0,235 при диаметре 0,22.
+	for x in [-0.3, 0.3]:
+		for z in [-0.235, 0.0, 0.235]:
 			var wheel := MeshInstance3D.new()
 			var cyl := CylinderMesh.new()
-			cyl.top_radius = 0.13
-			cyl.bottom_radius = 0.13
-			cyl.height = 0.1
+			cyl.top_radius = 0.11
+			cyl.bottom_radius = 0.11
+			cyl.height = 0.09
 			cyl.radial_segments = 8
 			cyl.rings = 0
 			wheel.mesh = cyl
 			wheel.material_override = wheel_mat
 			wheel.rotation = Vector3(0, 0, PI * 0.5)
-			wheel.position = Vector3(x, 0.13, z)
+			wheel.position = Vector3(x, 0.11, z)
 			root.add_child(wheel)
 	var mast := MeshInstance3D.new()
 	var mast_mesh := CylinderMesh.new()
@@ -112,7 +143,7 @@ func _build_model() -> Node3D:
 	mast_mesh.height = 0.35
 	mast.mesh = mast_mesh
 	mast.material_override = wheel_mat
-	mast.position = Vector3(0.16, 0.5, 0.3)
+	mast.position = Vector3(0.17, 0.45, 0.24)
 	root.add_child(mast)
 	return root
 

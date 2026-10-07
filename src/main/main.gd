@@ -6,7 +6,12 @@ extends Node
 ##   --autopilot       машина едет сама;
 ##   --bench=S         автопилот S секунд, затем печать статистики и выход;
 ##   --shots=N         автопилот, N снимков экрана в build/shots/ (нужен оконный режим), затем выход;
-##   --shot-every=S    интервал между снимками, секунд (по умолчанию 3).
+##   --shot-every=S    интервал между снимками, секунд (по умолчанию 3);
+##   --no-shadows      без теней (слабые машины, диагностика);
+##   --spawn=X,Z       старт в точке мира вместо площадки (отладка);
+##   --course=D        автопилот едет строго по курсу D градусов (0 — +x, 90 — +z), без объезда;
+##   --snapshot-at=S   отладочный снимок (как по F12) через S секунд;
+##   --zoom=N          камера в N раз крупнее (отладка).
 ## В веб-сборке те же параметры берутся из адреса страницы: ?seed=7&bench=30. Результаты бенчмарка
 ## и снимки уходят POST-запросами на /log и /shot (tools/scripts/web_server.py).
 
@@ -35,6 +40,10 @@ var _physics_frames := 0
 var _chunks_built := 0
 var _slow_frames := 0
 var _objects_at_start := 0
+var _spawn := Vector2.ZERO
+var _deaths := 0
+var _toast: Toast
+var _snapshot_at := -1.0
 
 
 func _ready() -> void:
@@ -44,12 +53,17 @@ func _ready() -> void:
 	_build_world()
 	if _args.has("bench"):
 		_bench_time = float(_args["bench"])
+	if _args.has("snapshot-at"):
+		_snapshot_at = float(_args["snapshot-at"])
 	if _args.has("shots"):
 		_shots_left = int(_args["shots"])
 		_shot_every = float(_args.get("shot-every", "3"))
 		_shot_timer = _shot_every
 	if _args.has("autopilot") or _bench_time > 0.0 or _shots_left > 0:
 		vehicle.autopilot = Autopilot.new(DetRng.unit(run_seed, 0, 0, 900) * TAU, query, vehicle.cls)
+		if _args.has("course"):
+			vehicle.autopilot = Autopilot.new(deg_to_rad(float(_args["course"])), query, vehicle.cls)
+			vehicle.autopilot.fixed_course = true
 		_begin()
 	else:
 		vehicle.control_enabled = false
@@ -74,8 +88,13 @@ func _build_world() -> void:
 	sun.rotation_degrees = Vector3(-38.0, -70.0, 0.0)
 	sun.light_color = Color(1.0, 0.88, 0.74)
 	sun.light_energy = 1.25
-	sun.shadow_enabled = true
-	sun.directional_shadow_max_distance = 60.0
+	sun.shadow_enabled = not _args.has("no-shadows")
+	# Одна ортогональная карта теней на небольшую дальность — плотнее тексели. Смещение по нормали
+	# берётся из вершинных нормалей меша (ChunkMesher их пишет), иначе грани затеняют сами себя.
+	sun.directional_shadow_mode = DirectionalLight3D.SHADOW_ORTHOGONAL
+	sun.directional_shadow_max_distance = 40.0
+	sun.shadow_bias = 0.1
+	sun.shadow_normal_bias = 2.0
 	add_child(sun)
 
 	terrain = TerrainData.new()
@@ -96,13 +115,20 @@ func _build_world() -> void:
 	vehicle = Vehicle.new(Balance.vehicle(&"rover"), query)
 	add_child(vehicle)
 	vehicle.place(spawn, -PI * 0.75)
+	vehicle.died.connect(_on_vehicle_died)
+	_spawn = spawn
 
 	rig = IsoCameraRig.new()
 	rig.target = vehicle
+	rig.zoom = float(_args.get("zoom", "1"))
 	add_child(rig)
 	vehicle.camera = rig.camera
 
+	_toast = Toast.new()
+	add_child(_toast)
+
 	var overlay := DebugOverlay.new()
+	overlay.run_seed = run_seed
 	overlay.vehicle = vehicle
 	overlay.streamer = streamer
 	overlay.scheduler = scheduler
@@ -114,6 +140,9 @@ func _build_world() -> void:
 
 ## Точка десанта M0: центр ближайшей к началу координат площадки челнока (ровно и сухо).
 func _spawn_point() -> Vector2:
+	if _args.has("spawn"):
+		var xz := (_args["spawn"] as String).split(",")
+		return Vector2(float(xz[0]) + 0.5, float(xz[1]) + 0.5)
 	for r in 4:
 		for bz in range(-r, r + 1):
 			for bx in range(-r, r + 1):
@@ -121,6 +150,20 @@ func _spawn_point() -> Vector2:
 				if pad.z != TerrainGenerator.NO_PAD:
 					return Vector2(pad.x + 0.5, pad.y + 0.5)
 	return Vector2(0.5, 0.5)
+
+
+## Гибель (M0: пока только «утонул»). Полный экран итога — в M1a.
+func _on_vehicle_died(cause: StringName) -> void:
+	_deaths += 1
+	print("vehicle died: %s" % cause)
+	if vehicle.autopilot != null:
+		vehicle.place(_spawn, -PI * 0.75)   # бенчмарк продолжается
+		return
+	vehicle.control_enabled = false
+	var screen := StartScreen.new()
+	screen.text = "МАШИНА УТОНУЛА\n\nНажмите любую клавишу, чтобы начать заново"
+	screen.started.connect(func() -> void: get_tree().reload_current_scene())
+	add_child(screen)
 
 
 func _begin() -> void:
@@ -137,6 +180,19 @@ func _physics_process(_dt: float) -> void:
 	_throttle_sum += vehicle.state.throttle
 
 
+func _unhandled_input(event: InputEvent) -> void:
+	if event.is_action_pressed(&"debug_snapshot"):
+		_debug_snapshot()
+
+
+## Отладочный снимок (F12): скриншот, карта, состояние машины, дамп тайлов — см. DebugSnapshot.
+func _debug_snapshot() -> void:
+	var dir := DebugSnapshot.capture(get_viewport(), vehicle, query, run_seed, rig.quarter())
+	var where := "отправлен на сервер" if dir.is_empty() else dir.replace(ProjectSettings.globalize_path("res://"), "")
+	_toast.show_message("Снимок: " + where)
+	print("debug snapshot: " + (dir if not dir.is_empty() else "web"))
+
+
 func _process(dt: float) -> void:
 	_frames += 1
 	_elapsed += dt
@@ -144,6 +200,9 @@ func _process(dt: float) -> void:
 		_max_delta = maxf(_max_delta, dt)
 		if dt > 0.02:
 			_slow_frames += 1
+	if _snapshot_at > 0.0 and _elapsed >= _snapshot_at:
+		_snapshot_at = -1.0
+		_debug_snapshot()
 	if _shots_left > 0:
 		_shot_timer -= dt
 		if _shot_timer <= 0.0:
@@ -156,7 +215,9 @@ func _process(dt: float) -> void:
 
 
 func _take_shot() -> void:
+	# Кадр рендера 480×320 увеличиваем вдвое без сглаживания — как он выглядит в окне.
 	var image := get_viewport().get_texture().get_image()
+	image.resize(image.get_width() * 2, image.get_height() * 2, Image.INTERPOLATE_NEAREST)
 	if OS.has_feature("web"):
 		_web_post("/shot", Marshalls.raw_to_base64(image.save_png_to_buffer()), true)
 	else:
@@ -191,9 +252,14 @@ func _print_bench() -> void:
 		_chunks_built, streamer.loaded_count(), vehicle.total_distance, vehicle.total_distance / _elapsed])
 	_report("bench: avg throttle %.2f → fuel %.1f u/min → full tank of %s lasts %.1f min" % [
 		avg_throttle, fuel_per_min, cls.id, cls.fuel_max / fuel_per_min])
-	_report("bench: objects %d (at start %d), static memory %.1f MB, terrain diffs %d" % [
+	_report("bench: render — draw calls %d, primitives %d, objects in frame %d, video memory %.0f MB" % [
+		Performance.get_monitor(Performance.RENDER_TOTAL_DRAW_CALLS_IN_FRAME),
+		Performance.get_monitor(Performance.RENDER_TOTAL_PRIMITIVES_IN_FRAME),
+		Performance.get_monitor(Performance.RENDER_TOTAL_OBJECTS_IN_FRAME),
+		Performance.get_monitor(Performance.RENDER_VIDEO_MEM_USED) / 1048576.0])
+	_report("bench: objects %d (at start %d), static memory %.1f MB, terrain diffs %d, deaths %d" % [
 		Performance.get_monitor(Performance.OBJECT_COUNT), _objects_at_start,
-		Performance.get_monitor(Performance.MEMORY_STATIC) / 1048576.0, terrain.diffs.size()])
+		Performance.get_monitor(Performance.MEMORY_STATIC) / 1048576.0, terrain.diffs.size(), _deaths])
 
 
 func _report(line: String) -> void:

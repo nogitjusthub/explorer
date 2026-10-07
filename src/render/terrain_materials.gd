@@ -14,6 +14,7 @@ var log_mesh: Mesh
 func _init() -> void:
 	terrain = ShaderMaterial.new()
 	terrain.shader = load("res://src/render/shaders/terrain.gdshader")
+	terrain.set_shader_parameter("tier_h", Grid.TIER_H)
 	water = ShaderMaterial.new()
 	water.shader = load("res://src/render/shaders/water.gdshader")
 

@@ -79,6 +79,23 @@ func test_no_pits_after_repair() -> void:
 		assert_eq(TerrainConnectivity.trapped_count(q, x0, x0, size, size, Grid.CHUNK), 0, "seed %d: trapped tiles" % run_seed)
 
 
+func test_no_hanging_water_and_few_saddles() -> void:
+	# Вода не висит над сухим соседом, разные уровни не соприкасаются; седловин почти нет.
+	for run_seed: int in SEEDS:
+		var gen := TerrainGenerator.new(run_seed, TerrainParams.new())
+		var terrain := TerrainData.new()
+		for cz in range(-2, 2):
+			for cx in range(-2, 2):
+				terrain.add_chunk(gen.generate(Vector2i(cx, cz)))
+		var q := TerrainQuery.new(terrain)
+		var x0 := -2 * Grid.CHUNK
+		var size := 4 * Grid.CHUNK
+		assert_eq(TerrainChecks.hanging_water_count(q, x0, x0, size, size), 0, "seed %d: hanging water" % run_seed)
+		var saddles := TerrainChecks.saddle_count(q, x0, x0, size, size)
+		# Седловину, которую нельзя выровнять без обрыва по соседству, генератор оставляет — таких единицы.
+		assert_true(saddles <= size * size / 500, "seed %d: saddle tiles %d" % [run_seed, saddles])
+
+
 func test_pads_flat_and_dry() -> void:
 	# В блоке может не найтись места (всё под водой или в ущелье) — берём ближайший блок с площадкой.
 	var gen := TerrainGenerator.new(1, TerrainParams.new())

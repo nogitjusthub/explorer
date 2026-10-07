@@ -3,20 +3,26 @@ extends Resource
 ## Параметры генератора рельефа (GDD §3.4). Высоты — в ярусах, частоты — в 1/тайл.
 
 @export_group("Base")
-@export var base_level: float = 7.0
-@export var coarse_freq: float = 1.0 / 220.0
-@export var coarse_amp: float = 6.0
+@export var base_level: float = 10.0
+@export var coarse_freq: float = 1.0 / 260.0
+@export var coarse_amp: float = 12.0            ## крупный рельеф: много уровней при пологих склонах
 @export var detail_freq: float = 1.0 / 70.0
-@export var detail_amp: float = 2.5
+@export var detail_amp: float = 2.0
 
 @export_group("Terraces")
 @export var terrace_low: float = 1.0            ## высота ступени на равнинах
 @export var terrace_high: float = 2.0           ## высота ступени на плато
 @export var plateau_freq: float = 1.0 / 160.0
-@export var step_sharp_w: float = 0.06          ## доля интервала ступени, на которой идёт подъём (резко)
-@export var step_gentle_w: float = 1.0          ## то же в зоне пандусов (полого)
+@export var step_sharp_w: float = 0.06          ## доля интервала ступени под подъём на скалах (обрыв)
+@export var step_soil_w: float = 0.6            ## то же на грунте (пологий склон между полками)
+@export var step_gentle_w: float = 1.0          ## в зонах пандусов и проездах (без ступеней)
 @export var ramp_freq: float = 1.0 / 26.0
 @export var ramp_threshold: float = 0.15        ## шум пандусов выше порога — пологий переход
+
+@export_group("Rock")
+## Скалистость: горы, края ущелий и отдельные выходы скал. Обрывы и уступы — в основном здесь.
+@export var rock_freq: float = 1.0 / 90.0
+@export var rock_threshold: float = 0.38
 
 @export_group("Avenues")
 ## Сеть пологих «проездов»: искривлённая решётка коридоров, где обрывы, горы и ущелья сходят на нет.
@@ -32,7 +38,7 @@ extends Resource
 @export var mountain_freq: float = 1.0 / 150.0
 @export var mountain_threshold: float = 0.32
 @export var mountain_height: float = 8.0
-@export var ridge_freq: float = 1.0 / 32.0
+@export var ridge_freq: float = 1.0 / 56.0
 
 @export_group("Canyons")
 @export var canyon_freq: float = 1.0 / 260.0
@@ -41,14 +47,27 @@ extends Resource
 @export var canyon_depth: float = 4.0
 
 @export_group("Water")
-@export var water_level: float = 3.0
-@export var water_freq: float = 1.0 / 500.0
-@export var water_amp: float = 1.4
+## Мир делится на области (искривлённая решётка); у каждой свой уровень воды. Между областями
+## с разными уровнями рельеф поднимается пологой дамбой выше обоих — вода разных уровней не
+## соприкасается и не «висит» над сухим соседом. Одинаковые уровни стыкуются вода к воде.
+@export var water_level: float = 4.0
+@export var water_spread: int = 1               ## уровень области: water_level ± spread
+@export var water_region: float = 192.0         ## размер области, тайлов
+@export var water_region_warp: float = 40.0
+@export var dam_width: float = 8.0              ## дамба действует в стольких тайлах от границы
+@export var dam_slope: float = 0.5              ## ярусов на тайл — склоны дамбы проезжаемы
+
+@export_group("Puddles")
+## Лужи на ровных полках холмов и плато: чаша глубиной 1 ярус, вода вровень с краем.
+@export var puddle_cell: int = 22
+@export var puddle_chance: float = 0.4
+@export var puddle_r_min: float = 1.5
+@export var puddle_r_max: float = 3.0
 
 @export_group("Ledges")
 @export var ledge_freq: float = 1.0 / 18.0
-@export var ledge_p_plateau: float = 0.3
-@export var ledge_p_plain: float = 0.1
+@export var ledge_p_soil: float = 0.03          ## доля уступов на грунте
+@export var ledge_p_rock: float = 0.3           ## на скалах
 
 @export_group("Biomes")
 @export var forest_freq: float = 1.0 / 75.0

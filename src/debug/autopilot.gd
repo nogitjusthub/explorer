@@ -11,6 +11,7 @@ const DIRECTIONS := 16
 
 var query: TerrainQuery
 var cls: VehicleClass
+var fixed_course := false        ## ехать строго по курсу, без объезда (отладка воды, обрывов)
 var _course := 0.0
 var _timer := 0.0
 var _drift := 0.0
@@ -25,6 +26,8 @@ func _init(start_course: float, terrain_query: TerrainQuery, vehicle_class: Vehi
 func direction(state: VehicleState, dt: float) -> Vector2:
 	_timer -= dt
 	_drift += dt
+	if fixed_course:
+		return Vector2.from_angle(_course)
 	if _timer <= 0.0:
 		_timer = REPLAN_S
 		_replan(state)

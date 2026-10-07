@@ -15,6 +15,10 @@ var fall_vy := 0.0
 var fall_from_tier := 0.0
 var fall_tile := Vector2i.ZERO
 
+var drowning := false            ## машина в воде глубже допустимой — тонет, управления нет
+var drown_time := 0.0
+var drowned := false             ## утонула (гибель уже случилась)
+
 
 func forward() -> Vector2:
 	return Vector2.from_angle(heading)

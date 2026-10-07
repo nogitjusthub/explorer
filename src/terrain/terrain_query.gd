@@ -65,6 +65,24 @@ func edge_rise(tx: int, tz: int, dir: int) -> int:
 	return maxi(db.get_corner(ib, nb.x) - da.get_corner(ia, own.x), db.get_corner(ib, nb.y) - da.get_corner(ia, own.y))
 
 
+## Подъём ребра (в ярусах) в точке ребра t ∈ [0, 1] — линейно между двумя углами.
+## t отсчитывается от первого угла Grid.EDGE_OWN[dir]: для рёбер N и S — по x, для E и W — по z.
+## Частичная стенка (на одном конце 0, на другом 1) у низкого конца почти не поднимается.
+func edge_rise_at(tx: int, tz: int, dir: int, t: float) -> float:
+	var o := Grid.DIR_OFFSETS[dir]
+	var da := data.owner_of(tx, tz)
+	var db := data.owner_of(tx + o.x, tz + o.y)
+	if da == null or db == null:
+		return WALL
+	var ia := da.local_index(tx, tz)
+	var ib := db.local_index(tx + o.x, tz + o.y)
+	var own := Grid.EDGE_OWN[dir]
+	var nb := Grid.EDGE_NEIGHBOR[dir]
+	var r1 := db.get_corner(ib, nb.x) - da.get_corner(ia, own.x)
+	var r2 := db.get_corner(ib, nb.y) - da.get_corner(ia, own.y)
+	return lerpf(r1, r2, clampf(t, 0.0, 1.0))
+
+
 ## Высота обрыва вниз при переходе в соседа: максимум «свой угол − угол соседа».
 func edge_drop(tx: int, tz: int, dir: int) -> int:
 	var o := Grid.DIR_OFFSETS[dir]

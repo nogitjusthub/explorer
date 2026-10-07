@@ -2,16 +2,9 @@ extends SceneTree
 ## Рисует карту рельефа в PNG для подбора параметров генератора.
 ## Запуск: godot --headless --path . --script res://src/debug/map_preview.gd -- --seed=1 --chunks=8
 ## Картинка: build/preview/map_<seed>.png, 3 пикселя на тайл.
-## Цвета: материал × высота; синий — вода; тёмно-зелёный — дерево; пурпурный — площадка челнока;
-## чёрная линия — стенка ≥ 2 яруса, оранжевая — уступ в 1 ярус; красный — тайл без выхода.
+## Легенда цветов — в MapRender.
 
 const S := 3
-const MATERIAL_COLORS: Array[Color] = [
-	Color(0.62, 0.38, 0.27),   # грунт
-	Color(0.74, 0.66, 0.78),   # песок
-	Color(0.36, 0.42, 0.52),   # камень
-	Color(0.30, 0.85, 0.80),   # кристалл
-]
 
 
 func _initialize() -> void:
@@ -36,7 +29,13 @@ func _initialize() -> void:
 	var fill_ms := (Time.get_ticks_usec() - t1) / 1000.0
 	var can := TerrainConnectivity.reachable_to_border(q, x0, z0, size, size)
 
-	var img := Image.create(size * S, size * S, false, Image.FORMAT_RGB8)
+	var trapped := PackedByteArray(can)
+	for lz in size:
+		for lx in size:
+			if lx < 32 or lz < 32 or lx >= size - 32 or lz >= size - 32:
+				trapped[lz * size + lx] = 1   # у края окна выход неизвестен — не считаем
+	var img := MapRender.render(q, x0, z0, size, size, S, trapped)
+
 	var stats := {"water": 0, "trees": 0, "pad": 0, "ledge_edges": 0, "cliff_edges": 0, "trapped": 0}
 	var biomes := PackedInt32Array()
 	biomes.resize(7)
@@ -46,49 +45,21 @@ func _initialize() -> void:
 			var tz := z0 + lz
 			var d := terrain.owner_of(tx, tz)
 			var i := d.local_index(tx, tz)
-			var c0 := d.get_corner(i, 0)
-			var c1 := d.get_corner(i, 1)
-			var c2 := d.get_corner(i, 2)
-			var c3 := d.get_corner(i, 3)
-			var avg := (c0 + c1 + c2 + c3) / 4.0
-			var col: Color = MATERIAL_COLORS[d.material[i]]
-			col = col * clampf(0.45 + avg * 0.045, 0.3, 1.25)
-			var gx := (c1 + c2 - c0 - c3) * 0.5
-			var gz := (c2 + c3 - c0 - c1) * 0.5
-			col = col * clampf(1.0 - 0.18 * (gx + gz), 0.6, 1.4)
 			biomes[d.biome[i]] += 1
-			var water := d.get_water(i)
-			if water != TerrainQuery.NO_WATER:
+			if d.get_water(i) != TerrainQuery.NO_WATER:
 				stats.water += 1
-				col = col.lerp(Color(0.08, 0.42, 0.45), clampf(0.55 + (water - avg) * 0.12, 0.5, 0.95))
 			if d.flags[i] & ChunkData.FLAG_PAD:
 				stats.pad += 1
-				col = Color(0.9, 0.2, 0.85)
-			var trapped := can[lz * size + lx] == 0 and lx >= 32 and lz >= 32 and lx < size - 32 and lz < size - 32
-			if trapped:
-				stats.trapped += 1
-				col = Color(1, 0, 0)
-			for py in S:
-				for px in S:
-					img.set_pixel(lx * S + px, lz * S + py, col)
 			if d.trees[i] != ChunkData.TREE_NONE:
 				stats.trees += 1
-				img.set_pixel(lx * S + 1, lz * S + 1, Color(0.1, 0.3, 0.15))
-			# Стенки на восточном и южном рёбрах (каждое ребро рисуется один раз).
+			if trapped[lz * size + lx] == 0:
+				stats.trapped += 1
 			for dir in [Grid.DIR_E, Grid.DIR_S]:
 				var step := maxi(q.edge_rise(tx, tz, dir), q.edge_drop(tx, tz, dir))
-				if step <= 0 or step >= TerrainQuery.WALL:
-					continue
 				if step == 1:
 					stats.ledge_edges += 1
-				else:
+				elif step > 1 and step < TerrainQuery.WALL:
 					stats.cliff_edges += 1
-				var wall_col := Color(0.95, 0.55, 0.1) if step == 1 else Color(0, 0, 0)
-				for k in S:
-					if dir == Grid.DIR_E:
-						img.set_pixel(lx * S + S - 1, lz * S + k, wall_col)
-					else:
-						img.set_pixel(lx * S + k, lz * S + S - 1, wall_col)
 
 	var dir_path := ProjectSettings.globalize_path("res://build/preview")
 	DirAccess.make_dir_recursive_absolute(dir_path)
@@ -104,6 +75,8 @@ func _initialize() -> void:
 	for b in 7:
 		parts.append("%s %.0f%%" % [names[b], 100.0 * biomes[b] / tiles])
 	print("biomes: " + ", ".join(parts))
+	print("saddle tiles %d, hanging water edges %d" % [TerrainChecks.saddle_count(q, x0, z0, size, size),
+			TerrainChecks.hanging_water_count(q, x0, z0, size, size)])
 	print("saved " + path)
 	quit()
 

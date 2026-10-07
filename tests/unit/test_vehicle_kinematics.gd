@@ -53,9 +53,10 @@ func test_fuel_rate() -> void:
 
 func test_accelerates_to_max_speed_on_flat() -> void:
 	var f := TerrainFixture.new()
-	var s := _state(f, _rover(), Vector2(5.5, 10.5), 0.0)
-	_drive(s, Vector2.RIGHT, _rover(), f, 150)
-	assert_near(s.vel.length(), 8.0, 0.01)
+	var rover := _rover()
+	var s := _state(f, rover, Vector2(5.5, 10.5), 0.0)
+	_drive(s, Vector2.RIGHT, rover, f, 150)
+	assert_near(s.vel.length(), rover.max_speed, 0.01)
 
 
 func test_wall_up_blocks_everyone() -> void:
@@ -68,12 +69,39 @@ func test_wall_up_blocks_everyone() -> void:
 	assert_false(s.falling)
 
 
+func test_partial_wall_passable_near_low_end() -> void:
+	# Ребро 13→14: у северного конца перепада нет, у южного — ярус. Тайл 14 — склон на юг.
+	var f := TerrainFixture.new(4)
+	for tz in range(0, 30):
+		f.set_tile(14, tz, 4, 4, 5, 5)
+	var rover := _rover()
+	var near_low := _state(f, rover, Vector2(10.5, 10.12), 0.0)
+	_drive(near_low, Vector2.RIGHT, rover, f, 90)
+	assert_true(near_low.pos.x > 14.5, "passed the low end of a partial wall, x=%.2f" % near_low.pos.x)
+	var near_high := _state(f, rover, Vector2(10.5, 10.85), 0.0)
+	_drive(near_high, Vector2.RIGHT, rover, f, 90)
+	assert_true(near_high.pos.x < 14.0, "blocked at the high end, x=%.2f" % near_high.pos.x)
+
+
+func test_turns_around_in_dead_end() -> void:
+	# Тупик: стенки на севере, западе и востоке, выход на юг. Ровер смотрит в стенку.
+	var f := TerrainFixture.new(4)
+	f.set_flat(10, 9, 6)
+	f.set_flat(9, 10, 6)
+	f.set_flat(11, 10, 6)
+	var rover := _rover()
+	var s := _state(f, rover, Vector2(10.5, 10.4), -PI * 0.5)
+	_drive(s, Vector2.UP, rover, f, 30)          # упирается в северную стенку
+	_drive(s, Vector2.DOWN, rover, f, 180)       # разворот и выезд на юг
+	assert_true(s.pos.y > 12.0, "left the dead end, z=%.2f" % s.pos.y)
+
+
 func test_slides_along_wall() -> void:
 	var f := TerrainFixture.new(4)
 	f.set_block(14, 0, 20, 30, 6)
 	var s := _state(f, _rover(), Vector2(13.5, 10.5), 0.0)
-	# Давим по диагонали в стенку: машина скользит вдоль неё по z.
-	_drive(s, Vector2(1, 1).normalized(), _rover(), f, 60)
+	# Давим по диагонали в стенку: машина (сначала доворачивает с места) скользит вдоль неё по z.
+	_drive(s, Vector2(1, 1).normalized(), _rover(), f, 90)
 	assert_true(s.pos.y > 12.0, "slid along the wall, z=%.2f" % s.pos.y)
 	assert_true(s.pos.x < 14.0, "did not pass the wall")
 
@@ -110,23 +138,47 @@ func test_one_tier_ledge_drop_is_free() -> void:
 	assert_eq(damage, 0)
 
 
-func test_deep_water_blocks_rover_not_hover() -> void:
+func test_rover_drowns_in_deep_water_hover_crosses() -> void:
 	var f := TerrainFixture.new(4)
 	for tz in range(0, 30):
 		for tx in range(14, 20):
 			f.set_flat(tx, tz, 2)
 			f.set_water(tx, tz, 5)        # глубина 3 яруса
-	# Склон вниз к воде заменён ровным берегом того же яруса, что дно — проверяем только воду.
+	# Берег — ровно на уровне дна, чтобы проверять только воду, без обрыва.
 	f.set_block(0, 0, 13, 30, 2)
 	var rover := _rover()
 	var s := _state(f, rover, Vector2(10.5, 10.5), 0.0)
-	_drive(s, Vector2.RIGHT, rover, f, 120)
-	assert_true(s.pos.x < 14.0, "rover stopped at deep water, x=%.2f" % s.pos.x)
+	var drowned := false
+	for _i in 300:
+		var r := VehicleKinematics.step(s, Vector2.RIGHT, rover, f.query, DT)
+		drowned = drowned or r.drowned
+	assert_true(s.drowning, "rover entered deep water and is drowning")
+	assert_true(drowned, "rover drowned")
+	assert_true(s.pos.x < 15.0, "sank near the shore, x=%.2f" % s.pos.x)
 	var hover := _hover()
 	var h := _state(f, hover, Vector2(10.5, 10.5), 0.0)
 	_drive(h, Vector2.RIGHT, hover, f, 120)
 	assert_true(h.pos.x > 15.0, "hover crossed the water, x=%.2f" % h.pos.x)
 	assert_near(h.y, 5 * Grid.TIER_H, 1e-3, "hover rides on the water level")
+
+
+func test_fall_into_deep_water_drowns_without_damage() -> void:
+	var f := TerrainFixture.new(4)
+	for tz in range(0, 30):
+		for tx in range(14, 20):
+			f.set_flat(tx, tz, 0)
+			f.set_water(tx, tz, 3)        # обрыв 4 яруса в воду глубиной 3
+	var rover := _rover()
+	var s := _state(f, rover, Vector2(11.5, 10.5), 0.0)
+	var damage := 0
+	var drowned := false
+	for _i in 400:
+		var r := VehicleKinematics.step(s, Vector2.RIGHT, rover, f.query, DT)
+		damage += r.fall_damage
+		drowned = drowned or r.drowned
+	assert_eq(damage, 0, "water cushions the fall")
+	assert_true(drowned, "rover drowned after falling into deep water")
+	assert_eq(s.tile, Vector2i(14, 10), "fell strictly into the adjacent tile")
 
 
 func test_shallow_water_slows_rover() -> void:
@@ -137,7 +189,7 @@ func test_shallow_water_slows_rover() -> void:
 	var rover := _rover()
 	var s := _state(f, rover, Vector2(5.5, 10.5), 0.0)
 	_drive(s, Vector2.RIGHT, rover, f, 120)
-	assert_near(s.vel.length(), 8.0 * 0.7, 0.01)
+	assert_near(s.vel.length(), rover.max_speed * rover.water_speed_mult, 0.01)
 
 
 func test_tree_blocks_slow_rover_and_falls_at_full_speed() -> void:
@@ -156,7 +208,7 @@ func test_tree_blocks_slow_rover_and_falls_at_full_speed() -> void:
 		var r := VehicleKinematics.step(fast, Vector2.RIGHT, rover, f.query, DT)
 		if r.felled_tree:
 			felled = true
-			assert_true(fast.vel.length() <= 4.0 + 1e-3, "speed capped after felling")
+			assert_true(fast.vel.length() <= rover.max_speed * rover.tree_speed_after_frac + 1e-3, "speed capped after felling")
 			break
 	assert_true(felled, "tree felled at full speed")
 	assert_false(f.query.has_standing_tree(20, 10))
@@ -179,24 +231,39 @@ func test_uphill_speed_limit() -> void:
 		if s.pos.x >= 21.0:
 			break
 	assert_true(s.uphill_tiles >= 4, "uphill tiles counted: %d" % s.uphill_tiles)
-	assert_true(max_after_four <= 8.0 / 3.0 + 1e-3, "speed on a long climb: %.2f" % max_after_four)
+	assert_true(max_after_four <= rover.max_speed / 3.0 + 1e-3, "speed on a long climb: %.2f" % max_after_four)
 
 
 func test_no_input_slows_down() -> void:
 	var f := TerrainFixture.new(4)
 	var rover := _rover()
 	var s := _state(f, rover, Vector2(5.5, 10.5), 0.0)
-	s.vel = Vector2(8, 0)
+	s.vel = Vector2(rover.max_speed, 0)
 	_drive(s, Vector2.ZERO, rover, f, 30)
-	assert_near(s.vel.length(), 8.0 - 10.0 * 0.5, 0.05)
+	assert_near(s.vel.length(), rover.max_speed - rover.brake_decel * 0.5, 0.05)
+
+
+func test_turns_in_place_then_accelerates() -> void:
+	# Стоит носом на восток, нужно на запад: сначала разворот на месте, потом разгон.
+	var f := TerrainFixture.new(4)
+	var rover := _rover()
+	var start := Vector2(10.5, 10.5)
+	var s := _state(f, rover, start, 0.0)
+	_drive(s, Vector2.LEFT, rover, f, 30)          # 0,5 с — разворот ещё идёт
+	assert_true(absf(wrapf(PI - s.heading, -PI, PI)) > VehicleKinematics.ALIGN_ANGLE, "still turning")
+	assert_near(s.vel.length(), 0.0, 1e-3, "does not move while turning in place")
+	assert_true(s.pos.distance_to(start) < 1e-3, "stays in place")
+	_drive(s, Vector2.LEFT, rover, f, 90)          # разворот закончен — разгон на запад
+	assert_true(s.vel.x < -2.0, "accelerates to the west after the turn: vx=%.2f" % s.vel.x)
+	assert_true(absf(s.pos.y - start.y) < 0.2, "no arc: z drift %.2f" % (s.pos.y - start.y))
 
 
 func test_reverse_input_turns_instead_of_reversing() -> void:
 	var f := TerrainFixture.new(4)
 	var rover := _rover()
 	var s := _state(f, rover, Vector2(10.5, 10.5), 0.0)
-	s.vel = Vector2(8, 0)
+	s.vel = Vector2(rover.max_speed, 0)
 	VehicleKinematics.step(s, Vector2.LEFT, rover, f.query, DT)
 	assert_true(s.vel.x > 0.0, "still moving forward on the first frame of a U-turn")
-	_drive(s, Vector2.LEFT, rover, f, 120)
-	assert_true(s.vel.x < -7.0, "after the turn drives the new way, vx=%.2f" % s.vel.x)
+	_drive(s, Vector2.LEFT, rover, f, 150)
+	assert_true(s.vel.x < -(rover.max_speed - 1.0), "after the turn drives the new way, vx=%.2f" % s.vel.x)
