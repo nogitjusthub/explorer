@@ -1,0 +1,45 @@
+class_name EngineSound
+extends AudioStreamPlayer
+## Звук двигателя: процедурный зацикленный WAV (без ассетов), тон и громкость — от скорости и газа.
+## AudioStreamWAV работает и в веб-сборке (режим сэмплов), в отличие от AudioStreamGenerator.
+
+const RATE := 22050
+const BASE_HZ := 55.0            ## целое число периодов на секунду — петля без щелчка
+
+
+func _ready() -> void:
+	stream = make_loop()
+	volume_db = -60.0
+	pitch_scale = 0.55
+
+
+## speed_ratio — доля от максимальной скорости, throttle — газ 0..1.
+func update(speed_ratio: float, throttle: float, dt: float) -> void:
+	var k := 1.0 - exp(-6.0 * dt)
+	pitch_scale = lerpf(pitch_scale, 0.55 + 0.9 * speed_ratio + 0.1 * throttle, k)
+	volume_db = lerpf(volume_db, lerpf(-22.0, -10.0, maxf(throttle, speed_ratio)), k)
+
+
+static func make_loop() -> AudioStreamWAV:
+	var data := PackedByteArray()
+	data.resize(RATE * 2)
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 12345
+	for i in RATE:
+		var t := float(i) / RATE
+		var x := 0.45 * _saw(BASE_HZ * t) + 0.25 * _saw(BASE_HZ * 2.0 * t + 0.31) \
+				+ 0.2 * sin(TAU * BASE_HZ * 0.5 * t) + 0.06 * rng.randf_range(-1.0, 1.0)
+		data.encode_s16(i * 2, int(clampf(x, -1.0, 1.0) * 20000.0))
+	var wav := AudioStreamWAV.new()
+	wav.format = AudioStreamWAV.FORMAT_16_BITS
+	wav.mix_rate = RATE
+	wav.stereo = false
+	wav.loop_mode = AudioStreamWAV.LOOP_FORWARD
+	wav.loop_begin = 0
+	wav.loop_end = RATE
+	wav.data = data
+	return wav
+
+
+static func _saw(x: float) -> float:
+	return 2.0 * (x - floorf(x + 0.5))

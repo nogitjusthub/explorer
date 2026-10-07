@@ -1,0 +1,31 @@
+[gd_resource type="Resource" script_class="VehicleClass" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://data/vehicles/vehicle_class.gd" id="1_vclass"]
+
+[resource]
+script = ExtResource("1_vclass")
+id = &"rover"
+display_name = "Ровер"
+hp_max = 100
+max_speed = 8.0
+accel = 6.0
+brake_decel = 10.0
+turn_rate_deg = 180.0
+turn_in_place = false
+drift = 0.0
+mass = 1.0
+uphill_loss_per_tile = 0.16666667
+uphill_floor = 0.33333334
+downhill_accel_bonus = 0.2
+max_water_depth = 1
+water_speed_mult = 0.7
+hovers = false
+fall_damage_mode = "exp"
+fall_damage_base = 20.0
+tree_fell_speed_frac = 0.9
+tree_speed_after_frac = 0.5
+tree_fell_damage = 0
+fuel_max = 100.0
+fuel_idle_per_min = 3.0
+fuel_drive_per_min = 15.0
+cargo_slots = 10

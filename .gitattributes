@@ -1,0 +1,15 @@
+* text=auto eol=lf
+
+*.png binary
+*.jpg binary
+*.webp binary
+*.wav binary
+*.ogg binary
+*.mp3 binary
+*.glb binary
+*.vox binary
+*.ttf binary
+*.otf binary
+*.zip binary
+
+*.cmd text eol=crlf

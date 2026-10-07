@@ -1,0 +1,10 @@
+# Godot 4
+.godot/
+/android/
+*.tmp
+*.translation
+export_credentials.cfg
+
+# Portable engine and build output
+tools/godot/
+build/
