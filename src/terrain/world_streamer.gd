@@ -136,6 +136,15 @@ func _process(_delta: float) -> void:
 	_maintain()
 
 
+## Выход из игры посреди генерации: разрываем циклы «запись ↔ задача», иначе они переживут выход.
+func _exit_tree() -> void:
+	for e: Entry in _entries.values():
+		if e.job != null:
+			e.job.cancelled = true
+			e.job = null
+	_entries.clear()
+
+
 func _refresh() -> void:
 	_refreshed_at = _focus
 	var c0 := Grid.chunk_of_world(_focus.x - R_LOAD, _focus.y - R_LOAD)

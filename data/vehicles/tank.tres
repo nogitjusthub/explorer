@@ -1,0 +1,33 @@
+[gd_resource type="Resource" script_class="VehicleClass" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://data/vehicles/vehicle_class.gd" id="1_vclass"]
+
+[resource]
+script = ExtResource("1_vclass")
+id = &"tank"
+display_name = "Танк"
+blurb = "Крепость: в гору без потерь, вброд до 2 ярусов, валит лес с малого хода. Медленный."
+hp_max = 160
+max_speed = 4.0
+accel = 2.0
+brake_decel = 5.0
+turn_rate_deg = 75.0
+turn_in_place = true
+drift = 0.0
+mass = 2.5
+uphill_loss_per_tile = 0.0
+uphill_floor = 1.0
+downhill_accel_bonus = 0.2
+max_water_depth = 2
+water_speed_mult = 0.5
+hovers = false
+fall_damage_mode = "exp"
+fall_damage_base = 20.0
+tree_fell_speed_frac = 0.25
+tree_speed_after_frac = 0.33
+tree_fell_damage = 0
+fuel_max = 90.0
+fuel_idle_per_min = 2.0
+fuel_drive_per_min = 9.0
+cargo_slots = 12
+engine_pitch = 0.7

@@ -4,6 +4,7 @@ extends Resource
 
 @export var id: StringName
 @export var display_name: String
+@export_multiline var blurb: String          ## одна-две строки о характере класса (экран выбора)
 @export var hp_max: int = 100
 
 @export_group("Movement")
@@ -12,11 +13,15 @@ extends Resource
 @export var brake_decel: float = 8.5         ## тайл/с²
 @export var turn_rate_deg: float = 150.0     ## °/с
 @export var turn_in_place: bool = false
-@export var drift: float = 0.0               ## боковое проскальзывание; только ховер
+@export var drift: float = 0.0               ## боковое проскальзывание 0..1: 0 — скорость всегда по курсу
 @export var mass: float = 1.0
 @export var uphill_loss_per_tile: float = 1.0 / 6.0   ## доля max_speed, теряемая за каждый тайл подъёма подряд
 @export var uphill_floor: float = 1.0 / 3.0           ## предел скорости не опускается ниже этой доли
 @export var downhill_accel_bonus: float = 0.2
+
+@export_group("Walls")
+@export var wall_hit_speed_frac: float = 2.0 / 3.0   ## удар в стенку со скоростью «в стену» от этой доли max_speed…
+@export var wall_hit_damage: int = 10                 ## …наносит фиксированный урон
 
 @export_group("Water")
 @export var max_water_depth: int = 1         ## в ярусах; -1 — любая глубина (ховер)
@@ -41,3 +46,4 @@ extends Resource
 @export_group("Presentation")
 @export var model: PackedScene
 @export var engine_sound: AudioStream
+@export var engine_pitch: float = 1.0        ## тон двигателя относительно ровера

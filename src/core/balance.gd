@@ -5,6 +5,8 @@ extends Node
 const RULES_PATH := "res://data/balance.tres"
 const VEHICLE_PATHS: Dictionary[StringName, String] = {
 	&"rover": "res://data/vehicles/rover.tres",
+	&"tank": "res://data/vehicles/tank.tres",
+	&"hover": "res://data/vehicles/hover.tres",
 }
 const PICKUP_PATHS: Dictionary[StringName, String] = {
 	&"crystal": "res://data/pickups/crystal.tres",

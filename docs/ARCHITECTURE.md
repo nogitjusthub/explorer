@@ -34,7 +34,7 @@ explorer/
 │  ├─ terrain/                  chunk_data  terrain_data  terrain_rules  terrain_generator
 │  │                            terrain_query  terrain_connectivity  terrain_repair  diff_store
 │  │                            chunk_mesher  world_streamer  chunk_node  tree_field  (deformation — M3)
-│  ├─ vehicle/                  vehicle(.tscn)  vehicle_state  vehicle_kinematics  vehicle_input
+│  ├─ vehicle/                  vehicle  vehicle_models  vehicle_state  vehicle_kinematics  vehicle_input
 │  ├─ camera/                   iso_camera_rig(.tscn)
 │  ├─ hazards/                  weather_director  storm_front  tornado  quake  fog  dust_storm
 │  ├─ fauna/                    fauna_director  worm  hopper  shellback  nest  grid_astar
@@ -83,7 +83,7 @@ explorer/
 | `Deformation` | Воронка, борозда, разлом → операции над углами + relax → список изменённых тайлов |
 | `ChunkMesher` | Секция чанка → массивы для `ArrayMesh` (верх, стенки, вода) |
 | `TreeField` | Буфер `MultiMesh` деревьев чанка, занятость тайлов |
-| `VehicleKinematics` | Один шаг движения по сетке над `VehicleState` |
+| `VehicleKinematics` | Один шаг движения по сетке над `VehicleState`; занос (`drift`), машина на подушке считает рёбра по зеркалу воды (`TerrainQuery.edge_rise_float_at`) |
 | `RunState` | HP, топливо, трюм с вытеснением дешёвого, формулы счёта (сдача, аварийный вызов, бонус), итог забега |
 | `Leaderboard` | `user://leaderboard.json`, топ-10 по классу |
 | `PickupGenerator` | Находки чанка по правилам GDD §6: один `RandomNumberGenerator` на чанк, бросок на каждый тайл в фиксированном порядке (~0,2 мс на чанк); ремкомплект — на чанк |
@@ -98,7 +98,8 @@ explorer/
 | `JobScheduler` | Очередь задач с приоритетом и бюджетом микросекунд на кадр |
 | `WorldStreamer` | Какие чанки нужны, гистерезис загрузки и выгрузки, пул `ChunkNode` |
 | `ChunkNode` | 4 × `MeshInstance3D` (секции) + вода + `MultiMeshInstance3D` деревьев |
-| `Vehicle` | Владеет `VehicleState`, вызывает кинематику, шлёт события |
+| `Vehicle` | Владеет `VehicleState`, вызывает кинематику, шлёт события; `set_class()` меняет модель и тон двигателя |
+| `VehicleModels` | Модели трёх классов из примитивов по `design_references/`; материалы для силуэта (stencil), вращающиеся части |
 | `VehicleInput` | Действия ввода → вектор направления относительно экрана |
 | `IsoCameraRig` | Ортокамера, поворот 90°, упреждение, тряска |
 | `GameFlow` (`main.gd`) | Машина состояний: Старт → Десант → Вылазка → Итог; владеет `RunState` |
@@ -422,6 +423,7 @@ $g = ".\tools\godot\Godot_v4.7.2-stable_win64_console.exe"
 | Бенчмарк (автопилот, ПК) | `… --path . -- --seed=7 --bench=40` (можно `--headless`) |
 | Отладочный снимок в игре | **F12** (геймпад — Back) → `build/debug/<дата_время>/`: `screenshot.png`, `map.png` (65×65 тайлов, машина — крест), `info.txt` (seed, коммит, команда воспроизведения, состояние машины, рёбра её тайла, сетка ярусов), `tiles.json` (дамп тайлов 17×17). В вебе — на `/shot` и `/log`. Без клавиатуры: `-- --snapshot-at=S` |
 | Старт в точке / прямой курс | `play.cmd --seed=N --spawn=X,Z [--course=D --autopilot]` |
+| Класс техники | `play.cmd --vehicle=tank` (rover, tank, hover); снимок экрана выбора — `-- --idle --select --shots=1` |
 | Снимки экрана | `… --path . -- --seed=7 --shots=4 --shot-every=3` → `build/shots/` |
 | Сценарий без рук | `… -- --seed=7 --idle --shuttle-in=6 --shuttle-dist=0 --shots=2 --press=radio@8`: машина стоит на площадке старта, челнок садится через 6 с, F на 8-й секунде. Ещё: `--fuel=N` (мало топлива — проверка пустого бака), `--debug` (оверлей сразу) |
 | Карта рельефа в PNG | `… --headless --path . --script res://src/debug/map_preview.gd -- --seed=1 --chunks=8` → `build/preview/` |

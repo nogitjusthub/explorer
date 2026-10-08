@@ -155,9 +155,16 @@ func test_rover_drowns_in_deep_water_hover_crosses() -> void:
 	assert_true(s.drowning, "rover entered deep water and is drowning")
 	assert_true(drowned, "rover drowned")
 	assert_true(s.pos.x < 15.0, "sank near the shore, x=%.2f" % s.pos.x)
+	# Ховер держится на зеркале: берег для него — на уровне воды (вода над сухим соседом
+	# генератором не допускается, так что «стенка воды» из рельефа выше — только для ровера).
+	var g := TerrainFixture.new(5)
+	for tz in range(0, 30):
+		for tx in range(14, 20):
+			g.set_flat(tx, tz, 2)
+			g.set_water(tx, tz, 5)
 	var hover := _hover()
-	var h := _state(f, hover, Vector2(10.5, 10.5), 0.0)
-	_drive(h, Vector2.RIGHT, hover, f, 120)
+	var h := _state(g, hover, Vector2(10.5, 10.5), 0.0)
+	_drive(h, Vector2.RIGHT, hover, g, 120)
 	assert_true(h.pos.x > 15.0, "hover crossed the water, x=%.2f" % h.pos.x)
 	assert_near(h.y, 5 * Grid.TIER_H, 1e-3, "hover rides on the water level")
 

@@ -97,6 +97,41 @@ func edge_drop(tx: int, tz: int, dir: int) -> int:
 	return maxi(da.get_corner(ia, own.x) - db.get_corner(ib, nb.x), da.get_corner(ia, own.y) - db.get_corner(ib, nb.y))
 
 
+## То же для машины на воздушной подушке: она держится не ниже зеркала воды, поэтому высота угла
+## тайла с водой — не ниже уровня воды. Берег у озера для неё — ступенька от воды, а не от дна.
+func edge_rise_float_at(tx: int, tz: int, dir: int, t: float) -> float:
+	var o := Grid.DIR_OFFSETS[dir]
+	var da := data.owner_of(tx, tz)
+	var db := data.owner_of(tx + o.x, tz + o.y)
+	if da == null or db == null:
+		return WALL
+	var ia := da.local_index(tx, tz)
+	var ib := db.local_index(tx + o.x, tz + o.y)
+	var wa := da.get_water(ia)
+	var wb := db.get_water(ib)
+	var own := Grid.EDGE_OWN[dir]
+	var nb := Grid.EDGE_NEIGHBOR[dir]
+	var r1 := maxi(db.get_corner(ib, nb.x), wb) - maxi(da.get_corner(ia, own.x), wa)
+	var r2 := maxi(db.get_corner(ib, nb.y), wb) - maxi(da.get_corner(ia, own.y), wa)
+	return lerpf(r1, r2, clampf(t, 0.0, 1.0))
+
+
+## Целые подъём и обрыв ребра по зеркалу воды (для поиска пути машины на подушке).
+func edge_rise_float(tx: int, tz: int, dir: int) -> int:
+	return maxi(roundi(edge_rise_float_at(tx, tz, dir, 0.0)), roundi(edge_rise_float_at(tx, tz, dir, 1.0)))
+
+
+func edge_drop_float(tx: int, tz: int, dir: int) -> int:
+	return maxi(-roundi(edge_rise_float_at(tx, tz, dir, 0.0)), -roundi(edge_rise_float_at(tx, tz, dir, 1.0)))
+
+
+## Высота поверхности или зеркала воды (что выше), ярусы.
+func surface_tier_float(x: float, z: float) -> float:
+	var w := water_tier(floori(x), floori(z))
+	var h := surface_tier(x, z)
+	return h if w == NO_WATER else maxf(h, w)
+
+
 ## Ярус зеркала воды на тайле или NO_WATER.
 func water_tier(tx: int, tz: int) -> int:
 	var d := data.owner_of(tx, tz)

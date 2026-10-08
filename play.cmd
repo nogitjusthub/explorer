@@ -5,6 +5,7 @@ rem   play.cmd --seed=7 --zoom=4
 rem Справка: play.cmd --help
 rem
 rem   --seed=N          задаёт мир (по умолчанию — от времени)
+rem   --vehicle=ID      машина: rover, tank, hover (по умолчанию — последняя выбранная)
 rem   --zoom=N          камера в N раз крупнее
 rem   --spawn=X,Z       старт в точке мира вместо площадки
 rem   --autopilot       машина едет сама
@@ -30,6 +31,7 @@ chcp 65001 >nul
 echo Запуск: play.cmd [параметры]   (из любой папки)
 echo.
 echo   --seed=N          задаёт мир (по умолчанию — от времени)
+echo   --vehicle=ID      машина: rover, tank, hover (по умолчанию — последняя выбранная)
 echo   --zoom=N          камера в N раз крупнее
 echo   --spawn=X,Z       старт в точке мира вместо площадки
 echo   --autopilot       машина едет сама

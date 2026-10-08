@@ -78,10 +78,12 @@ func _passable(a: Vector2i, b: Vector2i) -> bool:
 
 func _edge_ok(a: Vector2i, b: Vector2i) -> bool:
 	var dir := Grid.DIR_OFFSETS.find(b - a)
-	if dir < 0 or query.edge_rise(a.x, a.y, dir) > 0:
+	if dir < 0:
 		return false
-	if query.edge_drop(a.x, a.y, dir) >= 3:
-		return false   # не прыгаем с высоких обрывов
+	var rise := query.edge_rise_float(a.x, a.y, dir) if cls.hovers else query.edge_rise(a.x, a.y, dir)
+	var drop := query.edge_drop_float(a.x, a.y, dir) if cls.hovers else query.edge_drop(a.x, a.y, dir)
+	if rise > 0 or drop >= 3:
+		return false   # стенки вверх не проезжаем, с высоких обрывов не прыгаем
 	if cls.max_water_depth >= 0:
 		var w := query.water_tier(b.x, b.y)
 		if w != TerrainQuery.NO_WATER and w - query.surface_tier(b.x + 0.5, b.y + 0.5) > cls.max_water_depth:

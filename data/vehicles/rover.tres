@@ -6,6 +6,7 @@
 script = ExtResource("1_vclass")
 id = &"rover"
 display_name = "Ровер"
+blurb = "Универсал: держит дорогу, не боится мелководья, с разгона валит деревья."
 hp_max = 100
 max_speed = 6.5
 accel = 5.0

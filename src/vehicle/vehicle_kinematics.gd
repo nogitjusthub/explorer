@@ -7,6 +7,8 @@ extends RefCounted
 ##   на месте к нужному направлению (до ALIGN_ANGLE) и только потом разгоняется. На ходу —
 ##   поворот по дуге; если нужное направление сзади, машина сбрасывает скорость, доворачивает на
 ##   месте и разгоняется. Танк и на ходу не едет, пока угол больше TANK_TURN_ANGLE.
+## - Удар в стенку со скоростью «в стену» (поперёк ребра) от 2/3 max_speed — фиксированный урон
+##   класса; касание по касательной и медленный упор урона не дают.
 ## - Стенку вверх не проезжает никто: составляющая скорости поперёк ребра обнуляется. Перепад
 ##   считается в точке пересечения ребра; ступенька до STEP_TOLERANCE (треть яруса) проезжается —
 ##   так частичная стенка (0 на одном конце ребра, ярус на другом) проходима у низкого конца.
@@ -15,6 +17,8 @@ extends RefCounted
 ## - В воду глубже допустимой для класса можно заехать или упасть, но машина тонет: управления
 ##   нет, за DROWN_TIME уходит на дно — гибель. Ховер не тонет.
 ## - Деревья валятся на скорости от порога класса, иначе машина упирается.
+## - Машина на подушке (ховер) держится на зеркале воды: рёбра и склоны для неё считаются по
+##   высоте «не ниже воды»; её заносит — боковая скорость гаснет не сразу (cls.drift).
 
 const GRAVITY := 20.0            ## мировых единиц/с²
 const RADIUS := 0.3              ## радиус машины для стенок и деревьев, тайлов
@@ -34,6 +38,7 @@ const DEEP_MARGIN := 0.1            ## ярусов сверх допустим�
 class StepResult:
 	extends RefCounted
 	var hit_wall := false
+	var wall_damage := 0             ## удар в стенку на скорости (один раз за удар)
 	var landed := false
 	var fell_tiers := 0
 	var fall_damage := 0
@@ -76,14 +81,22 @@ static func step(s: VehicleState, inp: Vector2, cls: VehicleClass, q: TerrainQue
 	target_speed = minf(target_speed, limit)
 
 	var fwd := s.forward()
+	var lateral := 0.0
+	if cls.drift > 0.0:
+		# Занос: вдоль курса — разгон и торможение как у всех, поперёк — скорость гаснет постепенно.
+		var right := Vector2(-fwd.y, fwd.x)
+		lateral = s.vel.dot(right) * exp(-lerpf(12.0, 1.5, cls.drift) * dt)
+		speed = maxf(s.vel.dot(fwd), 0.0)
 	if speed < target_speed:
 		var accel := cls.accel
-		if slope_along(q, s.pos, fwd) < -0.05:
+		if _slope(cls, q, s.pos, fwd) < -0.05:
 			accel *= 1.0 + cls.downhill_accel_bonus
 		speed = minf(speed + accel * dt, target_speed)
 	else:
 		speed = maxf(speed - cls.brake_decel * dt, target_speed)
 	s.vel = fwd * speed
+	if lateral != 0.0:
+		s.vel = (s.vel + Vector2(-fwd.y, fwd.x) * lateral).limit_length(cls.max_speed)
 
 	var delta := s.vel * dt
 	_move_axis(s, cls, q, 0, delta.x, r)
@@ -95,7 +108,7 @@ static func step(s: VehicleState, inp: Vector2, cls: VehicleClass, q: TerrainQue
 	var t := Vector2i(floori(s.pos.x), floori(s.pos.y))
 	if t != s.tile:
 		s.tile = t
-		var slope := slope_along(q, s.pos, fwd)
+		var slope := _slope(cls, q, s.pos, fwd)
 		s.uphill_tiles = s.uphill_tiles + 1 if slope > UPHILL_SLOPE else 0
 	_collide_trees(s, cls, q, r)
 	s.y = ground_y(s, cls, q)
@@ -124,6 +137,22 @@ static func slope_along(q: TerrainQuery, pos: Vector2, dir: Vector2) -> float:
 	var a := q.surface_tier(pos.x - dir.x * 0.4, pos.y - dir.y * 0.4)
 	var b := q.surface_tier(pos.x + dir.x * 0.4, pos.y + dir.y * 0.4)
 	return (b - a) / 0.8
+
+
+## Наклон с учётом класса: машина на подушке считает склоны по зеркалу воды.
+static func _slope(cls: VehicleClass, q: TerrainQuery, pos: Vector2, dir: Vector2) -> float:
+	if not cls.hovers:
+		return slope_along(q, pos, dir)
+	var a := q.surface_tier_float(pos.x - dir.x * 0.4, pos.y - dir.y * 0.4)
+	var b := q.surface_tier_float(pos.x + dir.x * 0.4, pos.y + dir.y * 0.4)
+	return (b - a) / 0.8
+
+
+## Подъём ребра в точке пересечения с учётом класса (машина на подушке — по зеркалу воды).
+static func _rise_at(cls: VehicleClass, q: TerrainQuery, tile: Vector2i, dir: int, along: float) -> float:
+	if cls.hovers:
+		return q.edge_rise_float_at(tile.x, tile.y, dir, along)
+	return q.edge_rise_at(tile.x, tile.y, dir, along)
 
 
 ## Мировая высота днища: поверхность; ховер — не ниже зеркала воды.
@@ -157,6 +186,8 @@ static func _move_axis(s: VehicleState, cls: VehicleClass, q: TerrainQuery, axis
 	# Точка ребра под машиной: для рёбер N/S — доля по x, для E/W — по z.
 	var along: float = p[1 - axis] - cur[1 - axis]
 	if lead_crosses and _blocked(cls, q, cur, dir, along):
+		if absf(s.vel[axis]) >= cls.wall_hit_speed_frac * cls.max_speed - 1e-3:
+			r.wall_damage = cls.wall_hit_damage
 		# Подъезжаем вплотную; если машина уже ближе к стенке (после поворота), дальше не пускаем.
 		if d > 0.0:
 			np[axis] = minf(np[axis], maxf(p[axis], boundary - RADIUS))
@@ -170,9 +201,9 @@ static func _move_axis(s: VehicleState, cls: VehicleClass, q: TerrainQuery, axis
 	# Центр перешёл в соседний тайл: обрыв вниз — падение.
 	var center_crosses: bool = np[axis] >= boundary if d > 0.0 else np[axis] < boundary
 	if center_crosses:
-		var drop := -q.edge_rise_at(cur.x, cur.y, dir, along)
+		var drop := -_rise_at(cls, q, cur, dir, along)
 		if drop > STEP_TOLERANCE:
-			s.fall_from_tier = q.surface_tier(p.x, p.y)
+			s.fall_from_tier = q.surface_tier_float(p.x, p.y) if cls.hovers else q.surface_tier(p.x, p.y)
 			s.falling = true
 			s.fall_vy = 0.0
 			s.fall_tile = cur + Grid.DIR_OFFSETS[dir]
@@ -194,8 +225,8 @@ static func _slide_along_wall(s: VehicleState, axis: int) -> void:
 	s.vel = tangent * speed
 
 
-static func _blocked(_cls: VehicleClass, q: TerrainQuery, tile: Vector2i, dir: int, along: float) -> bool:
-	return q.edge_rise_at(tile.x, tile.y, dir, along) > STEP_TOLERANCE
+static func _blocked(cls: VehicleClass, q: TerrainQuery, tile: Vector2i, dir: int, along: float) -> bool:
+	return _rise_at(cls, q, tile, dir, along) > STEP_TOLERANCE
 
 
 ## Вода в точке машины глубже допустимой для класса (ховер не тонет).

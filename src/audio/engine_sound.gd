@@ -6,6 +6,8 @@ extends AudioStreamPlayer
 const RATE := 22050
 const BASE_HZ := 55.0            ## целое число периодов на секунду — петля без щелчка
 
+var pitch_mult := 1.0            ## тон класса: танк ниже, ховер выше
+
 
 func _ready() -> void:
 	stream = make_loop()
@@ -16,7 +18,7 @@ func _ready() -> void:
 ## speed_ratio — доля от максимальной скорости, throttle — газ 0..1.
 func update(speed_ratio: float, throttle: float, dt: float) -> void:
 	var k := 1.0 - exp(-6.0 * dt)
-	pitch_scale = lerpf(pitch_scale, 0.55 + 0.9 * speed_ratio + 0.1 * throttle, k)
+	pitch_scale = lerpf(pitch_scale, (0.55 + 0.9 * speed_ratio + 0.1 * throttle) * pitch_mult, k)
 	volume_db = lerpf(volume_db, lerpf(-22.0, -10.0, maxf(throttle, speed_ratio)), k)
 
 

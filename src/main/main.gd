@@ -6,6 +6,8 @@ extends Node
 enum Phase { START, RUN, OVER, RESULTS }
 
 const VIS_RADIUS_CLEAR := 1000.0
+const SELECT_ZOOM := 3.0           ## крупность камеры на экране выбора машины
+const TURNTABLE_SPEED := 0.7       ## рад/с — машина медленно поворачивается на экране выбора
 const SPAWN_HEADING := -PI * 0.75
 
 var run_seed: int
@@ -48,7 +50,12 @@ func _ready() -> void:
 	else:
 		vehicle.control_enabled = false
 		var start := StartScreen.new()
+		start.vehicle_ids = Balance.vehicle_ids()
+		start.selected = maxi(start.vehicle_ids.find(vehicle.cls.id), 0)
+		start.vehicle_changed.connect(_on_vehicle_selected)
 		start.started.connect(_begin)
+		rig.set_zoom(rig.zoom * SELECT_ZOOM)
+		hud.visible = false
 		add_child(start)
 
 
@@ -95,7 +102,10 @@ func _build_world(args: Dictionary) -> void:
 	streamer.preload_around(spawn)
 	print("preload: %d chunks in %d ms" % [streamer.loaded_count(), (Time.get_ticks_usec() - t0) / 1000])
 
-	vehicle = Vehicle.new(Balance.vehicle(&"rover"), query)
+	var vehicle_id := StringName(args.get("vehicle", Settings.vehicle_id))
+	if Balance.vehicle(vehicle_id) == null:
+		vehicle_id = &"rover"
+	vehicle = Vehicle.new(Balance.vehicle(vehicle_id), query)
 	add_child(vehicle)
 	vehicle.place(spawn, SPAWN_HEADING)
 	vehicle.damaged.connect(_on_vehicle_damaged)
@@ -175,8 +185,19 @@ func _new_run() -> void:
 	shuttles.run = run
 
 
+## Выбор на стартовом экране: другая машина, новый RunState под её класс.
+func _on_vehicle_selected(id: StringName) -> void:
+	vehicle.set_class(Balance.vehicle(id))
+	_new_run()
+
+
 func _begin() -> void:
+	if not dev.skips_start():
+		rig.set_zoom(rig.zoom / SELECT_ZOOM)
+		Settings.vehicle_id = String(vehicle.cls.id)
+		Settings.save_settings()
 	phase = Phase.RUN
+	hud.visible = true
 	dev.mark_start()
 	vehicle.control_enabled = true
 	vehicle.engine.play()
@@ -190,6 +211,8 @@ func _physics_process(dt: float) -> void:
 	streamer.update_focus(vehicle.state.pos, vehicle.state.vel)
 	var p := vehicle.state.pos
 	RenderingServer.global_shader_parameter_set(&"vis_center", Vector3(p.x, vehicle.state.y, p.y))
+	if phase == Phase.START:
+		vehicle.state.heading = wrapf(vehicle.state.heading + TURNTABLE_SPEED * dt, -PI, PI)
 	if phase != Phase.RUN:
 		return
 	run.tick(dt)

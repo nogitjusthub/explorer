@@ -43,6 +43,15 @@ func _ready() -> void:
 	_update_camera()
 
 
+## Крупность камеры (экран выбора машины показывает её ближе).
+func set_zoom(value: float) -> void:
+	zoom = value
+	if camera != null:
+		var render_h := float(ProjectSettings.get_setting("display/window/size/viewport_height", 320))
+		_ortho_size = render_h * sqrt(2.0) / TILE_PX / zoom
+		camera.size = _ortho_size
+
+
 ## Сколько раз камера повёрнута на 90° (для отладочного снимка).
 func quarter() -> int:
 	return _quarter

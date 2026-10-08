@@ -1,0 +1,33 @@
+[gd_resource type="Resource" script_class="VehicleClass" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://data/vehicles/vehicle_class.gd" id="1_vclass"]
+
+[resource]
+script = ExtResource("1_vclass")
+id = &"hover"
+display_name = "Ховер"
+blurb = "Гонщик: летит над водой, с обрывов почти без урона. Заносит, жжёт топливо."
+hp_max = 70
+max_speed = 7.5
+accel = 6.5
+brake_decel = 5.0
+turn_rate_deg = 225.0
+turn_in_place = false
+drift = 0.65
+mass = 0.5
+uphill_loss_per_tile = 0.16666667
+uphill_floor = 0.33333334
+downhill_accel_bonus = 0.2
+max_water_depth = -1
+water_speed_mult = 1.0
+hovers = true
+fall_damage_mode = "linear"
+fall_damage_base = 5.0
+tree_fell_speed_frac = 0.9
+tree_speed_after_frac = 0.5
+tree_fell_damage = 10
+fuel_max = 110.0
+fuel_idle_per_min = 5.0
+fuel_drive_per_min = 22.0
+cargo_slots = 8
+engine_pitch = 1.35

@@ -12,6 +12,7 @@ const CAUSE_TEXT := {
 	"drowned": "МАШИНА УТОНУЛА",
 	"fall": "РАЗБИТА ПРИ ПАДЕНИИ",
 	"tree": "РАЗБИТА О ДЕРЕВЬЯ",
+	"wall": "РАЗБИТА О СКАЛЫ",
 	"empty_tank": "КОНЧИЛОСЬ ТОПЛИВО",
 }
 const COLOR_TEXT := Color(0.95, 0.92, 0.85)
@@ -117,6 +118,8 @@ func _draw_screen() -> void:
 			COLOR_GOOD if evacuated else COLOR_BAD, HORIZONTAL_ALIGNMENT_CENTER, w)
 
 	var lines: Array[Array] = []
+	var cls := Balance.vehicle(StringName(result["class"]))
+	lines.append(["Машина", cls.display_name if cls != null else String(result["class"])])
 	lines.append(["Сдано челнокам", str(int(result["banked"]))])
 	if int(result["emergency_calls"]) > 0:
 		lines.append(["  в т. ч. аварийных вызовов", str(int(result["emergency_calls"]))])
