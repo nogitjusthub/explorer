@@ -111,6 +111,28 @@ static func wind_loop(seconds: float) -> AudioStreamWAV:
 	return wav
 
 
+## Визг стаи скакунов: несколько коротких писков, тон скачет.
+static func squeal(seconds: float) -> AudioStreamWAV:
+	var n := int(seconds * RATE)
+	var data := PackedFloat32Array()
+	data.resize(n)
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 606
+	var phase := 0.0
+	var chirp := 0.12
+	var f0 := 1400.0
+	for i in n:
+		var t := float(i) / RATE
+		var local := fmod(t, chirp) / chirp
+		if local < 1.0 / RATE * 20.0 / chirp:
+			f0 = rng.randf_range(1100.0, 1900.0)
+		var f := f0 * (1.0 + 0.6 * local) * (1.0 + 0.04 * sin(t * 90.0))
+		phase += TAU * f / RATE
+		var env := sin(local * PI) * (1.0 - t / seconds * 0.5)
+		data[i] = (sin(phase) * 0.7 + sin(phase * 2.01) * 0.2) * env
+	return _wav(data)
+
+
 ## Удар по корпусу: глухой низкий «бум» со щелчком.
 static func hit(seconds: float) -> AudioStreamWAV:
 	var n := int(seconds * RATE)

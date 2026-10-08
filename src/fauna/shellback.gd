@@ -1,0 +1,223 @@
+class_name Shellback
+extends Creature
+## Панцирник (GDD §5.4): ходит как танк — склоны, вброд до 2 ярусов, — медленно (shellback_speed).
+## Услышав машину, подбирается по полю путей вида SHELLBACK; когда до неё прямой путь короче рывка —
+## роет землю shellback_dig_s (телеграф) и бросается по прямой на shellback_charge_dist со скоростью
+## shellback_charge_speed. Попал — урон и отбрасывает машину; в стенку — оглушён. Спасение — уйти с
+## линии атаки.
+
+enum State { IDLE, APPROACH, DIG, CHARGE, STUN }
+
+const SHELL_COLOR := Color(0.27, 0.33, 0.3)
+const STRIPE_COLOR := Color(0.5, 0.6, 0.45)
+const LEG_COLOR := Color(0.16, 0.18, 0.17)
+const CONTACT := 0.9
+const STUN_S := 1.5
+const GIVE_UP_S := 25.0
+const WANDER_SPEED := 0.8
+
+var state := State.IDLE
+
+var _timer := 0.0
+var _aggro_t := 0.0
+var _charge_dir := Vector2.ZERO
+var _charge_left := 0.0
+var _hit := false
+var _goal := Vector2.ZERO
+var _model: Node3D
+var _dust: CPUParticles3D
+
+
+func _init() -> void:
+	name = "Shellback"
+
+
+func setup(at: Vector2) -> void:
+	pos = at
+	_goal = at
+	_model = _build_model()
+	add_child(_model)
+	_place(0.0)
+	_model.reset_physics_interpolation()
+
+
+func step(dt: float) -> void:
+	var vp := vehicle.state.pos
+	var d := pos.distance_to(vp)
+	match state:
+		State.IDLE:
+			if pos.distance_to(_goal) < 0.3:
+				_goal = pos + Vector2.from_angle(rng.randf() * TAU) * 3.0
+			_walk_to(_goal, WANDER_SPEED, dt)
+			if noise.hears_vehicle(pos):
+				state = State.APPROACH
+				aggressive = true
+				_aggro_t = 0.0
+		State.APPROACH:
+			_aggro_t += dt
+			if d <= rules.shellback_charge_dist and _line_clear(pos, vp):
+				state = State.DIG
+				_timer = rules.shellback_dig_s
+				_charge_dir = (vp - pos).normalized()
+				_dust.emitting = true
+			else:
+				var field: FlowField = director.call(&"field", FlowField.Mode.SHELLBACK)
+				var t := Grid.tile_of_world(pos.x, pos.y)
+				var next := field.next_tile(query, t) if field != null else t
+				_walk_to(Vector2(next.x + 0.5, next.y + 0.5) if next != t else vp, rules.shellback_speed, dt)
+			if _aggro_t > GIVE_UP_S or d > 30.0:
+				state = State.IDLE
+				aggressive = false
+		State.DIG:
+			_timer -= dt
+			_model.rotation.z = sin(_timer * 40.0) * 0.08    # дрожит, роет
+			_charge_dir = (vp - pos).normalized() if _timer > rules.shellback_dig_s * 0.5 else _charge_dir
+			if _timer <= 0.0:
+				state = State.CHARGE
+				_charge_left = rules.shellback_charge_dist
+				_hit = false
+				_dust.emitting = false
+				_model.rotation.z = 0.0
+		State.CHARGE:
+			var step := rules.shellback_charge_speed * dt
+			var np := pos + _charge_dir * step
+			var moved := Creature.move_on_grid(query, FlowField.Mode.SHELLBACK, pos, np)
+			_charge_left -= step
+			if moved == pos:
+				_stun()                                         # в стенку — оглушён
+			else:
+				pos = moved
+				_face(_charge_dir)
+			if not _hit and pos.distance_to(vp) < CONTACT and not vehicle.state.falling:
+				_hit = true
+				damaged.emit(rules.shellback_damage, &"shellback")
+				vehicle.state.push_vel += _charge_dir * 7.0 / vehicle.cls.mass
+				EventBus.camera_shake_requested.emit(0.7, 0.3)
+			if _charge_left <= 0.0 and state == State.CHARGE:
+				_stun()
+		State.STUN:
+			_timer -= dt
+			if _timer <= 0.0:
+				state = State.APPROACH
+	_fell_trees()
+	_place(dt)
+
+
+func _stun() -> void:
+	state = State.STUN
+	_timer = STUN_S
+
+
+## Прямой путь до цели проходим (рывок не упрётся в стенку).
+func _line_clear(a: Vector2, b: Vector2) -> bool:
+	var steps := ceili(a.distance_to(b) / 0.4)
+	var p := a
+	for i in range(1, steps + 1):
+		var np := a.lerp(b, float(i) / steps)
+		if Creature.move_on_grid(query, FlowField.Mode.SHELLBACK, p, np) == p:
+			return false
+		p = np
+	return true
+
+
+func _walk_to(goal: Vector2, speed: float, dt: float) -> void:
+	var delta := goal - pos
+	if delta.length() < 0.02:
+		return
+	var np := pos + delta.limit_length(speed * dt)
+	pos = Creature.move_on_grid(query, FlowField.Mode.SHELLBACK, pos, np)
+	_face(delta)
+
+
+func _face(dir: Vector2) -> void:
+	_model.rotation.y = atan2(-dir.x, -dir.y)
+
+
+## Деревья перед панцирником падают — он ломится сквозь лес, как танк.
+func _fell_trees() -> void:
+	var c := Grid.tile_of_world(pos.x, pos.y)
+	for dz in range(-1, 2):
+		for dx in range(-1, 2):
+			var t := c + Vector2i(dx, dz)
+			if query.has_standing_tree(t.x, t.y) and query.tree_position(t.x, t.y).distance_to(pos) < 0.8:
+				query.fell_tree(t.x, t.y)
+
+
+func _place(_dt: float) -> void:
+	_model.position = Vector3(pos.x, ground_y(pos), pos.y)
+	_dust.position = _model.position + Vector3(0, 0.1, 0)
+
+
+## Панцирник: тёмный купол-панцирь с полосами, рог, шесть ног.
+func _build_model() -> Node3D:
+	var root := Node3D.new()
+	var shell := MeshInstance3D.new()
+	var sm := SphereMesh.new()
+	sm.radius = 0.42
+	sm.height = 0.42
+	sm.is_hemisphere = true
+	sm.radial_segments = 10
+	sm.rings = 3
+	shell.mesh = sm
+	shell.material_override = Creature.material(SHELL_COLOR)
+	shell.position = Vector3(0, 0.12, 0)
+	shell.scale = Vector3(1.0, 0.85, 1.25)
+	root.add_child(shell)
+	var stripe := Creature.material(STRIPE_COLOR)
+	for z in [-0.18, 0.05, 0.28]:
+		var band := MeshInstance3D.new()
+		var b := BoxMesh.new()
+		b.size = Vector3(0.62, 0.06, 0.06)
+		band.mesh = b
+		band.material_override = stripe
+		band.position = Vector3(0, 0.38 - absf(z) * 0.5, z)
+		root.add_child(band)
+	var head := MeshInstance3D.new()
+	var hb := BoxMesh.new()
+	hb.size = Vector3(0.24, 0.16, 0.18)
+	head.mesh = hb
+	head.material_override = Creature.material(LEG_COLOR)
+	head.position = Vector3(0, 0.14, -0.55)
+	root.add_child(head)
+	var horn := MeshInstance3D.new()
+	var hc := CylinderMesh.new()
+	hc.top_radius = 0.0
+	hc.bottom_radius = 0.05
+	hc.height = 0.22
+	hc.radial_segments = 5
+	hc.rings = 0
+	horn.mesh = hc
+	horn.material_override = Creature.material(Color(0.85, 0.82, 0.7))
+	horn.position = Vector3(0, 0.22, -0.68)
+	horn.rotation.x = -1.1
+	root.add_child(horn)
+	var leg := Creature.material(LEG_COLOR)
+	for x in [-0.4, 0.4]:
+		for z in [-0.25, 0.0, 0.25]:
+			var l := MeshInstance3D.new()
+			var lb := BoxMesh.new()
+			lb.size = Vector3(0.14, 0.06, 0.06)
+			l.mesh = lb
+			l.material_override = leg
+			l.position = Vector3(x, 0.05, z)
+			root.add_child(l)
+	_dust = CPUParticles3D.new()
+	_dust.amount = 20
+	_dust.lifetime = 0.6
+	_dust.emitting = false
+	_dust.direction = Vector3.UP
+	_dust.spread = 60.0
+	_dust.initial_velocity_min = 1.0
+	_dust.initial_velocity_max = 2.4
+	_dust.gravity = Vector3(0, -5.0, 0)
+	var q := QuadMesh.new()
+	q.size = Vector2(0.1, 0.1)
+	var dm := StandardMaterial3D.new()
+	dm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	dm.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
+	dm.albedo_color = Color(0.55, 0.42, 0.35)
+	q.material = dm
+	_dust.mesh = q
+	_dust.local_coords = false
+	add_child(_dust)
+	return root

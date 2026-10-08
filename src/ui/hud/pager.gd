@@ -10,10 +10,10 @@ const LINE_H := 10.0
 const STALE_S := 1.0                   ## телеграф не обновлялся столько — угроза ушла
 const NEAR := 6.0                      ## ближе — без стрелки, «рядом»
 const NAMES := {
-	&"storm": "ГРОЗА", &"quake": "СЕЙСМИКА", &"fog": "ТУМАН", &"acid": "ТУМАН",
+	&"storm": "ГРОЗА", &"quake": "СЕЙСМИЧЕСКАЯ АКТИВНОСТЬ", &"fog": "ТУМАН", &"acid": "ТУМАН",
 	&"dust": "ПЫЛЕВАЯ БУРЯ", &"tornado": "СМЕРЧ",
 }
-const NO_ARROW: Array[StringName] = [&"storm", &"fog", &"acid", &"dust", &"tornado"]   ## без указателя
+const NO_ARROW: Array[StringName] = [&"storm", &"fog", &"acid", &"dust", &"tornado", &"quake"]   ## без указателя
 const COLOR_TEXT := Color(1.0, 0.55, 0.3)
 const COLOR_NEW := Color(1.0, 0.9, 0.6)
 const COLOR_BG := Color(0.06, 0.04, 0.09, 0.62)
@@ -61,7 +61,7 @@ func _process(dt: float) -> void:
 func _draw() -> void:
 	if _entries.is_empty() or vehicle == null or camera == null:
 		return
-	draw_rect(Rect2(Vector2(size.x - 120.0, 0.0), Vector2(120.0, LINE_H * _entries.size() + 2.0)), COLOR_BG)
+	draw_rect(Rect2(Vector2(size.x - 150.0, 0.0), Vector2(150.0, LINE_H * _entries.size() + 2.0)), COLOR_BG)
 	var b := camera.global_transform.basis
 	var right := Vector2(b.x.x, b.x.z).normalized()
 	var up := Vector2(-b.z.x, -b.z.z).normalized()

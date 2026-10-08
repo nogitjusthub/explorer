@@ -57,9 +57,9 @@ extends Resource
 @export var strike_interval_s: float = 2.5
 @export var strike_near_frac: float = 0.35       ## доля ударов рядом с машиной (если она под фронтом)
 @export var strike_near_r: float = 4.0
-@export var strike_telegraph_s: float = 1.2
-@export var strike_radius: float = 1.5
-@export var strike_core_r: float = 0.6           ## ближе — урон «в центре»
+@export var strike_telegraph_s: float = 0.7
+@export var strike_radius: float = 1.0
+@export var strike_core_r: float = 0.45          ## ближе — урон «в центре»
 @export var strike_damage_center: int = 25
 @export var strike_damage_edge: int = 10
 @export var strike_crater_depth: int = 1
@@ -111,6 +111,39 @@ extends Resource
 @export var fault_pad_clearance: float = 6.0
 @export var quake_toss_dist: float = 3.0
 @export var quake_toss_damage: int = 10
+
+@export_group("Fauna")
+@export var noise_range: float = 20.0            ## пассивная фауна слышит машину в радиусе шум × это
+@export var noise_full_frac: float = 0.8         ## шум 1,0 от этой доли Vmax
+@export var fauna_spawn_min: float = 40.0        ## появляется в кольце 40…52 тайла от машины
+@export var fauna_spawn_max: float = 52.0
+@export var fauna_despawn: float = 80.0          ## дальше — исчезает
+@export var shuttle_noise_r: float = 30.0        ## посадка основного челнока стягивает фауну
+@export var shuttle_noise_s: float = 20.0
+@export var emergency_noise_r: float = 15.0
+@export var emergency_noise_s: float = 10.0
+@export var hopper_speed: float = 7.5
+@export var hopper_wander_speed: float = 1.4
+@export var hopper_bite: int = 5
+@export var hopper_bite_cd_s: float = 2.0
+@export var hopper_max_biters: int = 3
+@export var hopper_chase_s: float = 15.0
+@export var hopper_chase_dist: float = 30.0
+@export var pack_min: int = 4
+@export var pack_max: int = 6
+@export var worm_min_level: int = 2
+@export var worm_speed: float = 5.0
+@export var worm_telegraph_s: float = 0.9
+@export var worm_damage: int = 30
+@export var worm_toss: float = 3.0
+@export var shellback_min_level: int = 3
+@export var shellback_speed: float = 2.5
+@export var shellback_charge_speed: float = 6.5
+@export var shellback_charge_dist: float = 6.0
+@export var shellback_dig_s: float = 1.0
+@export var shellback_damage: int = 35
+@export var nest_wake_r: float = 10.0            ## ближе к гнезду — из него выходит стая
+@export var nest_cooldown_s: float = 60.0
 
 @export_group("Emergency")
 @export var emergency_delay_s: float = 10.0

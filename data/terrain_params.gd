@@ -88,3 +88,7 @@ extends Resource
 @export var pad_half: int = 2                   ## площадка 5×5 тайлов
 @export var pad_blend: float = 6.0              ## ширина пологого кольца вокруг площадки
 @export var pad_clear_r: int = 3                ## без деревьев в этом радиусе от края площадки
+
+@export_group("Nests")
+@export var nest_pad_dist: float = 15.0          ## гнездо не ближе к центру площадки
+@export var nest_clear_r: int = 2                ## без деревьев вокруг гнезда

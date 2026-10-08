@@ -13,9 +13,11 @@ extends Node
 ##     --no-shadows       без теней
 ##     --debug            отладочный оверлей виден сразу (иначе — по F3)
 ##   Угрозы:
-##     --no-threats       без угроз
+##     --no-threats       без угроз (погода, землетрясения, смерчи)
+##     --no-fauna         без фауны
 ##     --threat=N         уровень угрозы не ниже N (1–6)
-##     --event=K@S,...    угроза K на S-й секунде: storm, fog, acid, dust, tornado, quake
+##     --event=K@S,...    событие K на S-й секунде: storm, fog, acid, dust, tornado, quake,
+##                          hoppers, worm, shellback (червь — только если рядом песок)
 ##   Сценарии без рук:
 ##     --idle             без стартового экрана и автопилота: машина стоит
 ##     --select           показать экран выбора машины и при --idle или --shots
@@ -45,6 +47,7 @@ var deaths := 0
 var pickups_collected := 0
 var run: RunState                  ## текущий забег (у автопилота после гибели начинается новый)
 var threats: ThreatDirector
+var fauna: FaunaDirector
 
 var _bench_time := -1.0
 var _shots_left := 0
@@ -230,6 +233,9 @@ func _print_bench() -> void:
 		var st := threats.stats
 		_report("bench: threats — level %d, storms %d (strikes %d), quakes %d, fog %d, acid %d, dust %d (tornadoes %d)" % [
 			threats.level, st["storm"], st["strikes"], st["quake"], st["fog"], st["acid"], st["dust"], st["tornado"]])
+	if fauna != null:
+		_report("bench: fauna — packs %d, worms %d, shellbacks %d, hits on the vehicle %d" % [
+			fauna.stats["packs"], fauna.stats["worms"], fauna.stats["shellbacks"], fauna.stats["hits"]])
 	_report("bench: render — draw calls %d, primitives %d, objects in frame %d, video memory %.0f MB" % [
 		Performance.get_monitor(Performance.RENDER_TOTAL_DRAW_CALLS_IN_FRAME),
 		Performance.get_monitor(Performance.RENDER_TOTAL_PRIMITIVES_IN_FRAME),

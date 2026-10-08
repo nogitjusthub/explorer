@@ -121,3 +121,26 @@ func test_pads_flat_and_dry() -> void:
 				assert_eq(d.get_corner(i, c), pad.z, "pad tile %d,%d corner %d" % [tx, tz, c])
 			assert_eq(d.water_level[i], 0, "pad tile under water")
 			assert_true(d.flags[i] & ChunkData.FLAG_PAD != 0, "pad flag")
+
+
+func test_nests_in_canyons_and_lakes_away_from_pads() -> void:
+	var gen := TerrainGenerator.new(3, TerrainParams.new())
+	var found := 0
+	for bz in range(-4, 4):
+		for bx in range(-4, 4):
+			var n := gen.nest_of_block(Vector2i(bx, bz))
+			if n == TerrainGenerator.NO_NEST:
+				continue
+			found += 1
+			var data := gen.generate(Grid.chunk_of_tile(n.x, n.y))
+			var i := data.local_index(n.x, n.y)
+			assert_true((data.flags[i] & ChunkData.FLAG_NEST) != 0, "nest tile flagged")
+			var b: int = data.biome[i]
+			assert_true(b == ChunkData.Biome.CANYON or b == ChunkData.Biome.LAKESIDE, "nest biome %d" % b)
+			assert_eq(data.trees[i], ChunkData.TREE_NONE, "no tree on a nest")
+			for dz in range(-1, 2):
+				for dx in range(-1, 2):
+					var pad := gen.pad_of_block(Vector2i(bx + dx, bz + dz))
+					if pad.z != TerrainGenerator.NO_PAD:
+						assert_true(Vector2(n).distance_to(Vector2(pad.x, pad.y)) >= 14.0, "nest away from pads")
+	assert_true(found > 0, "some nests in 8×8 blocks: %d" % found)

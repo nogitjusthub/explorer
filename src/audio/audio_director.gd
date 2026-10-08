@@ -18,6 +18,7 @@ var _hit: AudioStreamWAV
 var _rumble_build: AudioStreamWAV
 var _rumble_hit: AudioStreamWAV
 var _quake_heard := false              ## гул телеграфа текущего землетрясения уже запущен
+var _squeal: AudioStreamWAV
 
 
 func _ready() -> void:
@@ -28,6 +29,7 @@ func _ready() -> void:
 	_rumble_build = Sfx.rumble(2.5, true)
 	_rumble_hit = Sfx.rumble(2.4, false)
 	Sfx.wind_loop(2.0)        # гул смерча — в кэш заранее, иначе первый смерч дёрнет кадр
+	_squeal = Sfx.squeal(0.6)
 	for _i in VOICES:
 		var p := AudioStreamPlayer.new()
 		add_child(p)
@@ -36,6 +38,7 @@ func _ready() -> void:
 	EventBus.lightning_struck.connect(_on_lightning)
 	EventBus.sheet_lightning.connect(func(at: Vector3) -> void: _delayed(_thunder, at, -10.0, 0.7))
 	EventBus.threat_ended.connect(_on_threat_ended)
+	EventBus.fauna_alerted.connect(_on_fauna_alerted)
 	EventBus.vehicle_damaged.connect(func(_amount: int, _source: StringName, _at: Vector3) -> void: _play(_hit, -4.0))
 
 
@@ -45,6 +48,17 @@ func _on_telegraphed(kind: StringName, at: Vector3, _seconds: float, _dir: Vecto
 	elif kind == &"quake" and not _quake_heard:
 		_quake_heard = true
 		_play(_rumble_build, -2.0)
+
+
+## Фауна: визг стаи скакунов, гул червя под песком и раскат его броска.
+func _on_fauna_alerted(kind: StringName, at: Vector3) -> void:
+	match kind:
+		&"hopper":
+			_play_at(_squeal, at, -6.0, 0.9 + 0.2 * fmod(absf(at.x * 0.13), 1.0))
+		&"worm":
+			_play_at(_rumble_build, at, -4.0, 0.7)
+		&"worm_strike":
+			_play_at(_rumble_hit, at, 2.0, 0.75)
 
 
 func _on_threat_ended(kind: StringName) -> void:

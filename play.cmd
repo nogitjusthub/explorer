@@ -13,9 +13,11 @@ rem   --zoom=N           камера в N раз крупнее (0.75 — ме�
 rem   --no-shadows       без теней
 rem   --debug            отладочный оверлей виден сразу (иначе — по F3)
 rem Угрозы
-rem   --no-threats       без угроз
+rem   --no-threats       без угроз (погода, землетрясения, смерчи)
+rem   --no-fauna         без фауны
 rem   --threat=N         уровень угрозы не ниже N (1–6)
-rem   --event=K@S,...    угроза K на S-й секунде: storm, fog, acid, dust, tornado, quake
+rem   --event=K@S,...    событие K на S-й секунде: storm, fog, acid, dust, tornado, quake,
+rem                        hoppers, worm, shellback (червь — только если рядом песок)
 rem Сценарии без рук
 rem   --idle             без стартового экрана и автопилота: машина стоит
 rem   --select           показать экран выбора машины и при --idle или --shots
@@ -53,9 +55,11 @@ echo   --no-shadows       без теней
 echo   --debug            отладочный оверлей виден сразу (иначе — по F3)
 echo.
 echo  Угрозы
-echo   --no-threats       без угроз
+echo   --no-threats       без угроз (погода, землетрясения, смерчи)
+echo   --no-fauna         без фауны
 echo   --threat=N         уровень угрозы не ниже N (1–6)
-echo   --event=K@S,...    угроза K на S-й секунде: storm, fog, acid, dust, tornado, quake
+echo   --event=K@S,...    событие K на S-й секунде: storm, fog, acid, dust, tornado, quake,
+echo                        hoppers, worm, shellback (червь — только если рядом песок)
 echo.
 echo  Сценарии без рук
 echo   --idle             без стартового экрана и автопилота: машина стоит
@@ -75,6 +79,8 @@ echo.
 echo Примеры:
 echo   play.cmd --vehicle=tank --seed=1                  танк, мир 1
 echo   play.cmd --event=fog@3                            туман сразу; так же storm, acid, dust, tornado
+echo   play.cmd --event=hoppers@3                        стая скакунов сразу атакует
+echo   play.cmd --spawn=-43,-8 --seed=7 --event=worm@2   песчаный червь (старт на песке)
 echo   play.cmd --spawn=100,60 --event=quake@5           землетрясение (у площадки старта разлома не бывает)
 echo   play.cmd --idle --shuttle-in=6 --shuttle-dist=0   челнок на площадке старта через 6 с
 echo.

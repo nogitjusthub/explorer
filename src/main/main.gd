@@ -23,6 +23,7 @@ var pickups: PickupField
 var hud: Hud
 var shuttles: ShuttleController
 var threats: ThreatDirector
+var fauna: FaunaDirector
 var dev: DevTools
 var run: RunState
 var rules: BalanceRules
@@ -158,6 +159,22 @@ func _build_world(args: Dictionary) -> void:
 	add_child(threats)
 	threats.damaged.connect(_on_vehicle_damaged)
 	dev.threats = threats
+
+	fauna = FaunaDirector.new()
+	fauna.rules = rules
+	fauna.vehicle = vehicle
+	fauna.query = query
+	fauna.terrain = terrain
+	fauna.generator = generator
+	fauna.scheduler = scheduler
+	fauna.run_seed = run_seed
+	fauna.enabled = not args.has("no-fauna")
+	fauna.forced = dev.forced_events()
+	add_child(fauna)
+	streamer.chunk_built.connect(fauna.on_chunk_built)
+	streamer.chunk_removed.connect(fauna.on_chunk_removed)
+	fauna.damaged.connect(_on_vehicle_damaged)
+	dev.fauna = fauna
 	hud.pager.vehicle = vehicle
 	hud.pager.camera = rig.camera
 
@@ -250,6 +267,7 @@ func _begin() -> void:
 	shuttles.active = true
 	shuttles.menu_enabled = not sandbox
 	threats.begin()
+	fauna.begin()
 	run.announce()
 	EventBus.run_started.emit(run_seed, vehicle.cls.id)
 
@@ -269,6 +287,8 @@ func _physics_process(dt: float) -> void:
 		_on_fuel_empty()
 	shuttles.step(dt)
 	threats.step(dt)
+	fauna.level = threats.level
+	fauna.step(dt)
 	hud.radar.jammed = threats.radar_jammed()
 
 

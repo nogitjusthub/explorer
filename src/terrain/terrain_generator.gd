@@ -25,6 +25,7 @@ extends RefCounted
 const VERTS := Grid.WINDOW + 1      ## вершин на сторону окна
 const EXT := VERTS + 2              ## вершины окна + по одной с каждой стороны (для правки седловин)
 const NO_PAD := -999                ## ярус-маркер: в блоке нет годной площадки
+const NO_NEST := Vector2i(-999999, -999999)
 const NO_PUDDLE := Vector4(0, 0, 0, -999)
 
 var seed: int
@@ -46,6 +47,7 @@ var _n_warp: FastNoiseLite
 var _n_water_warp: FastNoiseLite
 
 var _pads: Dictionary[Vector2i, Vector3i] = {}       ## блок → (центр x, центр z, ярус), кэш
+var _nests: Dictionary[Vector2i, Vector2i] = {}      ## блок → тайл гнезда (или NO_NEST), кэш
 var _puddles: Dictionary[Vector2i, Vector4] = {}     ## ячейка → (центр x, центр z, радиус, ярус полки)
 
 
@@ -56,6 +58,7 @@ class GenJob:
 	var ext := PackedInt32Array()       ## высоты вершин окна с запасом в одну вершину (EXT × EXT)
 	var verts := PackedInt32Array()     ## после правки седловин (VERTS × VERTS)
 	var pads: Array[Vector3i] = []      ## площадки рядом с окном — чтобы не искать их на каждый тайл
+	var nests: Array[Vector2i] = []     ## гнёзда рядом с окном
 	var puddles: Array[Vector4] = []    ## лужи рядом с окном
 	var pad_blocks: Array[Vector2i] = []      ## что проверить на этапе подготовки
 	var puddle_cells: Array[Vector2i] = []
@@ -125,6 +128,9 @@ func step(job: GenJob, deadline_usec: int) -> bool:
 			var pad := pad_of_block(job.pad_blocks[job.row])
 			if pad.z != NO_PAD:
 				job.pads.append(pad)
+			var nest := nest_of_block(job.pad_blocks[job.row])
+			if nest != NO_NEST:
+				job.nests.append(nest)
 		else:
 			var puddle := puddle_of_cell(job.puddle_cells[job.row - job.pad_blocks.size()])
 			if puddle.w != NO_PUDDLE.w:
@@ -284,6 +290,65 @@ func pad_of_block(block: Vector2i) -> Vector3i:
 	return best
 
 
+## Гнездо блока 2×2 чанка (GDD §3.4): в ущельях и озёрном крае, не в воде, не ближе nest_pad_dist
+## к площадкам этого и соседних блоков. NO_NEST — в блоке гнезда нет.
+func nest_of_block(block: Vector2i) -> Vector2i:
+	if _nests.has(block):
+		return _nests[block]
+	var best := NO_NEST
+	var margin := 6
+	var span := p.pad_block - 2 * margin
+	for i in 10:
+		var cx := block.x * p.pad_block + margin + DetRng.hash4(seed, block.x, block.y, 400 + i) % span
+		var cz := block.y * p.pad_block + margin + DetRng.hash4(seed, block.x, block.y, 500 + i) % span
+		var x := cx + 0.5
+		var z := cz + 0.5
+		var h := height_raw(x, z)
+		var water := _region_level(_water_region_of(x, z))
+		if h < water + 1.0:
+			continue
+		var biome := _biome(x, z, roundi(h), water, _canyon_t(x, z), _mountain_mask(x, z))
+		if biome != ChunkData.Biome.CANYON and biome != ChunkData.Biome.LAKESIDE:
+			continue
+		if _pad_near(Vector2(x, z), p.nest_pad_dist):
+			continue
+		best = Vector2i(cx, cz)
+		break
+	_nests[block] = best
+	return best
+
+
+## Гнёзда, чей блок может задеть прямоугольник [x0, x1] × [z0, z1].
+func nests_in_rect(x0: int, z0: int, x1: int, z1: int) -> Array[Vector2i]:
+	var result: Array[Vector2i] = []
+	var b0 := Vector2i(floori(x0 / float(p.pad_block)), floori(z0 / float(p.pad_block)))
+	var b1 := Vector2i(floori(x1 / float(p.pad_block)), floori(z1 / float(p.pad_block)))
+	for bz in range(b0.y, b1.y + 1):
+		for bx in range(b0.x, b1.x + 1):
+			var n := nest_of_block(Vector2i(bx, bz))
+			if n != NO_NEST and n.x >= x0 and n.x <= x1 and n.y >= z0 and n.y <= z1:
+				result.append(n)
+	return result
+
+
+func _pad_near(pos: Vector2, dist: float) -> bool:
+	var block := Vector2i(floori(pos.x / float(p.pad_block)), floori(pos.y / float(p.pad_block)))
+	for bz in range(block.y - 1, block.y + 2):
+		for bx in range(block.x - 1, block.x + 2):
+			var pad := pad_of_block(Vector2i(bx, bz))
+			if pad.z != NO_PAD and pos.distance_to(Vector2(pad.x + 0.5, pad.y + 0.5)) < dist:
+				return true
+	return false
+
+
+## Чебышёвское расстояние до ближайшего гнезда окна (большое — гнёзд рядом нет).
+func _nest_distance(nests: Array[Vector2i], tx: int, tz: int) -> int:
+	var best := 1 << 20
+	for n in nests:
+		best = mini(best, maxi(absi(tx - n.x), absi(tz - n.y)))
+	return best
+
+
 ## Площадка, в прямоугольник которой (с запасом extra тайлов) попадает тайл, или null.
 ## Если годного места в блоке нет (всё под водой или в ущелье), площадки в блоке нет.
 func pad_near_tile(tx: int, tz: int, extra: int = 0) -> Variant:
@@ -368,9 +433,12 @@ func _build_tile(job: GenJob, lx: int, lz: int, origin: Vector2i) -> void:
 	data.material[i] = _material(tx, tz, biome, lo, water, rocky)
 	data.water_level[i] = water + Grid.HEIGHT_OFFSET if water > lo else 0
 	data.flags[i] = ChunkData.FLAG_PAD if is_pad else 0
+	var nest_d := _nest_distance(job.nests, tx, tz)
+	if nest_d <= 1:
+		data.flags[i] |= ChunkData.FLAG_NEST
 
 	data.trees[i] = ChunkData.TREE_NONE
-	if water <= lo and not _near_pad(job.pads, tx, tz, p.pad_clear_r):
+	if water <= lo and not _near_pad(job.pads, tx, tz, p.pad_clear_r) and nest_d > p.nest_clear_r:
 		if DetRng.unit(seed, tx, tz, 300) < _tree_density(biome):
 			data.trees[i] = 1 + DetRng.hash4(seed, tx, tz, 301) % 2
 			data.tree_offset[i] = DetRng.hash4(seed, tx, tz, 302) & 0xFF

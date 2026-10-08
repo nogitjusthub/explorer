@@ -73,7 +73,7 @@ func begin(v: Variant) -> void:
 	RenderingServer.global_shader_parameter_set(&"vis_color", COLORS[variant])
 	RenderingServer.global_shader_parameter_set(&"weather_clear", rules.dust_visibility if dust else rules.fog_visibility)
 	RenderingServer.global_shader_parameter_set(&"weather_gas_y", gas_y)
-	RenderingServer.global_shader_parameter_set(&"weather_max", 0.92 if dust else 0.86)
+	RenderingServer.global_shader_parameter_set(&"weather_max", 1.0)
 	_build_layers()
 	_update_globals()
 
@@ -174,15 +174,15 @@ func _build_layers() -> void:
 	var c: Color = COLORS[variant]
 	match variant:
 		Variant.FOG:
-			_layers.add_layer(c.lightened(0.1), 0.55, 1.0, 0.09, Vector2(0.12, 0.05))
-			_layers.add_layer(c.lightened(0.18), 0.5, 2.2, 0.06, Vector2(-0.06, 0.09))
-			_layers.add_layer(c.lightened(0.28), 0.45, 3.6, 0.045, Vector2(0.05, -0.04))
+			_layers.add_layer(c.lightened(0.2), 0.7, 1.0, 0.09, Vector2(0.12, 0.05))
+			_layers.add_layer(c.lightened(0.32), 0.65, 2.2, 0.06, Vector2(-0.06, 0.09))
+			_layers.add_layer(c.lightened(0.45), 0.6, 3.6, 0.045, Vector2(0.05, -0.04))
 		Variant.ACID:
 			_layers.add_layer(c.lightened(0.06), 0.7, gas_y - 0.15, 0.1, Vector2(0.08, 0.04), 0, true, true)
 			_layers.add_layer(c.lightened(0.16), 0.55, gas_y - 0.5, 0.06, Vector2(-0.05, 0.07), 0, true, true)
 			_layers.add_layer(c.lightened(0.22), 0.3, 1.8, 0.05, Vector2(0.04, -0.03))
 		Variant.DUST:
 			var w := wind * 0.12
-			_layers.add_layer(c.lightened(0.04), 0.55, 0.5, 0.1, w * 1.6)
-			_layers.add_layer(c.lightened(0.1), 0.5, 1.4, 0.07, w * 1.2)
-			_layers.add_layer(c.lightened(0.16), 0.45, 2.6, 0.05, w)
+			_layers.add_layer(c.lightened(0.12), 0.6, 0.5, 0.1, w * 1.6)
+			_layers.add_layer(c.lightened(0.22), 0.55, 1.4, 0.07, w * 1.2)
+			_layers.add_layer(c.lightened(0.32), 0.5, 2.6, 0.05, w)

@@ -71,11 +71,17 @@ float weather_density(vec3 p) {
 	return dens;
 }
 
-// Как гуще пелена с расстоянием r от машины: лёгкая дымка рядом, полная — к краям кадра
-// (примерно за 2,4 радиуса видимости). Плавно, без ступени.
+// Как гуще пелена с расстоянием r от машины: лёгкая дымка до clear_r − 2, внятно видно до clear_r,
+// полная пелена с clear_r + 2.5 (внешняя треть кадра). Плавно, без ступени.
 float weather_falloff(float r, float clear_r) {
-	float t = clamp((r - 0.5) / (clear_r * 2.4), 0.0, 1.0);
-	return mix(0.28, 1.0, t * t * (3.0 - 2.0 * t));
+	float t = clamp((r - (clear_r - 2.0)) / 4.5, 0.0, 1.0);
+	return mix(0.22, 1.0, t * t * (3.0 - 2.0 * t));
+}
+
+// Цвет пелены: не ровная заливка, а клубы — светлее и темнее, медленно текут.
+vec3 weather_color(vec3 p) {
+	float n = vfbm(p.xz * 0.07 + vec2(-TIME * 0.06, TIME * 0.045));
+	return vis_color.rgb * (0.7 + 0.42 * n);
 }
 
 // 0 — видно, до weather_max — скрыто погодой.
@@ -87,6 +93,8 @@ float vis_hidden(vec3 world_pos) {
 	float r = length(world_pos.xz - vis_center.xz) - (vfbm(world_pos.xz * 0.22 + vec2(TIME * 0.07, 0.0)) - 0.47) * 3.0;
 	float bubble = weather_falloff(r, weather_clear);
 	// Рваная пелена: местами гуще, местами сквозь неё проглядывает рельеф.
-	float billow = 0.4 + 0.6 * smoothstep(0.22, 0.7, vfbm(world_pos.xz * 0.08 + vec2(TIME * 0.05, -TIME * 0.035)));
-	return clamp(dens * bubble * weather_max * billow, 0.0, 1.0);
+	float billow = 0.55 + 0.45 * smoothstep(0.22, 0.7, vfbm(world_pos.xz * 0.08 + vec2(TIME * 0.05, -TIME * 0.035)));
+	// Разводы — в переходной зоне; дальше пелена сплошная (переход широкий — без ступеньки).
+	float solid = smoothstep(weather_clear - 0.5, weather_clear + 5.0, r);
+	return clamp(dens * weather_max * mix(bubble * billow, 1.0, solid), 0.0, 1.0);
 }

@@ -14,11 +14,12 @@ signal damaged(amount: int, source: StringName)
 const CANDIDATES := 6
 const FAR_STRIKE_R := 22.0               ## остальные удары — по фронту не дальше этого от машины
 const NO_TARGET := Vector2(INF, INF)
-const COLOR_TELEGRAPH := Color(1.0, 0.45, 0.2, 0.55)
+const FLICKER_S := 0.24                  ## период мерцания знака удара
 const COLOR_BOLT := Color(0.85, 0.92, 1.0)
 const COLOR_GLOW := Color(0.55, 0.7, 1.0, 0.35)
 const COLOR_CLOUD := Color(0.2, 0.21, 0.28)
 const BOLT_S := 0.22
+const ELMO_SHADER := preload("res://src/render/shaders/st_elmo.gdshader")
 
 var rules: BalanceRules
 var vehicle: Vehicle
@@ -100,9 +101,11 @@ func step(dt: float) -> void:
 		s["left"] -= dt
 		var node: Node3D = s["node"]
 		var left: float = s["left"]
+		# Корона разгорается и мерцает — пара вспышек, и удар.
 		var k := 1.0 - left / rules.strike_telegraph_s
-		node.scale = Vector3.ONE * lerpf(0.6, 1.0, k)
-		(node.get_meta(&"mat") as StandardMaterial3D).albedo_color.a = 0.25 + 0.5 * k + 0.2 * sin(left * 40.0)
+		var flick := 0.6 + 0.4 * float(fmod(rules.strike_telegraph_s - left, FLICKER_S) < FLICKER_S * 0.6)
+		(node.get_meta(&"mat") as ShaderMaterial).set_shader_parameter("intensity", (0.5 + 0.9 * k) * flick)
+		(node.get_meta(&"light") as OmniLight3D).light_energy = (0.6 + 1.4 * k) * flick
 		if left <= 0.0:
 			node.queue_free()
 			_pending.remove_at(i)
@@ -158,38 +161,53 @@ func _pick_target() -> Vector2:
 	return best
 
 
+## Знак удара — «огни святого Эльма»: мерцающая голубая корона, искры и подсветка там, куда ударит.
+## Бьёт в машину — светится конец антенны, в дерево — его макушка.
 func _telegraph(p: Vector2) -> void:
-	var y := query.surface_y(p.x, p.y)
+	var t := Grid.tile_of_world(p.x, p.y)
+	var y := query.surface_y(p.x, p.y) + 0.2
+	if p == vehicle.state.pos:
+		y = vehicle.state.y + 0.75
+	elif query.has_standing_tree(t.x, t.y) and query.tree_position(t.x, t.y).distance_to(p) < 0.9:
+		y += 0.8
 	var node := Node3D.new()
-	node.position = Vector3(p.x, y + 0.06, p.y)
-	var mat := StandardMaterial3D.new()
-	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	mat.albedo_color = COLOR_TELEGRAPH
-	mat.cull_mode = BaseMaterial3D.CULL_DISABLED
-	var ring := TorusMesh.new()
-	ring.inner_radius = rules.strike_radius - 0.12
-	ring.outer_radius = rules.strike_radius
-	ring.rings = 24
-	ring.ring_segments = 4
-	var ring_mi := MeshInstance3D.new()
-	ring_mi.mesh = ring
-	ring_mi.material_override = mat
-	ring_mi.scale = Vector3(1, 0.3, 1)
-	ring_mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	node.add_child(ring_mi)
-	var disc := CylinderMesh.new()
-	disc.top_radius = rules.strike_core_r
-	disc.bottom_radius = rules.strike_core_r
-	disc.height = 0.02
-	disc.radial_segments = 12
-	disc.rings = 0
-	var disc_mi := MeshInstance3D.new()
-	disc_mi.mesh = disc
-	disc_mi.material_override = mat
-	disc_mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	node.add_child(disc_mi)
+	node.position = Vector3(p.x, y, p.y)
+	var corona := MeshInstance3D.new()
+	var quad := QuadMesh.new()
+	quad.size = Vector2.ONE
+	corona.mesh = quad
+	var mat := ShaderMaterial.new()
+	mat.shader = ELMO_SHADER
+	mat.set_shader_parameter("seed", rng.randf() * 100.0)
+	corona.material_override = mat
+	corona.scale = Vector3(1.1, 1.1, 1.0)
+	corona.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	node.add_child(corona)
+	var sparks := CPUParticles3D.new()
+	sparks.amount = 16
+	sparks.lifetime = 0.3
+	sparks.direction = Vector3.UP
+	sparks.spread = 180.0
+	sparks.initial_velocity_min = 0.4
+	sparks.initial_velocity_max = 1.4
+	sparks.gravity = Vector3.ZERO
+	var sq := QuadMesh.new()
+	sq.size = Vector2(0.05, 0.05)
+	var sm := StandardMaterial3D.new()
+	sm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	sm.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
+	sm.albedo_color = Color(0.75, 0.85, 1.0)
+	sq.material = sm
+	sparks.mesh = sq
+	node.add_child(sparks)
+	var glow := OmniLight3D.new()
+	glow.light_color = Color(0.6, 0.7, 1.0)
+	glow.omni_range = 2.5
+	glow.light_energy = 1.0
+	glow.shadow_enabled = false
+	node.add_child(glow)
 	node.set_meta(&"mat", mat)
+	node.set_meta(&"light", glow)
 	add_child(node)
 	_pending.append({"pos": p, "left": rules.strike_telegraph_s, "node": node})
 	EventBus.threat_telegraphed.emit(&"lightning", node.position, rules.strike_telegraph_s, Vector2.ZERO)

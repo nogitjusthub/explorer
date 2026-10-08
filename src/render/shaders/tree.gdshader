@@ -18,5 +18,5 @@ void fragment() {
 	float hidden = vis_hidden(world_pos);
 	albedo = weather_grade(albedo);
 	ALBEDO = albedo * (1.0 - hidden) * (1.0 - storm_shade(world_pos));
-	EMISSION = albedo * glow * (1.0 - hidden) + vis_color.rgb * hidden;
+	EMISSION = albedo * glow * (1.0 - hidden) + weather_color(world_pos) * hidden;
 }

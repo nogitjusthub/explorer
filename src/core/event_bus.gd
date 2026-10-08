@@ -23,6 +23,9 @@ signal threat_ended(kind: StringName)
 signal lightning_struck(at: Vector3)
 signal sheet_lightning(at: Vector3)        ## зарница в тучах — вспышка и далёкий гром без удара
 signal wind_changed(dir: Vector2, strength: float)
+
+# Фауна
+signal fauna_alerted(kind: StringName, at: Vector3)
 signal screen_flash_requested(strength: float)
 signal weather_changed(kind: StringName, intensity: float)
 

@@ -18,7 +18,7 @@ void fragment() {
 	float ripple = sin(world_pos.x * 1.7 + TIME * 1.3) * sin(world_pos.z * 1.3 - TIME * 1.1);
 	float hidden = vis_hidden(world_pos);
 	ALBEDO = weather_grade(c.rgb + ripple * 0.03) * (1.0 - hidden) * (1.0 - storm_shade(world_pos));
-	EMISSION = vis_color.rgb * hidden;
+	EMISSION = weather_color(world_pos) * hidden;
 	ALPHA = mix(c.a, 1.0, hidden);
 	ROUGHNESS = 0.2;
 }

@@ -139,3 +139,33 @@ func test_furrow_with_memory_lowers_each_vertex_once() -> void:
 		Deformation.furrow(f.terrain, Vector2(8.0, 10.0), Vector2(12.0, 10.0), 0.6, done)
 	assert_eq(f.query.corner(10, 10, 0), 5, "no deeper than one tier")
 	assert_true(_max_delta(f, 5, 5, 15, 15) <= 1)
+
+
+func test_temporary_ridge_settles_back_exactly() -> void:
+	var f := TerrainFixture.new(6)
+	f.set_tile(11, 10, 6, 6, 5, 5)          # склон рядом — релаксация поднимет и соседей
+	var before := {}
+	for tz in range(5, 16):
+		for tx in range(5, 16):
+			for c in 4:
+				before[Vector3i(tx, tz, c)] = f.query.corner(tx, tz, c)
+	var originals := {}
+	Deformation.raise_vertices(f.terrain, Deformation.vertices_near_segment(Vector2(8.0, 10.0), Vector2(12.0, 10.0), 0.7), originals)
+	assert_eq(f.query.corner(10, 10, 0), 7, "ridge raised a tier")
+	assert_true(_max_delta(f, 5, 5, 15, 15) <= 1)
+	assert_eq(_walls(f, 5, 5, 15, 15), 0, "ridge has no walls")
+	# Оседает половинами — как позади ползущего червя.
+	var verts: Array[Vector2i] = []
+	for key: Vector3i in originals:
+		verts.append(Deformation.recorded_vertex(key))
+	var half: Array[Vector2i] = verts.filter(func(v: Vector2i) -> bool: return v.x <= 9)
+	Deformation.restore_vertices(f.terrain, half, originals)
+	assert_true(_max_delta(f, 5, 5, 15, 15) <= 1, "valid while settling")
+	assert_eq(_walls(f, 5, 5, 15, 15), 0, "no walls while settling")
+	Deformation.restore_vertices(f.terrain, verts, originals)
+	assert_true(originals.is_empty())
+	var diff := 0
+	for key: Vector3i in before:
+		if f.query.corner(key.x, key.y, key.z) != before[key]:
+			diff += 1
+	assert_eq(diff, 0, "terrain fully restored")

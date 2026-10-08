@@ -105,7 +105,9 @@ static func crater(terrain: TerrainData, center: Vector2, radius: float, depth: 
 ## Борозда вдоль отрезка: вершины ближе half_width к отрезку опускаются на ярус. На скалах
 ## (материал ROCK у любого тайла вокруг вершины) следа не остаётся. done — вершины, уже опущенные этим
 ## же источником (смерч): их не трогаем, иначе медленный смерч выкопал бы каньон.
-static func furrow(terrain: TerrainData, from: Vector2, to: Vector2, half_width: float, done: Dictionary = {}) -> PackedInt64Array:
+## height — сдвиг вершин: −1 — борозда (смерч), +1 — вал (червь под песком).
+static func furrow(terrain: TerrainData, from: Vector2, to: Vector2, half_width: float, done: Dictionary = {},
+		height: int = -1) -> PackedInt64Array:
 	var w := Work.new(terrain)
 	var queue: Array[Vector3i] = []
 	var lo := Vector2i(floori(minf(from.x, to.x) - half_width) - 1, floori(minf(from.y, to.y) - half_width) - 1)
@@ -119,9 +121,77 @@ static func furrow(terrain: TerrainData, from: Vector2, to: Vector2, half_width:
 			if done.has(v) or _vertex_on_rock(terrain, v):
 				continue
 			done[v] = true
-			_shift_vertex(w, v, -1, LOWER, queue)
+			_shift_vertex(w, v, height, LOWER if height < 0 else RAISE, queue)
 	_relax(w, queue)
 	return _commit(w)
+
+
+## Вершины ближе half_width к отрезку from–to.
+static func vertices_near_segment(from: Vector2, to: Vector2, half_width: float) -> Array[Vector2i]:
+	var result: Array[Vector2i] = []
+	var lo := Vector2i(floori(minf(from.x, to.x) - half_width) - 1, floori(minf(from.y, to.y) - half_width) - 1)
+	var hi := Vector2i(ceili(maxf(from.x, to.x) + half_width) + 1, ceili(maxf(from.y, to.y) + half_width) + 1)
+	for vz in range(lo.y, hi.y + 1):
+		for vx in range(lo.x, hi.x + 1):
+			var p := Vector2(vx, vz)
+			if Geometry2D.get_closest_point_to_segment(p, from, to).distance_to(p) <= half_width:
+				result.append(Vector2i(vx, vz))
+	return result
+
+
+## Временный подъём (вал червя): вершины поднимаются на ярус, релаксация поднимает соседей; исходные
+## высоты всех изменённых углов запоминаются в originals (Vector3i(tx, tz, угол) → ярус). Вершины, у
+## которых угол уже записан, не трогаем — вал не растёт выше яруса.
+static func raise_vertices(terrain: TerrainData, verts: Array[Vector2i], originals: Dictionary) -> PackedInt64Array:
+	var w := Work.new(terrain)
+	var queue: Array[Vector3i] = []
+	for v in verts:
+		if _vertex_recorded(v, originals):
+			continue
+		_shift_vertex(w, v, 1, RAISE, queue)
+	_relax(w, queue)
+	for k in w.cur:
+		var c := w.cur[k]
+		var o := w.orig[k]
+		var t := DiffStore.key_tile(k)
+		for ci in 4:
+			if c[ci] != o[ci]:
+				var key := Vector3i(t.x, t.y, ci)
+				if not originals.has(key):
+					originals[key] = o[ci]
+	return _commit(w)
+
+
+## Возврат временного подъёма: у вершин из verts углы получают исходные высоты из originals (и
+## забываются), соседи релаксируют вниз — без стенок, не ниже исходного рельефа.
+static func restore_vertices(terrain: TerrainData, verts: Array[Vector2i], originals: Dictionary) -> PackedInt64Array:
+	var w := Work.new(terrain)
+	var queue: Array[Vector3i] = []
+	for v in verts:
+		for o in VERTEX_TILES:
+			var key := Vector3i(v.x + o.x, v.y + o.y, o.z)
+			if not originals.has(key):
+				continue
+			var target: int = originals[key]
+			originals.erase(key)
+			if not w.load_tile(key.x, key.y):
+				continue
+			w.set_corner(key.x, key.y, key.z, target)
+			queue.append(Vector3i(key.x, key.y, LOWER))
+	_relax(w, queue)
+	return _commit(w)
+
+
+## Вершина записанного угла (обратное к VERTEX_TILES).
+static func recorded_vertex(key: Vector3i) -> Vector2i:
+	return Vector2i(key.x, key.y) + CORNER_OFFSETS[key.z]
+
+
+static func _vertex_recorded(v: Vector2i, originals: Dictionary) -> bool:
+	for o in VERTEX_TILES:
+		if originals.has(Vector3i(v.x + o.x, v.y + o.y, o.z)):
+			return true
+	return false
 
 
 ## Разлом длиной length вдоль линии из вершины start (по x, если along_x, иначе по z).

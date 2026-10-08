@@ -24,7 +24,9 @@ func _ready() -> void:
 	var glow := unshaded.duplicate() as StandardMaterial3D
 	glow.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	glow.albedo_color = Color(1, 1, 1, 0.01)
-	for mat in [unshaded, glow]:
+	var two_sided := glow.duplicate() as StandardMaterial3D     # воронка смерча, телеграфы, клубы
+	two_sided.cull_mode = BaseMaterial3D.CULL_DISABLED
+	for mat in [unshaded, glow, two_sided]:
 		var mi := MeshInstance3D.new()
 		var box := BoxMesh.new()
 		box.size = Vector3.ONE * 0.01
@@ -32,6 +34,15 @@ func _ready() -> void:
 		mi.material_override = mat
 		mi.position = Vector3(0, -0.5, 0)
 		add_child(mi)
+	var elmo := MeshInstance3D.new()                          # знак удара молнии
+	var eq := QuadMesh.new()
+	eq.size = Vector2.ONE * 0.01
+	elmo.mesh = eq
+	var em := ShaderMaterial.new()
+	em.shader = load("res://src/render/shaders/st_elmo.gdshader")
+	em.set_shader_parameter("intensity", 0.0)
+	elmo.material_override = em
+	add_child(elmo)
 	var light := OmniLight3D.new()
 	light.light_energy = 0.01
 	light.omni_range = 2.0
