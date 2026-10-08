@@ -1,0 +1,15 @@
+[gd_resource type="Resource" script_class="PickupKind" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://data/pickups/pickup_kind.gd" id="1_kind"]
+
+[resource]
+script = ExtResource("1_kind")
+id = &"repair"
+display_name = "Ремкомплект"
+cargo = false
+slots = 0
+hp_restore = 30
+shape = 3
+color = Color(0.95, 0.95, 0.9, 1)
+glow = 0.3
+size = 0.32

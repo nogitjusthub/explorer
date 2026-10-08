@@ -14,7 +14,9 @@ const ALL_PARTS := 0x3F
 
 enum State { GENERATING, BUILDING, READY }
 
-signal chunk_ready(coord: Vector2i)
+signal chunk_ready(coord: Vector2i)       ## первая сборка чанка завершена
+signal chunk_built(coord: Vector2i)       ## любая сборка (в т. ч. пересборка после правки рельефа)
+signal chunk_removed(coord: Vector2i)
 
 var terrain: TerrainData
 var generator: TerrainGenerator
@@ -176,6 +178,7 @@ func _unload(coord: Vector2i) -> void:
 		_pool.append(e.node)
 	terrain.remove_chunk(coord)
 	_entries.erase(coord)
+	chunk_removed.emit(coord)
 
 
 func _on_generated(e: Entry, data: ChunkData) -> void:
@@ -192,8 +195,10 @@ func _on_generated(e: Entry, data: ChunkData) -> void:
 
 func _on_built(e: Entry) -> void:
 	e.job = null
-	if e.state != State.READY:
-		e.state = State.READY
+	var first := e.state != State.READY
+	e.state = State.READY
+	chunk_built.emit(e.coord)
+	if first:
 		chunk_ready.emit(e.coord)
 
 

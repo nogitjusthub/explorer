@@ -30,7 +30,7 @@ explorer/
 │  └─ scripts/                  get_godot  get_templates  test  export_web (.ps1), web_server.py
 ├─ src/                         код и сцены, сгруппированы по фичам
 │  ├─ core/                     event_bus  balance  settings  job  job_scheduler  grid  det_rng
-│  ├─ main/                     main.tscn (GameFlow)  run_state  score  leaderboard
+│  ├─ main/                     main.tscn (GameFlow)  run_state  leaderboard
 │  ├─ terrain/                  chunk_data  terrain_data  terrain_rules  terrain_generator
 │  │                            terrain_query  terrain_connectivity  terrain_repair  diff_store
 │  │                            chunk_mesher  world_streamer  chunk_node  tree_field  (deformation — M3)
@@ -38,12 +38,14 @@ explorer/
 │  ├─ camera/                   iso_camera_rig(.tscn)
 │  ├─ hazards/                  weather_director  storm_front  tornado  quake  fog  dust_storm
 │  ├─ fauna/                    fauna_director  worm  hopper  shellback  nest  grid_astar
-│  ├─ pickups/                  pickup_field  pickup
-│  ├─ shuttle/                  shuttle_scheduler  shuttle  emergency_shuttle  pad_registry
-│  ├─ render/                   terrain_materials  shaders/ (terrain, water, tree, visibility.gdshaderinc)
+│  ├─ pickups/                  pickup_generator  pickup_field
+│  ├─ shuttle/                  shuttle_scheduler  emergency_call  shuttle_craft  shuttle_controller
+│  ├─ render/                   terrain_materials  shaders/ (terrain, water, tree, pickup, pickup_outline,
+│  │                            visibility.gdshaderinc)
 │  ├─ audio/                    engine_sound  (audio_director — M3)
-│  ├─ debug/                    autopilot  map_preview
-│  └─ ui/                       debug_overlay  start_screen  (hud/, screens/ — M1)
+│  ├─ debug/                    dev_tools  autopilot  debug_snapshot  map_render  map_preview
+│  └─ ui/                       debug_overlay  start_screen  toast  hud/ (hud, radar)
+│                               screens/ (results_screen, shuttle_menu)
 ├─ data/                        ресурсы баланса (.tres)
 │  ├─ balance_rules.gd  balance.tres  terrain_params.gd  terrain_params.tres
 │  ├─ vehicles/                 vehicle_class.gd  rover.tres  tank.tres  hover.tres
@@ -82,8 +84,11 @@ explorer/
 | `ChunkMesher` | Секция чанка → массивы для `ArrayMesh` (верх, стенки, вода) |
 | `TreeField` | Буфер `MultiMesh` деревьев чанка, занятость тайлов |
 | `VehicleKinematics` | Один шаг движения по сетке над `VehicleState` |
-| `RunState` | HP, топливо, трюм, счёт, таймеры, уровень угрозы одного забега |
-| `Score`, `Leaderboard` | Формулы счёта; `user://leaderboard.json`, топ-10 по классу |
+| `RunState` | HP, топливо, трюм с вытеснением дешёвого, формулы счёта (сдача, аварийный вызов, бонус), итог забега |
+| `Leaderboard` | `user://leaderboard.json`, топ-10 по классу |
+| `PickupGenerator` | Находки чанка по правилам GDD §6: один `RandomNumberGenerator` на чанк, бросок на каждый тайл в фиксированном порядке (~0,2 мс на чанк); ремкомплект — на чанк |
+| `ShuttleScheduler` | Расписание основного челнока: интервалы и дистанции посадок, анонс площадки за 30 с, окно 20 с с удержанием, пока открыто меню; выбор площадки по дистанции |
+| `EmergencyCall` | Аварийный челнок: таймер прилёта, выбор тайла посадки (сухой, без стенок, радиус 3) |
 | `GridAStar` | Поиск пути фауны по сетке с учётом проходимости вида |
 
 ### 3.2 Узлы сцены
@@ -99,9 +104,12 @@ explorer/
 | `GameFlow` (`main.gd`) | Машина состояний: Старт → Десант → Вылазка → Итог; владеет `RunState` |
 | `WeatherDirector` и угрозы | Цикл погоды, грозовой фронт, смерчи, разломы, телеграфы для пейджера |
 | `FaunaDirector` и виды | Появление по биому и шуму, поведение, A* |
-| `PickupField` | Находки по чанкам, сбор, метки радара |
-| `ShuttleScheduler`, `Shuttle` | Расписание основного челнока, выбор площадки, зона и меню |
-| `EmergencyShuttle` | Аварийный челнок: вызов, посадка рядом с машиной, обмен. От расписания не зависит |
+| `PickupField` | Находки загруженных чанков (по сигналам `chunk_built` / `chunk_removed` стримера), `MultiMesh` на вид, подбор, выпавшее из трюма, канистры по D(t) с запоминанием решения на чанк, запросы радара |
+| `ShuttleController` | Связывает `ShuttleScheduler` и `EmergencyCall` с машиной, `RunState`, HUD: меню при остановке в зоне, радио (F, с подтверждением), 10 с на решение при пустом баке, обмен с аварийным |
+| `ShuttleCraft` | Челнок из примитивов: указатель площадки (три стрелки вниз, огни бегут к центру), спуск, луч и кольцо зоны, взлёт |
+| `ShuttleMenu`, `ResultsScreen` | Меню челнока (сдать груз / завершить забег / уехать); итог забега, ввод имени, таблица рекордов |
+| `Radar` | Часть HUD: находки и площадка (или стрелка на неё), ориентирован по экрану |
+| `DevTools` | Параметры запуска, бенчмарк, снимки, сценарии без рук (`--idle`, `--press`) |
 | `Visibility` | Глобальные uniform видимости, логическое скрытие объектов |
 | `AudioDirector` | Четыре группы звуков по событиям |
 | `HUD` | Отображение; подписан на `EventBus`, логики не содержит |
@@ -329,7 +337,7 @@ signal chunk_loaded(coord: Vector2i)
 signal chunk_unloaded(coord: Vector2i)
 signal shuttle_state_changed(state: StringName, seconds_left: float, pad: Vector3)
 signal shuttle_menu_requested(open: bool)
-signal emergency_state_changed(state: StringName, seconds_left: float)
+signal emergency_state_changed(state: StringName, seconds_left: float, penalty: int)
 signal camera_rotated(quarter_turns: int)
 signal camera_shake_requested(strength: float, seconds: float)
 signal run_started(seed: int, vehicle: StringName)
@@ -340,7 +348,9 @@ signal run_ended(result: Dictionary)
 
 ## 9. Порядок обновления
 
-**`_physics_process`, 60 Гц.** Мир вызывает подсистемы явно, в фиксированном порядке — ради детерминизма:
+**`_physics_process`, 60 Гц.** Мир вызывает подсистемы явно, в фиксированном порядке — ради детерминизма.
+Сейчас (M1): `GameFlow` (родитель, идёт первым) — фокус стримера, `RunState.tick`, подбор находок, расход топлива,
+`ShuttleController.step`; затем `Vehicle` — шаг кинематики и сигналы урона и гибели. Целевой порядок:
 
 1. `VehicleInput.sample(camera_yaw)`.
 2. Погода и угрозы: таймеры, телеграфы, внешние силы → `state.ext_force`.
@@ -407,12 +417,13 @@ $g = ".\tools\godot\Godot_v4.7.2-stable_win64_console.exe"
 | Скачать движок (SHA512) | `powershell -ExecutionPolicy Bypass -File tools\scripts\get_godot.ps1` |
 | Шаблоны веб-экспорта (SHA512, только web без потоков) | `powershell -ExecutionPolicy Bypass -File tools\scripts\get_templates.ps1` |
 | Редактор | `editor.cmd` (из любой папки) |
-| Тесты | `powershell -ExecutionPolicy Bypass -File tools\scripts	est.ps1 [-Filter …]` |
+| Тесты | `powershell -ExecutionPolicy Bypass -File tools\scripts\test.ps1 [-Filter …]` |
 | Игра | `play.cmd [--seed=N]` (из любой папки; прямой запуск exe с `--path .` работает только из корня проекта) |
 | Бенчмарк (автопилот, ПК) | `… --path . -- --seed=7 --bench=40` (можно `--headless`) |
 | Отладочный снимок в игре | **F12** (геймпад — Back) → `build/debug/<дата_время>/`: `screenshot.png`, `map.png` (65×65 тайлов, машина — крест), `info.txt` (seed, коммит, команда воспроизведения, состояние машины, рёбра её тайла, сетка ярусов), `tiles.json` (дамп тайлов 17×17). В вебе — на `/shot` и `/log`. Без клавиатуры: `-- --snapshot-at=S` |
 | Старт в точке / прямой курс | `play.cmd --seed=N --spawn=X,Z [--course=D --autopilot]` |
 | Снимки экрана | `… --path . -- --seed=7 --shots=4 --shot-every=3` → `build/shots/` |
+| Сценарий без рук | `… -- --seed=7 --idle --shuttle-in=6 --shuttle-dist=0 --shots=2 --press=radio@8`: машина стоит на площадке старта, челнок садится через 6 с, F на 8-й секунде. Ещё: `--fuel=N` (мало топлива — проверка пустого бака), `--debug` (оверлей сразу) |
 | Карта рельефа в PNG | `… --headless --path . --script res://src/debug/map_preview.gd -- --seed=1 --chunks=8` → `build/preview/` |
 | Веб-сборка | `powershell -ExecutionPolicy Bypass -File tools\scripts\export_web.ps1 [-Debug] [-Serve]` → `build/web/` |
 | Веб-сервер с приёмом отчётов | `python tools/scripts/web_server.py 8000`; страница `http://127.0.0.1:8000/?seed=7&bench=40&shots=2` пишет результаты в `build/web_log.txt` и снимки в `build/web_shots/` |

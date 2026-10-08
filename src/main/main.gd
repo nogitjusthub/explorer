@@ -1,21 +1,12 @@
 extends Node
-## Корень игрового цикла (GameFlow). Веха M0: бесконечный мир, ровер, камера, отладочный оверлей.
-##
-## Параметры командной строки (после «--»):
-##   --seed=N          seed мира (по умолчанию — от времени);
-##   --autopilot       машина едет сама;
-##   --bench=S         автопилот S секунд, затем печать статистики и выход;
-##   --shots=N         автопилот, N снимков экрана в build/shots/ (нужен оконный режим), затем выход;
-##   --shot-every=S    интервал между снимками, секунд (по умолчанию 3);
-##   --no-shadows      без теней (слабые машины, диагностика);
-##   --spawn=X,Z       старт в точке мира вместо площадки (отладка);
-##   --course=D        автопилот едет строго по курсу D градусов (0 — +x, 90 — +z), без объезда;
-##   --snapshot-at=S   отладочный снимок (как по F12) через S секунд;
-##   --zoom=N          камера в N раз крупнее (отладка).
-## В веб-сборке те же параметры берутся из адреса страницы: ?seed=7&bench=30. Результаты бенчмарка
-## и снимки уходят POST-запросами на /log и /shot (tools/scripts/web_server.py).
+## Корень игрового цикла (GameFlow, ARCHITECTURE §3.2): старт → забег → итог.
+## Владеет RunState и связывает с ним машину, находки, челноки и HUD. Отладочные режимы запуска и
+## параметры командной строки — в DevTools.
+
+enum Phase { START, RUN, OVER, RESULTS }
 
 const VIS_RADIUS_CLEAR := 1000.0
+const SPAWN_HEADING := -PI * 0.75
 
 var run_seed: int
 var terrain: TerrainData
@@ -25,45 +16,34 @@ var scheduler: JobScheduler
 var streamer: WorldStreamer
 var vehicle: Vehicle
 var rig: IsoCameraRig
+var pickups: PickupField
+var hud: Hud
+var shuttles: ShuttleController
+var dev: DevTools
+var run: RunState
+var rules: BalanceRules
+var phase := Phase.START
+var sandbox := false               ## автопилот: забег бесконечный, гибель — возрождение
 
-var _args := {}
-var _bench_time := -1.0
-var _shots_left := 0
-var _shot_every := 3.0
-var _shot_timer := 0.0
-var _shot_index := 0
-var _frames := 0
-var _elapsed := 0.0
-var _max_delta := 0.0
-var _throttle_sum := 0.0
-var _physics_frames := 0
-var _chunks_built := 0
-var _slow_frames := 0
-var _objects_at_start := 0
-var _spawn := Vector2.ZERO
-var _deaths := 0
 var _toast: Toast
-var _snapshot_at := -1.0
+var _spawn := Vector2.ZERO
+var _over_timer := 0.0
+var _refused_key := -1             ## находка, на которую уже показали «трюм полон»
 
 
 func _ready() -> void:
-	_args = _parse_args()
-	run_seed = int(_args.get("seed", str(int(Time.get_unix_time_from_system()) % 100000)))
-	print("Explorer M0 — seed %d (Godot %s)" % [run_seed, Engine.get_version_info().string])
-	_build_world()
-	if _args.has("bench"):
-		_bench_time = float(_args["bench"])
-	if _args.has("snapshot-at"):
-		_snapshot_at = float(_args["snapshot-at"])
-	if _args.has("shots"):
-		_shots_left = int(_args["shots"])
-		_shot_every = float(_args.get("shot-every", "3"))
-		_shot_timer = _shot_every
-	if _args.has("autopilot") or _bench_time > 0.0 or _shots_left > 0:
-		vehicle.autopilot = Autopilot.new(DetRng.unit(run_seed, 0, 0, 900) * TAU, query, vehicle.cls)
-		if _args.has("course"):
-			vehicle.autopilot = Autopilot.new(deg_to_rad(float(_args["course"])), query, vehicle.cls)
-			vehicle.autopilot.fixed_course = true
+	var args := DevTools.parse_args()
+	run_seed = int(args.get("seed", str(int(Time.get_unix_time_from_system()) % 100000)))
+	print("Explorer — seed %d (Godot %s)" % [run_seed, Engine.get_version_info().string])
+	dev = DevTools.new(args)
+	rules = dev.tweak_rules(Balance.rules)
+	dev.run_seed = run_seed
+	_build_world(args)
+	_new_run()
+	if dev.skips_start():
+		if dev.wants_autopilot():
+			sandbox = true
+			vehicle.autopilot = dev.make_autopilot()
 		_begin()
 	else:
 		vehicle.control_enabled = false
@@ -72,7 +52,7 @@ func _ready() -> void:
 		add_child(start)
 
 
-func _build_world() -> void:
+func _build_world(args: Dictionary) -> void:
 	var env := Environment.new()
 	env.background_mode = Environment.BG_COLOR
 	env.background_color = Color(0.36, 0.27, 0.42)
@@ -88,7 +68,7 @@ func _build_world() -> void:
 	sun.rotation_degrees = Vector3(-38.0, -70.0, 0.0)
 	sun.light_color = Color(1.0, 0.88, 0.74)
 	sun.light_energy = 1.25
-	sun.shadow_enabled = not _args.has("no-shadows")
+	sun.shadow_enabled = not args.has("no-shadows")
 	# Одна ортогональная карта теней на небольшую дальность — плотнее тексели. Смещение по нормали
 	# берётся из вершинных нормалей меша (ChunkMesher их пишет), иначе грани затеняют сами себя.
 	sun.directional_shadow_mode = DirectionalLight3D.SHADOW_ORTHOGONAL
@@ -104,26 +84,46 @@ func _build_world() -> void:
 	scheduler.name = "JobScheduler"
 	add_child(scheduler)
 	streamer = WorldStreamer.new(terrain, generator, query, scheduler, TerrainMaterials.new())
-	streamer.chunk_ready.connect(func(_c: Vector2i) -> void: _chunks_built += 1)
 	add_child(streamer)
+	pickups = PickupField.new(terrain, query, run_seed, rules)
+	add_child(pickups)
+	streamer.chunk_built.connect(pickups.on_chunk_built)
+	streamer.chunk_removed.connect(pickups.on_chunk_removed)
 
-	var spawn := _spawn_point()
+	var spawn := _spawn_point(args)
 	var t0 := Time.get_ticks_usec()
 	streamer.preload_around(spawn)
 	print("preload: %d chunks in %d ms" % [streamer.loaded_count(), (Time.get_ticks_usec() - t0) / 1000])
 
 	vehicle = Vehicle.new(Balance.vehicle(&"rover"), query)
 	add_child(vehicle)
-	vehicle.place(spawn, -PI * 0.75)
+	vehicle.place(spawn, SPAWN_HEADING)
+	vehicle.damaged.connect(_on_vehicle_damaged)
 	vehicle.died.connect(_on_vehicle_died)
 	_spawn = spawn
 
 	rig = IsoCameraRig.new()
 	rig.target = vehicle
-	rig.zoom = float(_args.get("zoom", "1"))
+	rig.zoom = float(args.get("zoom", "1"))
 	add_child(rig)
 	vehicle.camera = rig.camera
 
+	hud = Hud.new()
+	add_child(hud)
+	hud.radar.pickups = pickups
+	hud.radar.vehicle = vehicle
+	hud.radar.camera = rig.camera
+
+	shuttles = ShuttleController.new()
+	shuttles.vehicle = vehicle
+	shuttles.query = query
+	shuttles.generator = generator
+	shuttles.rules = rules
+	shuttles.hud = hud
+	add_child(shuttles)
+	shuttles.evacuate_requested.connect(func() -> void: run.evacuate())
+	shuttles.refueled.connect(_restart_engine)
+	shuttles.tank_expired.connect(func() -> void: run.end(RunState.CAUSE_EMPTY_TANK))
 	_toast = Toast.new()
 	add_child(_toast)
 
@@ -133,15 +133,25 @@ func _build_world() -> void:
 	overlay.streamer = streamer
 	overlay.scheduler = scheduler
 	overlay.query = query
+	overlay.visible = dev.wants_autopilot() or args.has("debug")   # в игре — по F3
 	add_child(overlay)
+
+	dev.vehicle = vehicle
+	dev.streamer = streamer
+	dev.scheduler = scheduler
+	dev.terrain = terrain
+	dev.query = query
+	dev.rig = rig
+	dev.toast = _toast
+	add_child(dev)
 
 	RenderingServer.global_shader_parameter_set(&"vis_radius", VIS_RADIUS_CLEAR)
 
 
-## Точка десанта M0: центр ближайшей к началу координат площадки челнока (ровно и сухо).
-func _spawn_point() -> Vector2:
-	if _args.has("spawn"):
-		var xz := (_args["spawn"] as String).split(",")
+## Точка десанта: центр ближайшей к началу координат площадки челнока (ровно и сухо).
+func _spawn_point(args: Dictionary) -> Vector2:
+	if args.has("spawn"):
+		var xz := (args["spawn"] as String).split(",")
 		return Vector2(float(xz[0]) + 0.5, float(xz[1]) + 0.5)
 	for r in 4:
 		for bz in range(-r, r + 1):
@@ -152,139 +162,146 @@ func _spawn_point() -> Vector2:
 	return Vector2(0.5, 0.5)
 
 
-## Гибель (M0: пока только «утонул»). Полный экран итога — в M1a.
-func _on_vehicle_died(cause: StringName) -> void:
-	_deaths += 1
-	print("vehicle died: %s" % cause)
-	if vehicle.autopilot != null:
-		vehicle.place(_spawn, -PI * 0.75)   # бенчмарк продолжается
-		return
-	vehicle.control_enabled = false
-	var screen := StartScreen.new()
-	screen.text = "МАШИНА УТОНУЛА\n\nНажмите любую клавишу, чтобы начать заново"
-	screen.started.connect(func() -> void: get_tree().reload_current_scene())
-	add_child(screen)
+## Новый RunState; его сигналы уходят в EventBus (HUD и прочие слушатели).
+func _new_run() -> void:
+	run = RunState.new(vehicle.cls, rules)
+	run.hp_changed.connect(EventBus.hp_changed.emit)
+	run.fuel_changed.connect(EventBus.fuel_changed.emit)
+	run.cargo_changed.connect(EventBus.cargo_changed.emit)
+	run.score_changed.connect(EventBus.score_changed.emit)
+	run.ended.connect(_on_run_ended)
+	dev.run = run
+	dev.tweak_run(run)
+	shuttles.run = run
 
 
 func _begin() -> void:
-	_objects_at_start = int(Performance.get_monitor(Performance.OBJECT_COUNT))
+	phase = Phase.RUN
+	dev.mark_start()
 	vehicle.control_enabled = true
 	vehicle.engine.play()
+	shuttles.active = true
+	shuttles.menu_enabled = not sandbox
+	run.announce()
+	EventBus.run_started.emit(run_seed, vehicle.cls.id)
 
 
-func _physics_process(_dt: float) -> void:
+func _physics_process(dt: float) -> void:
 	streamer.update_focus(vehicle.state.pos, vehicle.state.vel)
 	var p := vehicle.state.pos
 	RenderingServer.global_shader_parameter_set(&"vis_center", Vector3(p.x, vehicle.state.y, p.y))
-	_physics_frames += 1
-	_throttle_sum += vehicle.state.throttle
-
-
-func _unhandled_input(event: InputEvent) -> void:
-	if event.is_action_pressed(&"debug_snapshot"):
-		_debug_snapshot()
-
-
-## Отладочный снимок (F12): скриншот, карта, состояние машины, дамп тайлов — см. DebugSnapshot.
-func _debug_snapshot() -> void:
-	var dir := DebugSnapshot.capture(get_viewport(), vehicle, query, run_seed, rig.quarter())
-	var where := "отправлен на сервер" if dir.is_empty() else dir.replace(ProjectSettings.globalize_path("res://"), "")
-	_toast.show_message("Снимок: " + where)
-	print("debug snapshot: " + (dir if not dir.is_empty() else "web"))
+	if phase != Phase.RUN:
+		return
+	run.tick(dt)
+	pickups.run_time = run.time
+	_collect_pickups()
+	if vehicle.engine_running and run.burn_fuel(dt, vehicle.state.throttle):
+		_on_fuel_empty()
+	shuttles.step(dt)
 
 
 func _process(dt: float) -> void:
-	_frames += 1
-	_elapsed += dt
-	if _frames > 10:
-		_max_delta = maxf(_max_delta, dt)
-		if dt > 0.02:
-			_slow_frames += 1
-	if _snapshot_at > 0.0 and _elapsed >= _snapshot_at:
-		_snapshot_at = -1.0
-		_debug_snapshot()
-	if _shots_left > 0:
-		_shot_timer -= dt
-		if _shot_timer <= 0.0:
-			_shot_timer = _shot_every
-			_take_shot()
-	if _bench_time > 0.0 and _elapsed >= _bench_time:
-		_bench_time = -1.0
-		_print_bench()
-		_finish()
+	if phase == Phase.OVER:
+		_over_timer -= dt
+		if _over_timer <= 0.0:
+			_show_results()
 
 
-func _take_shot() -> void:
-	# Кадр рендера 480×320 увеличиваем вдвое без сглаживания — как он выглядит в окне.
-	var image := get_viewport().get_texture().get_image()
-	image.resize(image.get_width() * 2, image.get_height() * 2, Image.INTERPOLATE_NEAREST)
-	if OS.has_feature("web"):
-		_web_post("/shot", Marshalls.raw_to_base64(image.save_png_to_buffer()), true)
-	else:
-		var dir := ProjectSettings.globalize_path("res://build/shots")
-		DirAccess.make_dir_recursive_absolute(dir)
-		var path := dir.path_join("shot_%02d.png" % _shot_index)
-		image.save_png(path)
-		print("shot " + path)
-	_shot_index += 1
-	_shots_left -= 1
-	if _shots_left == 0 and _bench_time <= 0.0:
-		_finish()
+## Подбор находок в радиусе (GDD §6): груз — в трюм с вытеснением дешёвого, ремкомплект и канистра
+## действуют сразу; при полном HP или баке они остаются лежать.
+func _collect_pickups() -> void:
+	var s := vehicle.state
+	if s.falling or s.drowning:
+		return
+	for p in pickups.near(s.pos, rules.pickup_radius):
+		var key: int = p["key"]
+		var kind := Balance.pickup(p["kind"])
+		var shown := 0
+		if kind.cargo:
+			var offer := run.offer_cargo(kind)
+			if not offer.accepted:
+				if key != _refused_key:
+					_refused_key = key
+					hud.popup("ТРЮМ ПОЛОН", Hud.COLOR_DAMAGE)
+				continue
+			for displaced in offer.displaced:
+				pickups.drop(displaced.id, s.pos, rules.pickup_radius + 0.5)
+			shown = kind.value
+		elif kind.hp_restore > 0:
+			if run.hp >= vehicle.cls.hp_max:
+				continue
+			run.heal(kind.hp_restore)
+			shown = kind.hp_restore
+		else:
+			if run.fuel >= vehicle.cls.fuel_max - 0.5:
+				continue
+			var frac := pickups.canister_fraction(key, kind)
+			run.add_fuel(vehicle.cls.fuel_max * frac)
+			shown = roundi(frac * 100.0)
+			_restart_engine()
+		pickups.take(key)
+		dev.pickups_collected += 1
+		EventBus.pickup_collected.emit(kind.id, shown)
 
 
-## Конец автоматического прогона. В браузере выход из движка бессмыслен (и ломает веб-аудио) —
-## там просто останавливаем машину.
-func _finish() -> void:
-	if OS.has_feature("web"):
-		vehicle.control_enabled = false
-	else:
-		get_tree().quit()
+func _on_vehicle_damaged(amount: int, source: StringName) -> void:
+	if phase != Phase.RUN:
+		return
+	var before := run.hp
+	run.damage(amount, source)
+	if run.hp < before:
+		EventBus.vehicle_damaged.emit(before - run.hp, source, vehicle.global_position)
 
 
-func _print_bench() -> void:
-	var avg_throttle := _throttle_sum / maxi(_physics_frames, 1)
-	var cls := vehicle.cls
-	var fuel_per_min := VehicleKinematics.fuel_per_second(cls, avg_throttle) * 60.0
-	_report("bench (%s, seed %d): %.1f s, %d frames, avg %.1f FPS, worst frame %.1f ms, frames > 20 ms: %d, worst job slice %.1f ms" % [
-		"web" if OS.has_feature("web") else "desktop", run_seed, _elapsed, _frames, _frames / _elapsed,
-		_max_delta * 1000.0, _slow_frames, scheduler.max_frame_usec / 1000.0])
-	_report("bench: chunks built %d, loaded now %d, distance %.0f tiles, avg speed %.2f tiles/s" % [
-		_chunks_built, streamer.loaded_count(), vehicle.total_distance, vehicle.total_distance / _elapsed])
-	_report("bench: avg throttle %.2f → fuel %.1f u/min → full tank of %s lasts %.1f min" % [
-		avg_throttle, fuel_per_min, cls.id, cls.fuel_max / fuel_per_min])
-	_report("bench: render — draw calls %d, primitives %d, objects in frame %d, video memory %.0f MB" % [
-		Performance.get_monitor(Performance.RENDER_TOTAL_DRAW_CALLS_IN_FRAME),
-		Performance.get_monitor(Performance.RENDER_TOTAL_PRIMITIVES_IN_FRAME),
-		Performance.get_monitor(Performance.RENDER_TOTAL_OBJECTS_IN_FRAME),
-		Performance.get_monitor(Performance.RENDER_VIDEO_MEM_USED) / 1048576.0])
-	_report("bench: objects %d (at start %d), static memory %.1f MB, terrain diffs %d, deaths %d" % [
-		Performance.get_monitor(Performance.OBJECT_COUNT), _objects_at_start,
-		Performance.get_monitor(Performance.MEMORY_STATIC) / 1048576.0, terrain.diffs.size(), _deaths])
+func _on_vehicle_died(cause: StringName) -> void:
+	if phase == Phase.RUN:
+		run.end(cause)
 
 
-func _report(line: String) -> void:
-	print(line)
-	if OS.has_feature("web"):
-		_web_post("/log", line, false)
+## Пустой бак: двигатель глохнет, 10 с на решение — аварийный челнок или конец забега (GDD §2.3).
+func _on_fuel_empty() -> void:
+	EventBus.fuel_empty.emit()
+	if sandbox:
+		run.add_fuel(vehicle.cls.fuel_max)
+		return
+	vehicle.engine_running = false
+	shuttles.on_fuel_empty()
 
 
-## POST на локальный сервер веб-сборки. base64 — для двоичных данных (снимки).
-func _web_post(path: String, payload: String, base64: bool) -> void:
-	var body := "Uint8Array.from(atob('%s'), c => c.charCodeAt(0))" % payload if base64 else JSON.stringify(payload)
-	JavaScriptBridge.eval("fetch('%s', {method: 'POST', body: %s})" % [path, body])
+## Топливо снова есть (канистра, аварийный челнок): двигатель заводится.
+func _restart_engine() -> void:
+	if vehicle.engine_running or run.fuel <= 0.0:
+		return
+	vehicle.engine_running = true
+	vehicle.engine.play()
+	shuttles.on_refueled()
 
 
-func _parse_args() -> Dictionary:
-	var result := {}
-	for arg in OS.get_cmdline_user_args():
-		if not arg.begins_with("--"):
-			continue
-		var kv := arg.trim_prefix("--").split("=", true, 1)
-		result[kv[0]] = kv[1] if kv.size() > 1 else ""
-	if OS.has_feature("web"):
-		var search: Variant = JavaScriptBridge.eval("window.location.search", true)
-		if search is String:
-			for pair in (search as String).trim_prefix("?").split("&", false):
-				var kv := pair.split("=", true, 1)
-				result[kv[0]] = kv[1] if kv.size() > 1 else ""
-	return result
+func _on_run_ended(cause: StringName) -> void:
+	var result := run.result()
+	print("run ended: %s, score %d, time %.0f s" % [cause, result["score"], result["time"]])
+	if cause != RunState.CAUSE_EVACUATED:
+		EventBus.vehicle_died.emit(cause)
+	EventBus.run_ended.emit(result)
+	if sandbox:
+		dev.deaths += 1
+		vehicle.place(_spawn, SPAWN_HEADING)
+		_new_run()
+		shuttles.reset()
+		run.announce()
+		return
+	phase = Phase.OVER
+	shuttles.active = false
+	vehicle.control_enabled = false
+	if cause != RunState.CAUSE_EVACUATED and cause != &"drowned" and cause != RunState.CAUSE_EMPTY_TANK:
+		vehicle.wreck()
+		hud.banner("МАШИНА РАЗБИТА", Hud.COLOR_DAMAGE)
+	_over_timer = rules.death_delay_s
+
+
+func _show_results() -> void:
+	phase = Phase.RESULTS
+	hud.visible = false
+	var screen := ResultsScreen.new(run.result(), Leaderboard.new())
+	screen.restart_requested.connect(func() -> void: get_tree().reload_current_scene())
+	add_child(screen)

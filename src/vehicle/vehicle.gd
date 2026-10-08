@@ -4,12 +4,14 @@ extends Node3D
 ## Позиция обновляется в _physics_process; плавность на высоких FPS даёт physics interpolation.
 
 signal landed(tiers: int, damage: int)
-signal died(cause: StringName)
+signal damaged(amount: int, source: StringName)   ## урон от падения или валки дерева (до учёта HP)
+signal died(cause: StringName)                    ## гибель, которую решает кинематика (утонула)
 
 const BODY_COLOR := Color(0.88, 0.55, 0.18)
 const GLASS_COLOR := Color(0.4, 0.82, 0.98, 0.7)
 const WHEEL_COLOR := Color(0.16, 0.14, 0.18)
 const XRAY_COLOR := Color(1.0, 0.75, 0.25, 0.75)
+const WRECK_COLOR := Color(0.22, 0.18, 0.17)
 
 var cls: VehicleClass
 var query: TerrainQuery
@@ -17,10 +19,13 @@ var state := VehicleState.new()
 var camera: Camera3D
 var autopilot: Autopilot
 var control_enabled := true
+var engine_running := true      ## false — двигатель заглох (пустой бак): газа нет, машина катится до остановки
+var wrecked := false
 var total_distance := 0.0
 var engine: EngineSound
 
 var _tilt := Basis.IDENTITY
+var _body_mat: StandardMaterial3D
 
 
 func _init(vehicle_class: VehicleClass, terrain_query: TerrainQuery) -> void:
@@ -48,7 +53,7 @@ func place(pos: Vector2, heading: float = 0.0) -> void:
 
 func _physics_process(dt: float) -> void:
 	var inp := Vector2.ZERO
-	if control_enabled:
+	if control_enabled and engine_running and not wrecked:
 		inp = autopilot.direction(state, dt) if autopilot != null else VehicleInput.world_direction(camera)
 	var before := state.pos
 	var r := VehicleKinematics.step(state, inp, cls, query, dt)
@@ -56,13 +61,27 @@ func _physics_process(dt: float) -> void:
 	if r.landed:
 		landed.emit(r.fell_tiers, r.fall_damage)
 		EventBus.vehicle_fell.emit(r.fell_tiers, r.fall_damage)
+		if r.fall_damage > 0:
+			damaged.emit(r.fall_damage, &"fall")
+	if r.tree_damage > 0:
+		damaged.emit(r.tree_damage, &"tree")
 	if r.drowned:
 		died.emit(&"drowned")
-		EventBus.vehicle_died.emit(&"drowned")
 	if not state.falling and not state.drowning:
 		_tilt = _tilt.slerp(_ground_basis(), minf(1.0, 12.0 * dt))
 	_apply_transform()
-	engine.update(state.vel.length() / cls.max_speed, state.throttle, dt)
+	if engine_running and not wrecked:
+		engine.update(state.vel.length() / cls.max_speed, state.throttle, dt)
+	elif engine.playing:
+		engine.volume_db = move_toward(engine.volume_db, -60.0, 40.0 * dt)
+		if engine.volume_db <= -59.0:
+			engine.stop()
+
+
+## Машина разбита: управление отключено, корпус темнеет, двигатель стихает.
+func wreck() -> void:
+	wrecked = true
+	_body_mat.albedo_color = WRECK_COLOR
 
 
 func _apply_transform() -> void:
@@ -94,6 +113,7 @@ func _build_model() -> Node3D:
 	root.name = "Model"
 	root.scale = Vector3.ONE * 1.25
 	var body_mat := _material(BODY_COLOR)
+	_body_mat = body_mat
 	body_mat.stencil_mode = BaseMaterial3D.STENCIL_MODE_XRAY
 	body_mat.stencil_color = XRAY_COLOR
 	body_mat.stencil_reference = 1

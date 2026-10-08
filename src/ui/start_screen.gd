@@ -1,11 +1,11 @@
 class_name StartScreen
 extends CanvasLayer
-## Экран «нажмите любую клавишу»: стартовый (нужен и для веба — браузер включает звук только
-## после действия пользователя) и экран гибели. Текст задаётся до добавления в дерево.
+## Экран «нажмите любую клавишу» перед забегом (нужен и для веба — браузер включает звук только
+## после действия пользователя). Текст задаётся до добавления в дерево.
 
 signal started
 
-const DEFAULT_TEXT := "EXPLORER\n\nW / A / S / D — движение, Q / E — поворот камеры, F3 — отладка\n\nНажмите любую клавишу"
+const DEFAULT_TEXT := "EXPLORER\n\nСобирайте находки и сдавайте груз челноку: остановитесь в круге на площадке.\nТопливо кончается — канистры редки, аварийный челнок дорог.\n\nW / A / S / D — движение, F — аварийный челнок, Q / E — поворот камеры, F3 — отладка\n\nНажмите любую клавишу"
 
 var text := DEFAULT_TEXT
 var _done := false
@@ -24,6 +24,7 @@ func _ready() -> void:
 	label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	label.set_anchors_preset(Control.PRESET_FULL_RECT)
 	label.add_theme_font_size_override(&"font_size", 10)
+	label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	add_child(label)
 
 
