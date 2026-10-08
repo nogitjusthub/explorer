@@ -21,6 +21,7 @@ var rig: IsoCameraRig
 var pickups: PickupField
 var hud: Hud
 var shuttles: ShuttleController
+var threats: ThreatDirector
 var dev: DevTools
 var run: RunState
 var rules: BalanceRules
@@ -134,6 +135,28 @@ func _build_world(args: Dictionary) -> void:
 	shuttles.evacuate_requested.connect(func() -> void: run.evacuate())
 	shuttles.refueled.connect(_restart_engine)
 	shuttles.tank_expired.connect(func() -> void: run.end(RunState.CAUSE_EMPTY_TANK))
+
+	threats = ThreatDirector.new()
+	threats.rules = rules
+	threats.vehicle = vehicle
+	threats.query = query
+	threats.terrain = terrain
+	threats.generator = generator
+	threats.streamer = streamer
+	threats.pickups = pickups
+	threats.run_seed = run_seed
+	threats.enabled = not args.has("no-threats")
+	threats.min_level = int(args.get("threat", "1"))
+	threats.forced = dev.forced_events()
+	add_child(threats)
+	threats.damaged.connect(_on_vehicle_damaged)
+	dev.threats = threats
+	hud.pager.vehicle = vehicle
+	hud.pager.camera = rig.camera
+
+	var audio := AudioDirector.new()
+	audio.vehicle = vehicle
+	add_child(audio)
 	_toast = Toast.new()
 	add_child(_toast)
 
@@ -203,6 +226,7 @@ func _begin() -> void:
 	vehicle.engine.play()
 	shuttles.active = true
 	shuttles.menu_enabled = not sandbox
+	threats.begin()
 	run.announce()
 	EventBus.run_started.emit(run_seed, vehicle.cls.id)
 
@@ -221,6 +245,8 @@ func _physics_process(dt: float) -> void:
 	if vehicle.engine_running and run.burn_fuel(dt, vehicle.state.throttle):
 		_on_fuel_empty()
 	shuttles.step(dt)
+	threats.step(dt)
+	hud.radar.jammed = threats.radar_jammed()
 
 
 func _process(dt: float) -> void:

@@ -15,6 +15,8 @@ rem   --bench=S         бенчмарк S секунд с автопилото�
 rem   --shots=N         N скриншотов в build\shots (интервал --shot-every=S, по умолчанию 3 с)
 rem   --snapshot-at=S   отладочный снимок (как по F12) через S секунд
 rem   --debug           отладочный оверлей виден сразу (иначе — по F3)
+rem   --no-threats      без угроз; --threat=N — уровень угрозы не ниже N
+rem   --event=K@S       угроза K (storm, quake) на S-й секунде: --event=storm@5,quake@12
 rem   --idle            без стартового экрана и автопилота: машина стоит
 rem   --shuttle-in=S    первый челнок садится через S секунд; --shuttle-dist=D — площадка на дистанции D
 rem   --fuel=N          топлива в начале забега; --press=radio@8 — нажать F на 8-й секунде
@@ -41,6 +43,8 @@ echo   --bench=S         бенчмарк S секунд с автопилото
 echo   --shots=N         N скриншотов в build\shots (интервал --shot-every=S, по умолчанию 3 с)
 echo   --snapshot-at=S   отладочный снимок (как по F12) через S секунд
 echo   --debug           отладочный оверлей виден сразу (иначе — по F3)
+echo   --no-threats      без угроз; --threat=N — уровень угрозы не ниже N
+echo   --event=K@S       угроза K (storm, quake) на S-й секунде: --event=storm@5,quake@12
 echo   --idle            без стартового экрана и автопилота: машина стоит
 echo   --shuttle-in=S    первый челнок садится через S секунд; --shuttle-dist=D — площадка на дистанции D
 echo   --fuel=N          топлива в начале забега; --press=radio@8 — нажать F на 8-й секунде

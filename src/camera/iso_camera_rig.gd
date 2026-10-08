@@ -17,6 +17,9 @@ var camera: Camera3D
 var zoom := 1.0                  ## крупность: 2 — вдвое ближе (отладка; пресеты зума — позже)
 
 var _quarter := 0
+var _shake := 0.0                ## амплитуда тряски, пикселей рендера
+var _shake_decay := 0.0          ## пикселей в секунду
+var _shake_rng := RandomNumberGenerator.new()
 var _yaw := deg_to_rad(45.0)
 var _focus := Vector3.ZERO
 var _ortho_size := 14.0
@@ -40,7 +43,19 @@ func _ready() -> void:
 	add_child(camera)
 	if target != null:
 		_focus = target.global_position
+	EventBus.camera_shake_requested.connect(shake)
 	_update_camera()
+
+
+## Тряска (землетрясение, удар молнии рядом): strength 1 — смещение до 2 пикселей рендера,
+## затухает за seconds. Отключается в настройках.
+func shake(strength: float, seconds: float) -> void:
+	if not Settings.camera_shake:
+		return
+	var amp := 2.0 * strength
+	if amp > _shake:
+		_shake = amp
+		_shake_decay = amp / maxf(seconds, 0.05)
 
 
 ## Крупность камеры (экран выбора машины показывает её ближе).
@@ -66,6 +81,7 @@ func _process(dt: float) -> void:
 		EventBus.camera_rotated.emit(_quarter)
 	var yaw_target := deg_to_rad(45.0) + _quarter * PI * 0.5
 	_yaw = move_toward(_yaw, yaw_target, PI * 0.5 / TURN_TIME * dt)
+	_shake = maxf(_shake - _shake_decay * dt, 0.0)
 
 	if target != null:
 		var p := target.get_global_transform_interpolated().origin
@@ -86,4 +102,8 @@ func _update_camera() -> void:
 	var a := _focus.dot(right)
 	var b := _focus.dot(up)
 	var snapped := _focus + right * (roundf(a / pixel) * pixel - a) + up * (roundf(b / pixel) * pixel - b)
+	if _shake > 0.0:
+		# Сдвиг целыми пикселями — картинка дёргается, но не «плывёт».
+		snapped += right * roundf(_shake_rng.randf_range(-_shake, _shake)) * pixel \
+				+ up * roundf(_shake_rng.randf_range(-_shake, _shake)) * pixel
 	camera.global_transform = Transform3D(basis, snapped + dir * DISTANCE)

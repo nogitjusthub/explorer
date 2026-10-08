@@ -15,6 +15,7 @@ var pickups: PickupField
 var vehicle: Vehicle
 var camera: Camera3D
 var range_tiles := 40.0
+var jammed := false                    ## гроза над машиной: дальность вдвое меньше, метки мерцают
 
 var _blips: Array[Dictionary] = []     ## {pos: Vector2 (тайлы мира), color: Color, big: bool}
 var _pad := Vector3.INF
@@ -22,6 +23,7 @@ var _pad_landed := false
 var _refresh := 0.0
 var _time := 0.0
 var _colors: Dictionary[StringName, Color] = {}
+var _noise := RandomNumberGenerator.new()   ## мерцание помех — только картинка, не геймплей
 
 
 func _ready() -> void:
@@ -42,7 +44,9 @@ func _process(dt: float) -> void:
 	if _refresh <= 0.0 and pickups != null and vehicle != null:
 		_refresh = REFRESH_S
 		_blips.clear()
-		for p in pickups.within(vehicle.state.pos, range_tiles):
+		for p in pickups.within(vehicle.state.pos, range_tiles * (0.5 if jammed else 1.0)):
+			if jammed and _noise.randf() < 0.35:
+				continue
 			var kind: StringName = p["kind"]
 			_blips.append({"pos": p["pos"], "color": _colors.get(kind, Color.WHITE), "big": kind == &"core"})
 	queue_redraw()
@@ -62,6 +66,11 @@ func _draw() -> void:
 	var up := Vector2(-b.z.x, -b.z.z).normalized()
 	var origin := vehicle.state.pos
 	var scale := R / range_tiles
+	var reach := R * (0.5 if jammed else 1.0)
+	if jammed:
+		for _i in 10:     # помехи: случайные точки
+			var n := Vector2.from_angle(_noise.randf() * TAU) * _noise.randf() * R
+			draw_rect(Rect2((c + n).floor(), Vector2.ONE), Color(0.8, 0.9, 1.0, 0.5))
 	for blip in _blips:
 		var d: Vector2 = blip["pos"] - origin
 		var p := c + Vector2(d.dot(right), -d.dot(up)) * scale
@@ -71,12 +80,12 @@ func _draw() -> void:
 		var d := Vector2(_pad.x, _pad.z) - origin
 		var p := Vector2(d.dot(right), -d.dot(up)) * scale
 		var on := _pad_landed or fmod(_time, 0.8) < 0.55
-		if p.length() <= R - 3.0:
+		if p.length() <= reach - 3.0:
 			if on:
 				draw_rect(Rect2((c + p - Vector2(2, 2)).floor(), Vector2(5, 5)), COLOR_PAD, false, 1.0)
 		elif on:
 			var dir := p.normalized()
-			var tip := c + dir * (R - 1.0)
+			var tip := c + dir * (reach - 1.0)
 			var side := Vector2(-dir.y, dir.x)
 			draw_colored_polygon(PackedVector2Array([tip, tip - dir * 5.0 + side * 3.0, tip - dir * 5.0 - side * 3.0]),
 					COLOR_PAD)

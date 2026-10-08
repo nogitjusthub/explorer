@@ -118,6 +118,22 @@ static func step(s: VehicleState, inp: Vector2, cls: VehicleClass, q: TerrainQue
 	return r
 
 
+## Подброс по дуге к точке target (землетрясение, смерч): высота дуги apex над стартом,
+## приземление — по правилам падения: урон по разнице высот старта и посадки, вода, деревья.
+static func launch(s: VehicleState, target: Vector2, apex: float, cls: VehicleClass, q: TerrainQuery) -> void:
+	s.fall_from_tier = q.surface_tier_float(s.pos.x, s.pos.y) if cls.hovers else q.surface_tier(s.pos.x, s.pos.y)
+	var land := q.surface_tier_float(target.x, target.y) if cls.hovers else q.surface_tier(target.x, target.y)
+	var top := s.y + apex
+	var vy := sqrt(2.0 * GRAVITY * apex)
+	var t := vy / GRAVITY + sqrt(2.0 * maxf(top - Grid.tier_to_y(land), 0.0) / GRAVITY)
+	s.falling = true
+	s.launched = true
+	s.fall_vy = vy
+	s.fall_tile = Grid.tile_of_world(target.x, target.y)
+	s.vel = (target - s.pos) / maxf(t, 0.1)
+	s.uphill_tiles = 0
+
+
 ## Урон от падения со стенки высотой h ярусов (GDD §3.2).
 static func fall_damage(cls: VehicleClass, h: int) -> int:
 	if h < 2:
@@ -259,10 +275,17 @@ static func _drown_step(s: VehicleState, q: TerrainQuery, dt: float, r: StepResu
 static func _fall_step(s: VehicleState, cls: VehicleClass, q: TerrainQuery, dt: float, r: StepResult) -> void:
 	s.fall_vy -= GRAVITY * dt
 	s.y += s.fall_vy * dt
-	# Падение строго в соседний тайл: по горизонтали машина остаётся в его пределах.
 	var p := s.pos + s.vel * dt
-	p.x = clampf(p.x, s.fall_tile.x + 0.05, s.fall_tile.x + 0.95)
-	p.y = clampf(p.y, s.fall_tile.y + 0.05, s.fall_tile.y + 0.95)
+	if s.launched:
+		# Подброс: летит по дуге, садится там, где встретит поверхность.
+		s.fall_tile = Grid.tile_of_world(p.x, p.y)
+		if not q.is_loaded(s.fall_tile.x, s.fall_tile.y):
+			p = s.pos
+			s.fall_tile = Grid.tile_of_world(p.x, p.y)
+	else:
+		# Падение строго в соседний тайл: по горизонтали машина остаётся в его пределах.
+		p.x = clampf(p.x, s.fall_tile.x + 0.05, s.fall_tile.x + 0.95)
+		p.y = clampf(p.y, s.fall_tile.y + 0.05, s.fall_tile.y + 0.95)
 	s.pos = p
 	var ground := ground_y(s, cls, q)
 	# Падение в глубокую воду: удар смягчает вода, но машина тонет.
@@ -271,6 +294,7 @@ static func _fall_step(s: VehicleState, cls: VehicleClass, q: TerrainQuery, dt: 
 		if w != TerrainQuery.NO_WATER and s.y <= w * Grid.TIER_H \
 				and w - ground / Grid.TIER_H > cls.max_water_depth + DEEP_MARGIN:
 			s.falling = false
+			s.launched = false
 			s.tile = s.fall_tile
 			r.landed = true
 			_start_drowning(s, w * Grid.TIER_H - 0.1)
@@ -279,6 +303,9 @@ static func _fall_step(s: VehicleState, cls: VehicleClass, q: TerrainQuery, dt: 
 		return
 	s.y = ground
 	s.falling = false
+	if s.launched:
+		s.launched = false
+		s.vel *= 0.3
 	s.tile = s.fall_tile
 	s.uphill_tiles = 0
 	r.landed = true

@@ -20,7 +20,9 @@ extends Node
 ##   --shuttle-dist=D  площадка челнока на дистанции D тайлов (0 — ближайшая, обычно площадка старта);
 ##   --fuel=N          топлива в начале забега N единиц;
 ##   --press=A@S,...   нажать действие A на S-й секунде (radio@8,move_right@9 — сценарии без рук);
-##   --select          показать экран выбора машины и при --idle/--shots (снимки экрана выбора).
+##   --select          показать экран выбора машины и при --idle/--shots (снимки экрана выбора);
+##   --no-threats      без угроз; --threat=N — уровень угрозы не ниже N;
+##   --event=K@S,...   угроза K (storm, quake) на S-й секунде забега.
 ## В веб-сборке те же параметры берутся из адреса страницы: ?seed=7&bench=30. Результаты бенчмарка
 ## и снимки уходят POST-запросами на /log и /shot (tools/scripts/web_server.py).
 
@@ -36,6 +38,7 @@ var toast: Toast
 var deaths := 0
 var pickups_collected := 0
 var run: RunState                  ## текущий забег (у автопилота после гибели начинается новый)
+var threats: ThreatDirector
 
 var _bench_time := -1.0
 var _shots_left := 0
@@ -90,6 +93,16 @@ func tweak_rules(rules: BalanceRules) -> BalanceRules:
 	r.shuttle_interval_base = float(args.get("shuttle-in", r.shuttle_interval_base))
 	r.shuttle_dist_base = float(args.get("shuttle-dist", r.shuttle_dist_base))
 	return r
+
+
+## Принудительные события из --event=storm@5,quake@12.
+func forced_events() -> Array[Dictionary]:
+	var result: Array[Dictionary] = []
+	for item in String(args.get("event", "")).split(",", false):
+		var parts := item.split("@")
+		if parts.size() == 2:
+			result.append({"kind": StringName(parts[0]), "at": float(parts[1])})
+	return result
 
 
 func tweak_run(run_state: RunState) -> void:
@@ -205,6 +218,9 @@ func _print_bench() -> void:
 		avg_throttle, fuel_per_min, cls.id, cls.fuel_max / fuel_per_min])
 	_report("bench: pickups collected %d; current run: hp %d, fuel %.0f, cargo %d slots / %d pts, score %d" % [
 		pickups_collected, run.hp, run.fuel, run.cargo_slots_used(), run.cargo_value(), run.score()])
+	if threats != null:
+		_report("bench: threats — level %d, storms %d, strikes %d, quakes %d" % [
+			threats.level, threats.stats["storm"], threats.stats["strikes"], threats.stats["quake"]])
 	_report("bench: render — draw calls %d, primitives %d, objects in frame %d, video memory %.0f MB" % [
 		Performance.get_monitor(Performance.RENDER_TOTAL_DRAW_CALLS_IN_FRAME),
 		Performance.get_monitor(Performance.RENDER_TOTAL_PRIMITIVES_IN_FRAME),

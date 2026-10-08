@@ -116,3 +116,11 @@ vis_color={
 "type": "color",
 "value": Color(0.55, 0.6, 0.7, 1)
 }
+storm_center={
+"type": "vec3",
+"value": Vector3(0, 0, 0)
+}
+storm_radius={
+"type": "float",
+"value": 0.0
+}

@@ -43,9 +43,11 @@ var _shuttle_left := 0.0
 var _em_state := &"idle"
 var _em_left := 0.0
 var _em_penalty := 0
+var _flash := 0.0
 var _canvas: Control
 var _font: Font
 var radar: Radar
+var pager: Pager
 
 
 func _ready() -> void:
@@ -65,6 +67,15 @@ func _ready() -> void:
 	radar.offset_top = 4.0
 	radar.offset_bottom = 4.0 + 2.0 * Radar.R
 	_canvas.add_child(radar)
+	pager = Pager.new()
+	pager.anchor_left = 1.0
+	pager.anchor_right = 1.0
+	pager.offset_left = -160.0
+	pager.offset_right = -5.0
+	pager.offset_top = 8.0 + 2.0 * Radar.R
+	pager.offset_bottom = 8.0 + 2.0 * Radar.R + 34.0
+	_canvas.add_child(pager)
+	EventBus.screen_flash_requested.connect(func(strength: float) -> void: _flash = maxf(_flash, strength))
 	EventBus.shuttle_state_changed.connect(_on_shuttle_state)
 	EventBus.emergency_state_changed.connect(_on_emergency_state)
 	EventBus.hp_changed.connect(_on_hp_changed)
@@ -140,6 +151,7 @@ func _on_damaged(amount: int, _source: StringName, _at: Vector3) -> void:
 func _process(dt: float) -> void:
 	_time += dt
 	_damage_flash = maxf(_damage_flash - dt, 0.0)
+	_flash = maxf(_flash - dt * 5.0, 0.0)
 	_banner_t = maxf(_banner_t - dt, 0.0)
 	for p in _popups:
 		p["t"] -= dt
@@ -151,6 +163,8 @@ func _process(dt: float) -> void:
 
 func _draw_hud() -> void:
 	var size := _canvas.size
+	if _flash > 0.0:
+		_canvas.draw_rect(Rect2(Vector2.ZERO, size), Color(0.9, 0.95, 1.0, _flash * 0.45))
 	if _damage_flash > 0.0:
 		var a := _damage_flash / 0.35 * 0.5
 		var c := Color(COLOR_DAMAGE, a)

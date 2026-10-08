@@ -115,6 +115,12 @@ func preload_around(pos: Vector2) -> void:
 			break
 
 
+## После разлома: проверить ямы без выхода вокруг центра загрузки и залить их.
+func request_pit_fill() -> void:
+	_pits_needed = true
+	_pit_passes = 0
+
+
 func loaded_count() -> int:
 	return _entries.size()
 

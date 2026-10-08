@@ -274,3 +274,22 @@ func test_reverse_input_turns_instead_of_reversing() -> void:
 	assert_true(s.vel.x > 0.0, "still moving forward on the first frame of a U-turn")
 	_drive(s, Vector2.LEFT, rover, f, 150)
 	assert_true(s.vel.x < -(rover.max_speed - 1.0), "after the turn drives the new way, vx=%.2f" % s.vel.x)
+
+
+func test_launch_arc_lands_by_fall_rules() -> void:
+	var f := TerrainFixture.new(6)
+	f.set_block(14, 0, 30, 30, 4)     # к востоку от x = 14 — на 2 яруса ниже
+	var rover := _rover()
+	var s := _state(f, rover, Vector2(12.5, 10.5), 0.0)
+	VehicleKinematics.launch(s, Vector2(15.5, 10.5), 1.0, rover, f.query)
+	var landed: VehicleKinematics.StepResult = null
+	for _i in 180:
+		var r := VehicleKinematics.step(s, Vector2.ZERO, rover, f.query, DT)
+		if r.landed:
+			landed = r
+			break
+	assert_true(landed != null, "landed")
+	assert_eq(s.tile, Vector2i(15, 10), "landed at the target tile")
+	assert_eq(landed.fell_tiers, 2)
+	assert_eq(landed.fall_damage, 20, "fall damage by height difference")
+	assert_false(s.launched)

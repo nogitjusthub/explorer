@@ -16,6 +16,6 @@ void vertex() {
 void fragment() {
 	vec3 albedo = base_color.rgb * COLOR.rgb;
 	float hidden = vis_hidden(world_pos);
-	ALBEDO = albedo * (1.0 - hidden);
+	ALBEDO = albedo * (1.0 - hidden) * (1.0 - storm_shade(world_pos));
 	EMISSION = albedo * glow * (1.0 - hidden) + vis_color.rgb * hidden;
 }

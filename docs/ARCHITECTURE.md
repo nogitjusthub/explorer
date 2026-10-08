@@ -36,7 +36,7 @@ explorer/
 │  │                            chunk_mesher  world_streamer  chunk_node  tree_field  (deformation — M3)
 │  ├─ vehicle/                  vehicle  vehicle_models  vehicle_state  vehicle_kinematics  vehicle_input
 │  ├─ camera/                   iso_camera_rig(.tscn)
-│  ├─ hazards/                  weather_director  storm_front  tornado  quake  fog  dust_storm
+│  ├─ hazards/                  threat_director  storm_front  quake  (tornado  fog  dust_storm — M3b)
 │  ├─ fauna/                    fauna_director  worm  hopper  shellback  nest  grid_astar
 │  ├─ pickups/                  pickup_generator  pickup_field
 │  ├─ shuttle/                  shuttle_scheduler  emergency_call  shuttle_craft  shuttle_controller
@@ -49,7 +49,6 @@ explorer/
 ├─ data/                        ресурсы баланса (.tres)
 │  ├─ balance_rules.gd  balance.tres  terrain_params.gd  terrain_params.tres
 │  ├─ vehicles/                 vehicle_class.gd  rover.tres  tank.tres  hover.tres
-│  ├─ threats/                  threat_config.gd  lightning  tornado  quake  fog  dust (.tres)
 │  └─ pickups/                  pickup_kind.gd  crystal  sample  core  repair  canister (.tres)
 ├─ assets/                      models/  textures/  sfx/  fonts/
 └─ tests/                       run_tests.gd  test_case.gd  terrain_fixture.gd  unit/test_*.gd
@@ -80,7 +79,7 @@ explorer/
 | `DiffStore` | Изменения поверх процедурной базы: тайлы и собранные находки |
 | `TerrainData` | Реестр загруженных чанков; применение diff при загрузке; запись правок во все чанки-владельцы; dirty-секции |
 | `TerrainQuery` | Высота, нормаль, стенка, вода, материал в точке и на ребре |
-| `Deformation` | Воронка, борозда, разлом → операции над углами + relax → список изменённых тайлов |
+| `Deformation` | Воронка, борозда, разлом по углам тайлов загруженных чанков: общие вершины двигаются вместе, релаксация до Δ ≤ 1 (опускает высокие или поднимает низкие углы, неподвижные вершины площадок не трогает); у разлома — стенка вдоль линии и пандусы каждые 5 тайлов; вода затапливает опустившееся и уходит с поднятого; запись через `TerrainData.write_tile` |
 | `ChunkMesher` | Секция чанка → массивы для `ArrayMesh` (верх, стенки, вода) |
 | `TreeField` | Буфер `MultiMesh` деревьев чанка, занятость тайлов |
 | `VehicleKinematics` | Один шаг движения по сетке над `VehicleState`; занос (`drift`), машина на подушке считает рёбра по зеркалу воды (`TerrainQuery.edge_rise_float_at`) |
@@ -103,7 +102,9 @@ explorer/
 | `VehicleInput` | Действия ввода → вектор направления относительно экрана |
 | `IsoCameraRig` | Ортокамера, поворот 90°, упреждение, тряска |
 | `GameFlow` (`main.gd`) | Машина состояний: Старт → Десант → Вылазка → Итог; владеет `RunState` |
-| `WeatherDirector` и угрозы | Цикл погоды, грозовой фронт, смерчи, разломы, телеграфы для пейджера |
+| `ThreatDirector` | Уровень угрозы T, цикл погоды «ясно → событие → ясно», таймер землетрясений с T ≥ 3, затишье после сдачи; угрозы — дочерние узлы, урон машине — сигналом `damaged` |
+| `StormFront` | Грозовой фронт: тень облаков (глобальные `storm_center` / `storm_radius`), удары с весом по высоте, телеграф-круг, урон, воронка, деревья, кристаллы, помехи радара |
+| `Quake` | Землетрясение: телеграф (тряска, трещина, пыль, пейджер), разлом рядом с машиной вдали от площадок, подброс машины (`VehicleKinematics.launch`), заливка ям |
 | `FaunaDirector` и виды | Появление по биому и шуму, поведение, A* |
 | `PickupField` | Находки загруженных чанков (по сигналам `chunk_built` / `chunk_removed` стримера), `MultiMesh` на вид, подбор, выпавшее из трюма, канистры по D(t) с запоминанием решения на чанк, запросы радара |
 | `ShuttleController` | Связывает `ShuttleScheduler` и `EmergencyCall` с машиной, `RunState`, HUD: меню при остановке в зоне, радио (F, с подтверждением), 10 с на решение при пустом баке, обмен с аварийным |
@@ -112,8 +113,8 @@ explorer/
 | `Radar` | Часть HUD: находки и площадка (или стрелка на неё), ориентирован по экрану |
 | `DevTools` | Параметры запуска, бенчмарк, снимки, сценарии без рук (`--idle`, `--press`) |
 | `Visibility` | Глобальные uniform видимости, логическое скрытие объектов |
-| `AudioDirector` | Четыре группы звуков по событиям |
-| `HUD` | Отображение; подписан на `EventBus`, логики не содержит |
+| `AudioDirector`, `Sfx` | Процедурные звуки событий (треск телеграфа молнии, гром, удар по корпусу), громкость по расстоянию |
+| `HUD` | Отображение; подписан на `EventBus`, логики не содержит. Внутри — `Radar` и `Pager` (угрозы: тип, стрелка по экрану, секунды до события), вспышка экрана от молнии |
 
 ### 3.3 Autoload-синглтоны
 
@@ -308,7 +309,7 @@ class_name VehicleClass extends Resource
 
 | Ресурс | Ключевые поля |
 |---|---|
-| `BalanceRules` (`balance.tres`) | `drop_invuln_s = 3`; `radar_range = 40`; челнок: `shuttle_interval_base = 90`, `_step = 30`, `_max = 180`, `shuttle_dist_base = 25`, `_step = 15`, `_max = 70`, `shuttle_window_s = 20`, `shuttle_zone_r = 2`, `shuttle_stop_speed = 0.5`; аварийный: `emergency_delay_s = 10`, `emergency_fuel_frac = 0.3`, `emergency_cargo_mult = 0.5`, `emergency_penalty_base = 500`; `empty_tank_decision_s = 10`; бонус: `bonus_hp_mult = 3`, `bonus_fuel_mult = 2`; канистры: `canister_d0`, `canister_floor = 0.3`, `canister_fade_s = 600`; `calm_after_ship_s = 20`; кривая угрозы: `threat_time_step_s = 90`, `threat_dist_step = 500`, `threat_max = 6` |
+| `BalanceRules` (`balance.tres`) | `drop_invuln_s = 3`; `radar_range = 40`; челнок: `shuttle_interval_base = 90`, `_step = 30`, `_max = 180`, `shuttle_dist_base = 25`, `_step = 15`, `_max = 70`, `shuttle_window_s = 20`, `shuttle_zone_r = 2`, `shuttle_stop_speed = 0.5`; аварийный: `emergency_delay_s = 10`, `emergency_fuel_frac = 0.3`, `emergency_cargo_mult = 0.5`, `emergency_penalty_base = 500`; `empty_tank_decision_s = 10`; бонус: `bonus_hp_mult = 3`, `bonus_fuel_mult = 2`; канистры: `canister_d0`, `canister_floor = 0.3`, `canister_fade_s = 600`; `calm_after_ship_s = 20`; кривая угрозы: `threat_time_step_s = 90`, `threat_dist_step = 500`, `threat_max = 6`; погода: `first_event_s`, `clear_t1_s`, `clear_t6_s`; землетрясения: `quake_min_level = 3`, `quake_interval_t3_s`, `quake_interval_t4_s`; гроза (`storm_*`, `strike_*`) и разлом (`fault_*`, `quake_toss_*`) — группы Storm и Quake |
 | `ThreatConfig` (на угрозу) | `kind`, `telegraph_s`, `damage_center`, `damage_edge`, `radius`, `duration_min/max`, `speed`, `crater_depth`, `visibility_radius`, `wind_accel`, `pull_accel`, `min_threat_level`, `biome_weights`, звуки |
 | `PickupKind` | `kind`, `slots`, `value`, `hp_restore`, `fuel_restore_min/max` (доля бака), `rarity`, `placement_rule` |
 | `TerrainParams` | частоты и октавы fBm, порог ridge, амплитуда domain warp, `ledge_keep_p_plateau = 0.3`, `ledge_keep_p_plain = 0.1`, `water_noise_freq`, `tree_radius`, `pad_clear_r = 3`, `pad_size = 5` |
@@ -425,6 +426,7 @@ $g = ".\tools\godot\Godot_v4.7.2-stable_win64_console.exe"
 | Старт в точке / прямой курс | `play.cmd --seed=N --spawn=X,Z [--course=D --autopilot]` |
 | Класс техники | `play.cmd --vehicle=tank` (rover, tank, hover); снимок экрана выбора — `-- --idle --select --shots=1` |
 | Снимки экрана | `… --path . -- --seed=7 --shots=4 --shot-every=3` → `build/shots/` |
+| Угрозы | `-- --no-threats`, `--threat=N` (уровень не ниже N), `--event=storm@5,quake@12` (событие на заданной секунде; разлом не ложится у площадки старта — для проверки `--spawn=100,60`). В отчёте бенчмарка — число гроз, ударов и землетрясений |
 | Сценарий без рук | `… -- --seed=7 --idle --shuttle-in=6 --shuttle-dist=0 --shots=2 --press=radio@8`: машина стоит на площадке старта, челнок садится через 6 с, F на 8-й секунде. Ещё: `--fuel=N` (мало топлива — проверка пустого бака), `--debug` (оверлей сразу) |
 | Карта рельефа в PNG | `… --headless --path . --script res://src/debug/map_preview.gd -- --seed=1 --chunks=8` → `build/preview/` |
 | Веб-сборка | `powershell -ExecutionPolicy Bypass -File tools\scripts\export_web.ps1 [-Debug] [-Serve]` → `build/web/` |

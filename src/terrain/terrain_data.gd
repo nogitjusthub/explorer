@@ -43,6 +43,16 @@ func write_tile(tx: int, tz: int, record: PackedByteArray, mesh_dirty: bool, tre
 				data.dirty_sections |= DIRTY_TREES
 
 
+## Помечает части для пересборки (биты ChunkData.dirty_sections) во всех окнах, где есть тайл.
+func mark_dirty(tx: int, tz: int, bits: int) -> void:
+	var owner := Grid.chunk_of_tile(tx, tz)
+	for dz in range(-1, 2):
+		for dx in range(-1, 2):
+			var data: ChunkData = chunks.get(owner + Vector2i(dx, dz))
+			if data != null and data.contains_tile(tx, tz):
+				data.dirty_sections |= bits
+
+
 ## Секции меша (биты 0–3), которые рисуют тайл или стенки рядом с ним.
 static func _sections_touching(data: ChunkData, tx: int, tz: int) -> int:
 	var origin := Grid.chunk_origin(data.coord)

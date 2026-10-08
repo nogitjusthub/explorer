@@ -31,5 +31,5 @@ void vertex() {
 void fragment() {
 	vec3 c = base_color.rgb * shade * (0.85 + 0.3 * glow);
 	c = mix(c, vec3(1.0), flash * 0.7);
-	ALBEDO = mix(c, vis_color.rgb, vis_hidden(world_pos));
+	ALBEDO = mix(c * (1.0 - 0.5 * storm_shade(world_pos)), vis_color.rgb, vis_hidden(world_pos));
 }

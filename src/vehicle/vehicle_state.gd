@@ -14,6 +14,7 @@ var falling := false
 var fall_vy := 0.0
 var fall_from_tier := 0.0
 var fall_tile := Vector2i.ZERO
+var launched := false            ## подброшена по дуге (землетрясение, смерч): летит без привязки к тайлу
 
 var drowning := false            ## машина в воде глубже допустимой — тонет, управления нет
 var drown_time := 0.0

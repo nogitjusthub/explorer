@@ -36,6 +36,42 @@ extends Resource
 @export var shuttle_zone_r: float = 2.0
 @export var shuttle_stop_speed: float = 0.5     ## тайл/с: машина «остановилась» в зоне
 
+@export_group("Threats")
+## Уровень угрозы T = min(threat_max; 1 + floor(t / time_step) + floor(путь / dist_step)) (GDD §7.1).
+@export var threat_time_step_s: float = 90.0
+@export var threat_dist_step: float = 500.0
+@export var threat_max: int = 6
+@export var calm_after_ship_s: float = 20.0      ## после сдачи основному челноку новые угрозы не начинаются
+@export var first_event_s: float = 35.0          ## ясная погода в начале забега
+@export var clear_t1_s: float = 45.0             ## пауза между погодными событиями при T = 1…
+@export var clear_t6_s: float = 15.0             ## …и при T = 6 (линейно между ними, ±30%)
+@export var quake_min_level: int = 3
+@export var quake_interval_t3_s: float = 80.0    ## при T = 3 землетрясения редко…
+@export var quake_interval_t4_s: float = 45.0    ## …с T = 4 регулярно
+
+@export_group("Storm")
+@export var storm_radius: float = 10.0           ## тень облаков диаметром 20 тайлов
+@export var storm_speed: float = 1.7
+@export var storm_spawn_dist: float = 26.0       ## фронт появляется на таком расстоянии и идёт через машину
+@export var strike_interval_s: float = 2.5
+@export var strike_near_frac: float = 0.35       ## доля ударов рядом с машиной (если она под фронтом)
+@export var strike_near_r: float = 4.0
+@export var strike_telegraph_s: float = 1.2
+@export var strike_radius: float = 1.5
+@export var strike_core_r: float = 0.6           ## ближе — урон «в центре»
+@export var strike_damage_center: int = 25
+@export var strike_damage_edge: int = 10
+@export var strike_crater_depth: int = 1
+
+@export_group("Quake")
+@export var quake_telegraph_s: float = 2.5
+@export var fault_length: int = 20
+@export var fault_up_max: int = 3                ## одна сторона поднимается на 1…up_max
+@export var fault_down_max: int = 2              ## другая опускается на 0…down_max
+@export var fault_pad_clearance: float = 6.0
+@export var quake_toss_dist: float = 3.0
+@export var quake_toss_damage: int = 10
+
 @export_group("Emergency")
 @export var emergency_delay_s: float = 10.0
 @export var emergency_fuel_frac: float = 0.3
