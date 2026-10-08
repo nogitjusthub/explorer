@@ -8,6 +8,7 @@ var zoom_preset: int = 1
 var master_volume: float = 1.0
 var player_name: String = "AAA"        ## последнее введённое имя для таблицы рекордов
 var vehicle_id: String = "rover"       ## последний выбранный класс техники
+var quick_restart := false             ## «Заново» на экране итога: следующий забег без экрана выбора (не сохраняется)
 
 
 func _ready() -> void:

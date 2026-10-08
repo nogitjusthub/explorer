@@ -24,6 +24,10 @@ var engine: EngineSound
 var _tilt := Basis.IDENTITY
 var _model: VehicleModels.Model
 var _time := 0.0
+var _lift_t := -1.0
+var _lift_from := 0.0
+var _lift_to := 0.0
+var _lift_s := 1.0
 
 
 func _init(vehicle_class: VehicleClass, terrain_query: TerrainQuery) -> void:
@@ -74,7 +78,27 @@ func place(pos: Vector2, heading: float = 0.0) -> void:
 	reset_physics_interpolation()
 
 
+## Эвакуация: машину плавно втягивает вверх (в челнок), потом она скрывается.
+func lift(to_y: float, seconds: float) -> void:
+	_lift_t = 0.0
+	_lift_from = state.y
+	_lift_to = to_y
+	_lift_s = seconds
+	control_enabled = false
+
+
 func _physics_process(dt: float) -> void:
+	if _lift_t >= 0.0:
+		_lift_t += dt
+		var k := minf(_lift_t / _lift_s, 1.0)
+		state.y = lerpf(_lift_from, _lift_to, k * k * (3.0 - 2.0 * k))
+		_model.root.rotation.y += dt * 2.5 * k
+		_apply_transform()
+		if k >= 1.0:
+			visible = false
+			engine.stop()
+			_lift_t = -1.0
+		return
 	var inp := Vector2.ZERO
 	if control_enabled and engine_running and not wrecked:
 		inp = autopilot.direction(state, dt) if autopilot != null else VehicleInput.world_direction(camera)

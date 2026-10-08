@@ -30,7 +30,7 @@ explorer/
 │  └─ scripts/                  get_godot  get_templates  test  export_web (.ps1), web_server.py
 ├─ src/                         код и сцены, сгруппированы по фичам
 │  ├─ core/                     event_bus  balance  settings  job  job_scheduler  grid  det_rng
-│  ├─ main/                     main.tscn (GameFlow)  run_state  leaderboard
+│  ├─ main/                     main.tscn (GameFlow)  run_state  leaderboard  drop_pod
 │  ├─ terrain/                  chunk_data  terrain_data  terrain_rules  terrain_generator
 │  │                            terrain_query  terrain_connectivity  terrain_repair  diff_store
 │  │                            chunk_mesher  world_streamer  chunk_node  tree_field  (deformation — M3)
@@ -44,7 +44,8 @@ explorer/
 │  │                            fog_layer, fog_layer_depth, visibility.gdshaderinc, fog_layer.gdshaderinc)
 │  ├─ audio/                    engine_sound  (audio_director — M3)
 │  ├─ debug/                    dev_tools  autopilot  debug_snapshot  map_render  map_preview
-│  └─ ui/                       debug_overlay  start_screen  toast  weather_overlay  hud/ (hud, radar, pager)
+│  └─ ui/                       debug_overlay  toast  weather_overlay  pause_overlay  ui_kit  vehicle_portrait
+│                               hud/ (hud, radar, pager)  screens/ (hangar, help, shuttle_menu, results)
 │                               screens/ (results_screen, shuttle_menu)
 ├─ data/                        ресурсы баланса (.tres)
 │  ├─ balance_rules.gd  balance.tres  terrain_params.gd  terrain_params.tres
@@ -102,9 +103,16 @@ explorer/
 | `VehicleModels` | Модели трёх классов из примитивов по `design_references/`; материалы для силуэта (stencil), вращающиеся части |
 | `VehicleInput` | Действия ввода → вектор направления относительно экрана |
 | `IsoCameraRig` | Ортокамера, поворот 90°, упреждение, тряска |
-| `GameFlow` (`main.gd`) | Машина состояний: Старт → Десант → Вылазка → Итог; владеет `RunState` |
+| `GameFlow` (`main.gd`) | Машина состояний: Старт → Десант → Вылазка → Итог; владеет `RunState`. Точка высадки — `_landing_point` рядом с площадкой старта (детерминированно по seed); `RunState.tick` и угрозы идут только в фазе вылазки |
+| `DropPod` | Сцена десанта: тень и маркер на земле, капсула с огненным следом падает 2,2 с (`landed` — воронку, тряску и испуг фауны делает `GameFlow`), раскрывается лепестками (`opened` — старт вылазки) |
+| `PauseOverlay` | Пауза по Esc: `get_tree().paused`, затемнение и надпись; включена только во время вылазки. `DevTools` работает и на паузе (`PROCESS_MODE_ALWAYS`) |
+| `HangarScreen` | Экран выбора — трюм челнока в своём мире (`SubViewport`, `own_world_3d`): комната, люки, три модели (`VehicleModels.build_plain` — без x-ray), прожектор (`SpotLight3D` + видимый конус) над выбранной, характеристики значками; старт — машина уходит в люк, затемнение, `started` |
+| `HelpScreen` | Справка F1 (`PROCESS_MODE_ALWAYS`): цель, угрозы, управление; во время вылазки ставит паузу. Статический `is_open` — пока справка открыта, другие экраны ввод не берут |
+| `UiKit` | Кнопки с хоткеем (мышь и тап), текст с тенью, значки и шкала характеристик `stat_*` класса |
+| `VehiclePortrait` | Маленький вращающийся портрет модели класса в своём мире (экран итога) |
+| `ResultsScreen` | Итог, ввод имени (клавиши и тап), рекорды; кнопки «Заново [R]» (`Settings.quick_restart` — после перезагрузки сцены сразу десант) и «Выход [Esc]» (в трюм) |
 | `ThreatDirector` | Уровень угрозы T, цикл непогоды «ясно → гроза или плохая видимость → ясно» (жребий вида — `murk_variant`), таймеры землетрясений и смерчей с T ≥ 3, затишье после сдачи; угрозы — дочерние узлы, урон машине — сигналом `damaged` |
-| `StormFront` | Грозовой фронт: тень туч (глобальные `storm_center` / `storm_radius` / `storm_dark`), слои туч и зарницы, удары с весом по высоте, телеграф-круг, ветвистые молнии со вспышкой света и искрами, урон, воронка, деревья, кристаллы, помехи радара; `weather_changed` — затемнение света и дождь |
+| `StormFront` | Грозовой фронт: тень туч (глобальные `storm_center` / `storm_radius` / `storm_dark`), слои туч и зарницы, удары с весом по высоте, телеграф — «огни святого Эльма» (`st_elmo.gdshader`), ветвистые молнии со вспышкой света и искрами, урон, воронка, деревья, кристаллы, помехи радара; `weather_changed` — затемнение света и дождь |
 | `WeatherFront` | Плохая видимость — масса (центр, радиус, рваный край), ползёт через машину. Вид — жребий: туман, кислотный туман (уровень газа по низинам, урон ниже него), пылевая буря (ветер в `ext_accel`, шанс смерча). Ставит глобальные `weather_*` и `vis_color`, шлёт `weather_changed` (свет, частицы) и сообщение пейджеру без стрелки |
 | `MurkLayers` | Объём непогоды: слои облачного шума (`fog_layer*.gdshader`) на разной высоте; плотность и край — из глобальных параметров погоды или грозы; дыра у машины сдвинута на высоту слоя, чтобы на экране совпасть с машиной; зарницы — подсветка слоёв |
 | `WeatherOverlay` | Частицы на весь экран (CanvasLayer под HUD): косой дождь под грозой, пыль по ветру в буре |
@@ -436,8 +444,8 @@ $g = ".\tools\godot\Godot_v4.7.2-stable_win64_console.exe"
 | Старт в точке / прямой курс | `play.cmd --seed=N --spawn=X,Z [--course=D --autopilot]` |
 | Класс техники | `play.cmd --vehicle=tank` (rover, tank, hover); снимок экрана выбора — `-- --idle --select --shots=1` |
 | Снимки экрана | `… --path . -- --seed=7 --shots=4 --shot-every=3` → `build/shots/` |
-| Угрозы | `-- --no-threats`, `--threat=N` (уровень не ниже N), `--event=storm@5,quake@12` (storm, quake, fog, acid, dust, tornado — событие на заданной секунде; разлом не ложится у площадки старта — для проверки `--spawn=100,60`). В отчёте бенчмарка — счётчики угроз; `--log-slow` печатает кадры дольше 20 мс со временем (первый запуск после правки шейдеров даёт пики компиляции — со второго их нет, Godot кэширует) |
-| Сценарий без рук | `… -- --seed=7 --idle --shuttle-in=6 --shuttle-dist=0 --shots=2 --press=radio@8`: машина стоит на площадке старта, челнок садится через 6 с, F на 8-й секунде. Ещё: `--fuel=N` (мало топлива — проверка пустого бака), `--debug` (оверлей сразу) |
+| Угрозы | `-- --no-threats`, `--no-fauna`, `--threat=N` (уровень не ниже N), `--event=storm@5,quake@12` (storm, quake, fog, acid, dust, tornado, hoppers, worm, shellback — событие на заданной секунде; разлом не ложится у площадки старта — для проверки `--spawn=100,60`). В отчёте бенчмарка — счётчики угроз; `--log-slow` печатает кадры дольше 20 мс со временем (первый запуск после правки шейдеров даёт пики компиляции — со второго их нет, Godot кэширует) |
+| Сценарий без рук | `… -- --seed=7 --idle --shuttle-in=6 --shuttle-dist=0 --shots=2 --press=radio@8`: машина стоит на площадке старта, челнок садится через 6 с, F на 8-й секунде (меню открыто — подтверждает эвакуацию). Без стартового экрана (`--idle`, автопилот, бенчмарк) и с `--no-drop` сцены десанта нет — машина сразу на площадке старта; десант с экраном выбора: `--idle --select --press=radio@0.6 --shots=16 --shot-every=0.25`. Пауза: `--press=pause@3,pause@5`. Ещё: `--fuel=N` (мало топлива — проверка пустого бака), `--debug` (оверлей сразу) |
 | Карта рельефа в PNG | `… --headless --path . --script res://src/debug/map_preview.gd -- --seed=1 --chunks=8` → `build/preview/` |
 | Веб-сборка | `powershell -ExecutionPolicy Bypass -File tools\scripts\export_web.ps1 [-Debug] [-Serve]` → `build/web/` |
 | Веб-сервер с приёмом отчётов | `python tools/scripts/web_server.py 8000`; страница `http://127.0.0.1:8000/?seed=7&bench=40&shots=2` пишет результаты в `build/web_log.txt` и снимки в `build/web_shots/` |

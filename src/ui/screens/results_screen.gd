@@ -1,14 +1,19 @@
 class_name ResultsScreen
 extends CanvasLayer
 ## Экран итога (GDD §6): причина конца, разбор счёта, ввод имени при попадании в топ-10 класса
-## (3 знака, аркадный выбор: W/S — знак, A/D — позиция, F/Enter — готово), затем таблица рекордов.
+## (3 знака, аркадный выбор: W/S — знак, A/D — позиция, F/Enter — готово; на телефоне — тап по
+## стрелкам над и под буквой и кнопка «Готово»), затем таблица рекордов и две кнопки с хоткеями:
+## «Заново» (R) — сразу новый забег на той же машине, «Выход» (Esc) — в трюм челнока к выбору машины.
+## Класс машины показан портретом — названий классов игроку не показываем.
 
 signal restart_requested
+signal exit_requested
 
 const LETTERS := "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-"
+const LETTERS_Y := 166.0
 const INPUT_DELAY_S := 0.8             ## нажатия в первые доли секунды игнорируются (палец ещё на газе)
 const CAUSE_TEXT := {
-	"evacuated": "ЭВАКУАЦИЯ",
+	"evacuated": "ВОЗВРАЩЕНИЕ НА ОРБИТУ",
 	"drowned": "МАШИНА УТОНУЛА",
 	"fall": "РАЗБИТА ПРИ ПАДЕНИИ",
 	"tree": "РАЗБИТА О ДЕРЕВЬЯ",
@@ -39,6 +44,9 @@ var _cursor := 0
 var _age := 0.0
 var _canvas: Control
 var _font: Font
+var _done: Button
+var _restart: Button
+var _exit: Button
 
 
 func _init(run_result: Dictionary, leaderboard: Leaderboard) -> void:
@@ -60,9 +68,16 @@ func _ready() -> void:
 	_canvas.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_canvas.draw.connect(_draw_screen)
 	add_child(_canvas)
+	var portrait := VehiclePortrait.new(StringName(result["class"]))
+	portrait.position = Vector2(34, 46)
+	add_child(portrait)
+	_done = _button("ГОТОВО", "Enter", _save_entry, Vector2(240, 214), true)
+	_restart = _button("ЗАНОВО", "R", restart_requested.emit, Vector2(232, 296), false, true)
+	_exit = _button("ВЫХОД", "Esc", exit_requested.emit, Vector2(248, 296), false)
 	var score := int(result["score"])
 	_rank = board.rank_for(StringName(result["class"]), score) if score > 0 else -1
 	_entering = _rank >= 0
+	_update_buttons()
 	var last := Settings.player_name.to_upper()
 	for i in 3:
 		var idx := LETTERS.find(last[i]) if i < last.length() else 0
@@ -74,9 +89,50 @@ func _process(dt: float) -> void:
 	_canvas.queue_redraw()
 
 
+## Кнопка с хоткеем: центр по x (center) или край — правый (from_right) или левый — в точке at.
+func _button(text: String, hotkey: String, action: Callable, at: Vector2, center: bool,
+		from_right: bool = false) -> Button:
+	var b := UiKit.button(text, hotkey)
+	b.pressed.connect(_on_button.bind(action))
+	add_child(b)
+	b.reset_size()
+	var x := at.x - b.size.x * 0.5 if center else (at.x - b.size.x if from_right else at.x)
+	b.position = Vector2(x, at.y - b.size.y * 0.5)
+	return b
+
+
+func _on_button(action: Callable) -> void:
+	if _age >= INPUT_DELAY_S and not HelpScreen.is_open:
+		action.call()
+
+
+func _update_buttons() -> void:
+	_done.visible = _entering
+	_restart.visible = not _entering
+	_exit.visible = not _entering
+
+
+## Стрелки над и под буквой (тап меняет знак): прямоугольники для попадания.
+func _letter_arrow(i: int, up: bool) -> Rect2:
+	var x := _canvas.size.x * 0.5 - 27.0 + i * 20.0
+	return Rect2(x, LETTERS_Y - (25.0 if up else -3.0), 14, 10)
+
+
 func _input(event: InputEvent) -> void:
-	if _age < INPUT_DELAY_S or not (event is InputEventKey or event is InputEventJoypadButton \
-			or event is InputEventJoypadMotion):
+	if _age < INPUT_DELAY_S or HelpScreen.is_open:
+		return
+	if _entering and UiKit.is_click(event):
+		var p: Vector2 = (event as InputEventMouseButton).position
+		for i in 3:
+			for up: bool in [true, false]:
+				if _letter_arrow(i, up).grow(3.0).has_point(p):
+					_cursor = i
+					_letters[i] = (_letters[i] + (1 if up else LETTERS.length() - 1)) % LETTERS.length()
+					get_viewport().set_input_as_handled()
+					return
+		return
+	if not (event is InputEventKey or event is InputEventJoypadButton or event is InputEventJoypadMotion \
+			or event is InputEventAction):
 		return
 	var confirm := event.is_action_pressed(&"radio") or event.is_action_pressed(&"ui_accept")
 	if _entering:
@@ -93,9 +149,12 @@ func _input(event: InputEvent) -> void:
 		else:
 			return
 		get_viewport().set_input_as_handled()
-	elif confirm:
+	elif event.is_action_pressed(&"restart"):
 		get_viewport().set_input_as_handled()
 		restart_requested.emit()
+	elif event.is_action_pressed(&"pause") or event.is_action_pressed(&"ui_cancel"):
+		get_viewport().set_input_as_handled()
+		exit_requested.emit()
 
 
 func _player_name() -> String:
@@ -113,6 +172,7 @@ func _save_entry() -> void:
 		"date": Time.get_date_string_from_system(),
 	})
 	_entering = false
+	_update_buttons()
 	Settings.player_name = entry_name
 	Settings.save_settings()
 
@@ -125,13 +185,11 @@ func _draw_screen() -> void:
 			COLOR_GOOD if evacuated else COLOR_BAD, HORIZONTAL_ALIGNMENT_CENTER, w)
 
 	var lines: Array[Array] = []
-	var cls := Balance.vehicle(StringName(result["class"]))
-	lines.append(["Машина", cls.display_name if cls != null else String(result["class"])])
 	lines.append(["Сдано челнокам", str(int(result["banked"]))])
 	if int(result["emergency_calls"]) > 0:
 		lines.append(["  в т. ч. аварийных вызовов", str(int(result["emergency_calls"]))])
 	if evacuated:
-		lines.append(["Бонус (HP × 3 + топливо × 2)", "+%d" % int(result["bonus"])])
+		lines.append(["Бонус (броня × 3 + топливо × 2)", "+%d" % int(result["bonus"])])
 	else:
 		lines.append(["Груз в трюме", "потерян"])
 	lines.append(["Время забега", _format_time(float(result["time"]))])
@@ -147,7 +205,7 @@ func _draw_screen() -> void:
 
 	if _entering:
 		_text(Vector2(0, y), "НОВЫЙ РЕКОРД — %d-е место" % (_rank + 1), 8, COLOR_GOOD, HORIZONTAL_ALIGNMENT_CENTER, w)
-		y += 24.0
+		y = LETTERS_Y
 		var x0 := w * 0.5 - 27.0
 		for i in 3:
 			var x := x0 + i * 20.0
@@ -155,8 +213,12 @@ func _draw_screen() -> void:
 			_text(Vector2(x, y), LETTERS[_letters[i]], 16, col, HORIZONTAL_ALIGNMENT_CENTER, 14)
 			if i == _cursor and fmod(_age, 0.6) < 0.4:
 				_canvas.draw_rect(Rect2(x + 1, y + 3, 12, 2), COLOR_MARK)
-		y += 22.0
-		_text(Vector2(0, y), "W / S — буква,  A / D — позиция,  F / Enter — готово", 8, COLOR_DIM,
+			for up: bool in [true, false]:
+				var c := _letter_arrow(i, up).get_center()
+				var s := -1.0 if up else 1.0
+				_canvas.draw_colored_polygon(PackedVector2Array([c + Vector2(-4, -2 * s), c + Vector2(4, -2 * s),
+						c + Vector2(0, 3 * s)]), COLOR_MARK if i == _cursor else COLOR_DIM)
+		_text(Vector2(0, y + 24), "W / S — буква,  A / D — позиция", 8, COLOR_DIM,
 				HORIZONTAL_ALIGNMENT_CENTER, w)
 		return
 
@@ -172,13 +234,10 @@ func _draw_screen() -> void:
 		_text(Vector2(x + 50, y), str(int(e.get("score", 0))), 8, col, HORIZONTAL_ALIGNMENT_RIGHT, 60)
 		_text(Vector2(x + 120, y), _format_time(float(e.get("time", 0.0))), 8, COLOR_DIM)
 		var saved: bool = e.get("cause", "") == String(RunState.CAUSE_EVACUATED)
-		_text(Vector2(x + 152, y), "эвакуация" if saved else "гибель", 8, COLOR_GOOD if saved else COLOR_BAD)
+		_text(Vector2(x + 152, y), "возврат" if saved else "гибель", 8, COLOR_GOOD if saved else COLOR_BAD)
 		y += 10.0
 	if list.is_empty():
 		_text(Vector2(0, y), "пока пусто", 8, COLOR_DIM, HORIZONTAL_ALIGNMENT_CENTER, w)
-	if fmod(_age, 1.0) < 0.7:
-		_text(Vector2(0, _canvas.size.y - 10), "F / Enter — новый забег", 8, COLOR_TEXT,
-				HORIZONTAL_ALIGNMENT_CENTER, w)
 
 
 static func _format_time(seconds: float) -> String:

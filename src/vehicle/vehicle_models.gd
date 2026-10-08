@@ -32,6 +32,14 @@ class Model:
 	var hover_height := 0.0                 ## модель парит над поверхностью (ховер)
 
 
+## Без силуэта сквозь препятствия (экраны вне игры: трюм, портреты) — stencil не нужен.
+static func build_plain(id: StringName) -> Model:
+	var m := build(id)
+	for mat in m.materials:
+		mat.stencil_mode = BaseMaterial3D.STENCIL_MODE_DISABLED
+	return m
+
+
 static func build(id: StringName) -> Model:
 	var m := Model.new()
 	m.root = Node3D.new()

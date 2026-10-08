@@ -39,6 +39,7 @@ func _ready() -> void:
 	EventBus.sheet_lightning.connect(func(at: Vector3) -> void: _delayed(_thunder, at, -10.0, 0.7))
 	EventBus.threat_ended.connect(_on_threat_ended)
 	EventBus.fauna_alerted.connect(_on_fauna_alerted)
+	EventBus.drop_landed.connect(_on_drop_landed)
 	EventBus.vehicle_damaged.connect(func(_amount: int, _source: StringName, _at: Vector3) -> void: _play(_hit, -4.0))
 
 
@@ -48,6 +49,12 @@ func _on_telegraphed(kind: StringName, at: Vector3, _seconds: float, _dir: Vecto
 	elif kind == &"quake" and not _quake_heard:
 		_quake_heard = true
 		_play(_rumble_build, -2.0)
+
+
+## Удар капсулы десанта — раскат.
+func _on_drop_landed(_at: Vector3) -> void:
+	_play(_rumble_hit, 4.0, 0.8)
+	_play(_thunder, -2.0, 0.6)
 
 
 ## Фауна: визг стаи скакунов, гул червя под песком и раскат его броска.

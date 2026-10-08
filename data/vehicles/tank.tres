@@ -6,7 +6,7 @@
 script = ExtResource("1_vclass")
 id = &"tank"
 display_name = "Танк"
-blurb = "Крепость: в гору без потерь, вброд до 2 ярусов, валит лес с малого хода. Медленный."
+blurb = "Крепость: в гору без потерь, глубокий брод, лес валит с малого хода. Неспешен."
 hp_max = 160
 max_speed = 4.0
 accel = 2.0
@@ -32,3 +32,7 @@ fuel_idle_per_min = 2.0
 fuel_drive_per_min = 9.0
 cargo_slots = 12
 engine_pitch = 0.7
+stat_fuel = 5
+stat_armor = 5
+stat_handling = 2
+stat_cargo = 4

@@ -49,6 +49,13 @@ func setup(at: Vector2, count: int) -> void:
 		(m["node"] as Node3D).reset_physics_interpolation()
 
 
+## Бегство (испуг): стая уходит прочь и исчезает.
+func flee() -> void:
+	state = State.RETREAT
+	aggressive = false
+	_timer = RETREAT_S
+
+
 ## Разбудить (гнездо, шумное событие): визг и погоня.
 func wake(toward: Variant = null) -> void:
 	source = toward

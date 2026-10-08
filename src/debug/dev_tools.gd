@@ -7,6 +7,7 @@ extends Node
 ##     --seed=N           задаёт мир (по умолчанию — от времени)
 ##     --vehicle=ID       машина: rover, tank, hover (по умолчанию — последняя выбранная)
 ##     --spawn=X,Z        старт в точке мира вместо площадки
+##     --no-drop          без сцены десанта: машина сразу на площадке старта
 ##     --fuel=N           топлива в начале забега, единиц
 ##   Камера и экран:
 ##     --zoom=N           камера в N раз крупнее (0.75 — мельче)
@@ -20,8 +21,9 @@ extends Node
 ##                          hoppers, worm, shellback (червь — только если рядом песок)
 ##   Сценарии без рук:
 ##     --idle             без стартового экрана и автопилота: машина стоит
-##     --select           показать экран выбора машины и при --idle или --shots
+##     --select           показать трюм с выбором машины и при --idle или --shots
 ##     --press=A@S,...    нажать действие A на S-й секунде: radio@8,move_right@9
+##     --click=X:Y@S,...  клик (тап) в точке X,Y рендера 480×320 на S-й секунде
 ##     --shuttle-in=S     первый челнок садится через S секунд
 ##     --shuttle-dist=D   площадка челнока на дистанции D (0 — площадка старта)
 ##   Автопилот, бенчмарк, снимки:
@@ -64,12 +66,15 @@ var _chunks_built := 0
 var _slow_frames := 0
 var _objects_at_start := 0
 var _presses: Array[Dictionary] = []    ## {action, at}
+var _clicks: Array[Dictionary] = []     ## {pos (пиксели рендера), at}
+var _mouse_up: Array[Vector2] = []
 var _release: Array[StringName] = []
 
 
 func _init(parsed_args: Dictionary) -> void:
 	args = parsed_args
 	name = "DevTools"
+	process_mode = Node.PROCESS_MODE_ALWAYS     # снимки, нажатия и F12 работают и на паузе
 	if args.has("bench"):
 		_bench_time = float(args["bench"])
 	if args.has("snapshot-at"):
@@ -82,6 +87,11 @@ func _init(parsed_args: Dictionary) -> void:
 		var parts := item.split("@")
 		if parts.size() == 2:
 			_presses.append({"action": StringName(parts[0]), "at": float(parts[1])})
+	for item in String(args.get("click", "")).split(",", false):
+		var parts := item.split("@")
+		var xy := parts[0].split(":")
+		if parts.size() == 2 and xy.size() == 2:
+			_clicks.append({"pos": Vector2(float(xy[0]), float(xy[1])), "at": float(parts[1])})
 
 
 ## Нужен ли автопилот (явно или ради бенчмарка и снимков; --idle — без него).
@@ -167,6 +177,14 @@ func _process(dt: float) -> void:
 		up.pressed = false
 		Input.parse_input_event(up)
 	_release.clear()
+	for pos in _mouse_up:
+		_click(pos, false)
+	_mouse_up.clear()
+	while not _clicks.is_empty() and _elapsed >= _clicks[0]["at"]:
+		var c: Dictionary = _clicks.pop_front()
+		_click(c["pos"], true)
+		_mouse_up.append(c["pos"])
+		print("click %s at %.1f s" % [c["pos"], _elapsed])
 	while not _presses.is_empty() and _elapsed >= _presses[0]["at"]:
 		var press: Dictionary = _presses.pop_front()
 		var ev := InputEventAction.new()
@@ -187,6 +205,16 @@ func _process(dt: float) -> void:
 		_bench_time = -1.0
 		_print_bench()
 		_finish()
+
+
+## Клик (или тап — касание эмулирует мышь) в точке рендера 480×320: в окне она масштабирована.
+func _click(pos: Vector2, pressed: bool) -> void:
+	var ev := InputEventMouseButton.new()
+	ev.button_index = MOUSE_BUTTON_LEFT
+	ev.pressed = pressed
+	ev.position = get_viewport().get_final_transform() * pos
+	ev.global_position = ev.position
+	Input.parse_input_event(ev)
 
 
 func _take_shot() -> void:

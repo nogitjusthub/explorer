@@ -40,6 +40,25 @@ func test_table_and_tank_times() -> void:
 	assert_true(Balance.vehicle(&"tank") != null and Balance.vehicle(&"hover") != null, "classes registered")
 
 
+func test_selection_stats_follow_balance() -> void:
+	# Значки 1–5 на экране выбора не должны врать: порядок классов — как у чисел баланса.
+	var rover := _cls(&"rover")
+	var tank := _cls(&"tank")
+	var hover := _cls(&"hover")
+	for cls: VehicleClass in [rover, tank, hover]:
+		for v in UiKit.stats_of(cls):
+			assert_true(v >= 1 and v <= UiKit.PIPS, "%s stat %d in 1..5" % [cls.id, v])
+	var minutes := func(c: VehicleClass) -> float: return c.fuel_max / VehicleKinematics.fuel_per_second(c, 1.0)
+	assert_true(tank.stat_fuel > rover.stat_fuel and rover.stat_fuel > hover.stat_fuel
+			and minutes.call(tank) > minutes.call(rover) and minutes.call(rover) > minutes.call(hover), "fuel order")
+	assert_true(tank.stat_armor > rover.stat_armor and rover.stat_armor > hover.stat_armor
+			and tank.hp_max > rover.hp_max and rover.hp_max > hover.hp_max, "armor order")
+	assert_true(hover.stat_handling > rover.stat_handling and rover.stat_handling > tank.stat_handling
+			and hover.turn_rate_deg > rover.turn_rate_deg and rover.turn_rate_deg > tank.turn_rate_deg, "handling order")
+	assert_true(tank.stat_cargo > rover.stat_cargo and rover.stat_cargo > hover.stat_cargo
+			and tank.cargo_slots > rover.cargo_slots and rover.cargo_slots > hover.cargo_slots, "cargo order")
+
+
 func test_tank_climbs_without_losing_speed() -> void:
 	var f := TerrainFixture.new(4)
 	for tz in range(0, 30):

@@ -58,6 +58,18 @@ func field(mode: FlowField.Mode) -> FlowField:
 	return _fields.get(mode)
 
 
+## Испуг (удар капсулы десанта): стаи рядом уходят, панцирники успокаиваются.
+func scare(at: Vector2, radius: float) -> void:
+	for c in _creatures:
+		if c.pos.distance_to(at) > radius:
+			continue
+		if c is HopperPack:
+			(c as HopperPack).flee()
+		elif c is Shellback:
+			(c as Shellback).state = Shellback.State.IDLE
+			c.aggressive = false
+
+
 func on_chunk_built(coord: Vector2i) -> void:
 	var o := Grid.chunk_origin(coord)
 	for t in generator.nests_in_rect(o.x, o.y, o.x + Grid.CHUNK - 1, o.y + Grid.CHUNK - 1):

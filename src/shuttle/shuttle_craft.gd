@@ -32,6 +32,8 @@ var _ring: MeshInstance3D
 var _arrows: Node3D
 var _arrow_mats: Array[StandardMaterial3D] = []
 var _ring_mat: StandardMaterial3D
+var _beam_mat: StandardMaterial3D
+var _tractor := false                  ## эвакуация: луч втягивает машину — ярче и пульсирует
 var _anim := Anim.NONE
 var _t := 0.0
 var _dur := FLY_S
@@ -83,13 +85,52 @@ func touch_down() -> void:
 	_ring.visible = kind == Kind.MAIN
 
 
+## Эвакуация: луч разгорается и втягивает машину (до взлёта).
+func tractor() -> void:
+	_tractor = true
+	_beam.visible = true
+
+
 func ascend() -> void:
+	_tractor = false
+	_beam_mat.albedo_color.a = COLOR_BEAM.a
 	_anim = Anim.ASCEND
 	_t = 0.0
 	_dur = FLY_S
 	_beam.visible = false
 	_ring.visible = false
 	_arrows.visible = false
+
+
+## Взлёт с площадки — пыль кольцом из-под челнока.
+func takeoff_dust() -> void:
+	var dust := CPUParticles3D.new()
+	dust.one_shot = true
+	dust.explosiveness = 0.8
+	dust.amount = 70
+	dust.lifetime = 1.6
+	dust.emission_shape = CPUParticles3D.EMISSION_SHAPE_RING
+	dust.emission_ring_axis = Vector3.UP
+	dust.emission_ring_radius = zone_r
+	dust.emission_ring_inner_radius = 0.5
+	dust.emission_ring_height = 0.1
+	dust.direction = Vector3.UP
+	dust.spread = 75.0
+	dust.initial_velocity_min = 1.5
+	dust.initial_velocity_max = 4.0
+	dust.gravity = Vector3(0, -3.0, 0)
+	var q := QuadMesh.new()
+	q.size = Vector2(0.22, 0.22)
+	var m := StandardMaterial3D.new()
+	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	m.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
+	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	m.albedo_color = Color(0.7, 0.58, 0.5, 0.7)
+	q.material = m
+	dust.mesh = q
+	dust.position = Vector3(0, 0.1, 0)
+	add_child(dust)
+	dust.emitting = true
 
 
 func is_flying() -> bool:
@@ -101,6 +142,8 @@ func _process(dt: float) -> void:
 		return
 	_time += dt
 	_ring_mat.albedo_color.a = 0.55 + 0.35 * sin(_time * 4.0)
+	if _tractor:
+		_beam_mat.albedo_color.a = 0.45 + 0.2 * sin(_time * 30.0)
 	if _arrows.visible:
 		_update_arrows()
 	match _anim:
@@ -156,7 +199,8 @@ func _build() -> void:
 	beam.rings = 0
 	beam.cap_top = false
 	beam.cap_bottom = false
-	_beam = _mesh(self, beam, Vector3(0, MAIN_HOVER * 0.5, 0), _unshaded(COLOR_BEAM))
+	_beam_mat = _unshaded(COLOR_BEAM)
+	_beam = _mesh(self, beam, Vector3(0, MAIN_HOVER * 0.5, 0), _beam_mat)
 	_beam.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 
 	var ring := TorusMesh.new()

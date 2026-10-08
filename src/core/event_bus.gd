@@ -45,6 +45,7 @@ signal camera_shake_requested(strength: float, seconds: float)
 
 # Жизненный цикл забега
 signal run_started(seed: int, vehicle: StringName)
+signal drop_landed(at: Vector3)            ## капсула десанта коснулась земли
 signal run_ended(result: Dictionary)
 
 @warning_ignore_restore("unused_signal")

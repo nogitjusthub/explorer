@@ -8,7 +8,8 @@ signal evacuate_requested          ## выбрано «Завершить заб
 signal refueled                    ## аварийный челнок привёз топливо
 signal tank_expired                ## пустой бак: время на решение вышло
 
-const CONFIRM_S := 3.0             ## второе нажатие F в течение этого времени подтверждает вызов
+const CONFIRM_S := 3.0
+const LIFT_S := 1.0                      ## эвакуация: машину втягивает в челнок             ## второе нажатие F в течение этого времени подтверждает вызов
 const RETARGET_S := 0.25
 const COLOR_GOOD := Color(0.46, 0.9, 0.4)
 const COLOR_WARN := Color(1.0, 0.6, 0.25)
@@ -185,7 +186,8 @@ func _on_departed() -> void:
 		_close_menu()
 
 
-## Меню открывается, когда машина остановилась в зоне севшего челнока.
+## Меню открывается, когда машина остановилась в зоне севшего челнока, и закрывается, если её
+## вынесло из зоны. После закрытия (Esc, A / D) снова откроется, только когда машина тронется.
 func _update_menu() -> void:
 	var s := vehicle.state
 	var speed := s.vel.length()
@@ -196,6 +198,9 @@ func _update_menu() -> void:
 	if _menu == null:
 		if active and menu_enabled and in_zone and _menu_armed and speed < rules.shuttle_stop_speed:
 			_open_menu()
+		return
+	if not in_zone:            # вынесло из зоны (толчок, смерч, подброс) — меню закрывается само
+		_close_menu()
 		return
 	_menu.cargo_value = run.cargo_value()
 	_menu.bonus = run.evacuation_bonus()
@@ -230,7 +235,16 @@ func _on_ship() -> void:
 func _on_evacuate() -> void:
 	_close_menu()
 	vehicle.control_enabled = false
+	vehicle.lift(_pad_ground().y + ShuttleCraft.MAIN_HOVER + 0.2, LIFT_S)
+	_main_craft.tractor()
+	get_tree().create_timer(LIFT_S + 0.2).timeout.connect(_evac_takeoff)
 	evacuate_requested.emit()
+
+
+func _evac_takeoff() -> void:
+	_main_craft.takeoff_dust()
+	_main_craft.ascend()
+	EventBus.camera_shake_requested.emit(0.6, 1.0)
 
 
 ## Состояние челноков для HUD и радара.

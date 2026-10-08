@@ -3,8 +3,8 @@ extends Resource
 ## Числа баланса одного класса техники (GDD §4). Один .tres на класс.
 
 @export var id: StringName
-@export var display_name: String
-@export_multiline var blurb: String          ## одна-две строки о характере класса (экран выбора)
+@export var display_name: String             ## внутреннее имя (логи, отладка) — игроку не показываем
+@export_multiline var blurb: String          ## одна строка о характере класса (экран выбора)
 @export var hp_max: int = 100
 
 @export_group("Movement")
@@ -46,5 +46,10 @@ extends Resource
 
 @export_group("Presentation")
 @export var model: PackedScene
+## Характеристики для экрана выбора, 1–5 (относительно других классов, без чисел баланса).
+@export_range(1, 5) var stat_fuel: int = 3
+@export_range(1, 5) var stat_armor: int = 3
+@export_range(1, 5) var stat_handling: int = 3
+@export_range(1, 5) var stat_cargo: int = 3
 @export var engine_sound: AudioStream
 @export var engine_pitch: float = 1.0        ## тон двигателя относительно ровера

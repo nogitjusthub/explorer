@@ -15,6 +15,7 @@ const TURN_TIME := 0.3
 var target: Vehicle
 var camera: Camera3D
 var zoom := 1.0                  ## крупность: 2 — вдвое ближе (отладка; пресеты зума — позже)
+var turn_enabled := true         ## Q / E поворачивают камеру (выключено, пока открыт экран выбора)
 
 var _quarter := 0
 var _shake := 0.0                ## амплитуда тряски, пикселей рендера
@@ -73,10 +74,10 @@ func quarter() -> int:
 
 
 func _process(dt: float) -> void:
-	if Input.is_action_just_pressed(&"cam_left"):
+	if turn_enabled and Input.is_action_just_pressed(&"cam_left"):
 		_quarter -= 1
 		EventBus.camera_rotated.emit(_quarter)
-	if Input.is_action_just_pressed(&"cam_right"):
+	if turn_enabled and Input.is_action_just_pressed(&"cam_right"):
 		_quarter += 1
 		EventBus.camera_rotated.emit(_quarter)
 	var yaw_target := deg_to_rad(45.0) + _quarter * PI * 0.5

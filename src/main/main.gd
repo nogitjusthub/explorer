@@ -3,12 +3,12 @@ extends Node
 ## Владеет RunState и связывает с ним машину, находки, челноки и HUD. Отладочные режимы запуска и
 ## параметры командной строки — в DevTools.
 
-enum Phase { START, RUN, OVER, RESULTS }
+enum Phase { START, DROP, RUN, OVER, RESULTS }
 
 const SUN_ENERGY := 1.25
 const AMBIENT_ENERGY := 0.5
-const SELECT_ZOOM := 3.0           ## крупность камеры на экране выбора машины
-const TURNTABLE_SPEED := 0.7       ## рад/с — машина медленно поворачивается на экране выбора
+const EVAC_SCENE_S := 3.4         ## эвакуация: машину втягивает в челнок, он уходит вверх
+const LANDING_TRIES := 40
 const SPAWN_HEADING := -PI * 0.75
 
 var run_seed: int
@@ -31,6 +31,9 @@ var phase := Phase.START
 var sandbox := false               ## автопилот: забег бесконечный, гибель — возрождение
 
 var _toast: Toast
+var _pause: PauseOverlay
+var _help: HelpScreen
+var _no_drop := false
 var _sun: DirectionalLight3D
 var _env: Environment
 var _weather_k := {&"storm": 0.0, &"murk": 0.0}
@@ -44,6 +47,7 @@ func _ready() -> void:
 	run_seed = int(args.get("seed", str(int(Time.get_unix_time_from_system()) % 100000)))
 	print("Explorer — seed %d (Godot %s)" % [run_seed, Engine.get_version_info().string])
 	dev = DevTools.new(args)
+	_no_drop = args.has("no-drop")
 	rules = dev.tweak_rules(Balance.rules)
 	dev.run_seed = run_seed
 	_build_world(args)
@@ -53,16 +57,20 @@ func _ready() -> void:
 			sandbox = true
 			vehicle.autopilot = dev.make_autopilot()
 		_begin()
+	elif Settings.quick_restart:
+		# «Заново» на экране итога: тот же класс, сразу десант — без трюма с выбором.
+		Settings.quick_restart = false
+		_begin()
 	else:
 		vehicle.control_enabled = false
-		var start := StartScreen.new()
-		start.vehicle_ids = Balance.vehicle_ids()
-		start.selected = maxi(start.vehicle_ids.find(vehicle.cls.id), 0)
-		start.vehicle_changed.connect(_on_vehicle_selected)
-		start.started.connect(_begin)
-		rig.set_zoom(rig.zoom * SELECT_ZOOM)
+		var hangar := HangarScreen.new()
+		hangar.vehicle_ids = Balance.vehicle_ids()
+		hangar.selected = maxi(hangar.vehicle_ids.find(vehicle.cls.id), 0)
+		hangar.vehicle_changed.connect(_on_vehicle_selected)
+		hangar.started.connect(_begin)
+		rig.turn_enabled = false
 		hud.visible = false
-		add_child(start)
+		add_child(hangar)
 
 
 func _build_world(args: Dictionary) -> void:
@@ -109,6 +117,9 @@ func _build_world(args: Dictionary) -> void:
 	var spawn := _spawn_point(args)
 	var t0 := Time.get_ticks_usec()
 	streamer.preload_around(spawn)
+	if _plays_drop() and not args.has("spawn"):
+		spawn = _landing_point(spawn)
+		streamer.preload_around(spawn)
 	print("preload: %d chunks in %d ms" % [streamer.loaded_count(), (Time.get_ticks_usec() - t0) / 1000])
 
 	var vehicle_id := StringName(args.get("vehicle", Settings.vehicle_id))
@@ -177,6 +188,11 @@ func _build_world(args: Dictionary) -> void:
 	dev.fauna = fauna
 	hud.pager.vehicle = vehicle
 	hud.pager.camera = rig.camera
+
+	_pause = PauseOverlay.new()
+	add_child(_pause)
+	_help = HelpScreen.new()
+	add_child(_help)
 
 	var warmup := Warmup.new()
 	warmup.at = Vector3(spawn.x, vehicle.state.y, spawn.y)
@@ -254,12 +270,69 @@ func _on_weather_changed(kind: StringName, intensity: float) -> void:
 	_env.ambient_light_energy = AMBIENT_ENERGY * (1.0 - 0.35 * storm)
 
 
+## Точка высадки (GDD §2.1): рядом с площадкой старта, на сухом ровном тайле без стенок и деревьев —
+## там капсула выбьет воронку. Детерминированно по seed; не нашлось — центр площадки.
+func _landing_point(pad: Vector2) -> Vector2:
+	var rng := DetRng.rng_for(run_seed, 0, 0, 950)
+	for _i in LANDING_TRIES:
+		var p := pad + Vector2.from_angle(rng.randf() * TAU) * rng.randf_range(9.0, 16.0)
+		var t := Grid.tile_of_world(p.x, p.y)
+		if not query.is_loaded(t.x, t.y) or query.water_tier(t.x, t.y) != TerrainQuery.NO_WATER:
+			continue
+		if query.has_standing_tree(t.x, t.y):
+			continue
+		var d := terrain.owner_of(t.x, t.y)
+		if (d.flags[d.local_index(t.x, t.y)] & (ChunkData.FLAG_PAD | ChunkData.FLAG_NEST)) != 0:
+			continue
+		var walls := false
+		for dir in 4:
+			walls = walls or query.edge_rise(t.x, t.y, dir) != 0 or query.edge_drop(t.x, t.y, dir) != 0
+		if not walls:
+			return Vector2(t.x + 0.5, t.y + 0.5)
+	return pad
+
+
+## Сцена десанта: в обычной игре да; отладочные сценарии без стартового экрана и --no-drop стартуют
+## сразу на площадке старта.
+func _plays_drop() -> bool:
+	return not dev.skips_start() and not _no_drop
+
+
 func _begin() -> void:
 	if not dev.skips_start():
-		rig.set_zoom(rig.zoom / SELECT_ZOOM)
 		Settings.vehicle_id = String(vehicle.cls.id)
 		Settings.save_settings()
+	rig.turn_enabled = true
+	hud.visible = true
+	if not _plays_drop():
+		_start_run()
+		return
+	# Десант: машина в капсуле, капсула падает с орбиты на точку старта.
+	phase = Phase.DROP
+	vehicle.visible = false
+	vehicle.control_enabled = false
+	var pod := DropPod.new()
+	add_child(pod)
+	pod.start(Vector3(_spawn.x, query.surface_y(_spawn.x, _spawn.y), _spawn.y))
+	pod.landed.connect(_on_drop_landed)
+	pod.opened.connect(_start_run)
+
+
+## Удар капсулы: воронка, пыль, тряска, раскат; фауна рядом разбегается; машина — на дне воронки.
+func _on_drop_landed() -> void:
+	Deformation.crater(terrain, _spawn, 2.0, 1)
+	vehicle.place(_spawn, SPAWN_HEADING)
+	vehicle.visible = true
+	fauna.scare(_spawn, 15.0)
+	EventBus.camera_shake_requested.emit(1.5, 0.8)
+	EventBus.screen_flash_requested.emit(0.35)
+	EventBus.drop_landed.emit(Vector3(_spawn.x, vehicle.state.y, _spawn.y))
+
+
+func _start_run() -> void:
 	phase = Phase.RUN
+	_pause.enabled = true
+	_help.pause_game = true
 	hud.visible = true
 	dev.mark_start()
 	vehicle.control_enabled = true
@@ -276,8 +349,6 @@ func _physics_process(dt: float) -> void:
 	streamer.update_focus(vehicle.state.pos, vehicle.state.vel)
 	var p := vehicle.state.pos
 	RenderingServer.global_shader_parameter_set(&"vis_center", Vector3(p.x, vehicle.state.y, p.y))
-	if phase == Phase.START:
-		vehicle.state.heading = wrapf(vehicle.state.heading + TURNTABLE_SPEED * dt, -PI, PI)
 	if phase != Phase.RUN:
 		return
 	run.tick(dt)
@@ -383,17 +454,26 @@ func _on_run_ended(cause: StringName) -> void:
 		run.announce()
 		return
 	phase = Phase.OVER
+	_pause.enabled = false
+	_help.pause_game = false
 	shuttles.active = false
 	vehicle.control_enabled = false
 	if cause != RunState.CAUSE_EVACUATED and cause != &"drowned" and cause != RunState.CAUSE_EMPTY_TANK:
 		vehicle.wreck()
 		hud.banner("МАШИНА РАЗБИТА", Hud.COLOR_DAMAGE)
-	_over_timer = rules.death_delay_s
+	_over_timer = EVAC_SCENE_S if cause == RunState.CAUSE_EVACUATED else rules.death_delay_s
 
 
 func _show_results() -> void:
 	phase = Phase.RESULTS
 	hud.visible = false
 	var screen := ResultsScreen.new(run.result(), Leaderboard.new())
-	screen.restart_requested.connect(func() -> void: get_tree().reload_current_scene())
+	screen.restart_requested.connect(_restart.bind(true))
+	screen.exit_requested.connect(_restart.bind(false))
 	add_child(screen)
+
+
+## Новый забег: quick — сразу десант на той же машине («Заново»), иначе — в трюм к выбору («Выход»).
+func _restart(quick: bool) -> void:
+	Settings.quick_restart = quick
+	get_tree().reload_current_scene()
