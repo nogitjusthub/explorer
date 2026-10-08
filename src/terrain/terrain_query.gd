@@ -148,6 +148,13 @@ func water_depth(x: float, z: float) -> float:
 	return w - surface_tier(x, z)
 
 
+func biome(tx: int, tz: int) -> int:
+	var d := data.owner_of(tx, tz)
+	if d == null:
+		return ChunkData.Biome.PLAINS
+	return d.biome[d.local_index(tx, tz)]
+
+
 func material(tx: int, tz: int) -> int:
 	var d := data.owner_of(tx, tz)
 	if d == null:

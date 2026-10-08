@@ -130,3 +130,12 @@ func test_on_generated_terrain_keeps_seams_and_valid_tiles() -> void:
 				if data.read_record(lz * ChunkData.N + lx) != owner.read_record(owner.local_index(o.x + lx, o.y + lz)):
 					mismatch += 1
 	assert_eq(mismatch, 0, "apron windows match owners")
+
+
+func test_furrow_with_memory_lowers_each_vertex_once() -> void:
+	var f := TerrainFixture.new(6)
+	var done := {}
+	for _i in 5:     # медленный смерч топчется на месте
+		Deformation.furrow(f.terrain, Vector2(8.0, 10.0), Vector2(12.0, 10.0), 0.6, done)
+	assert_eq(f.query.corner(10, 10, 0), 5, "no deeper than one tier")
+	assert_true(_max_delta(f, 5, 5, 15, 15) <= 1)

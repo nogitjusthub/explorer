@@ -21,6 +21,8 @@ signal cargo_shipped(value: int, emergency: bool)
 signal threat_telegraphed(kind: StringName, at: Vector3, seconds: float, dir_hint: Vector2)
 signal threat_ended(kind: StringName)
 signal lightning_struck(at: Vector3)
+signal sheet_lightning(at: Vector3)        ## зарница в тучах — вспышка и далёкий гром без удара
+signal wind_changed(dir: Vector2, strength: float)
 signal screen_flash_requested(strength: float)
 signal weather_changed(kind: StringName, intensity: float)
 

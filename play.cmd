@@ -1,25 +1,34 @@
 @echo off
 rem Запуск игры. Путь к проекту берётся от расположения этого файла, поэтому работает из любой папки.
-rem Параметры передаются в игру как есть (разделитель «--» для Godot ставится здесь):
-rem   play.cmd --seed=7 --zoom=4
+rem Параметры передаются в игру как есть (разделитель «--» для Godot ставится здесь).
 rem Справка: play.cmd --help
 rem
-rem   --seed=N          задаёт мир (по умолчанию — от времени)
-rem   --vehicle=ID      машина: rover, tank, hover (по умолчанию — последняя выбранная)
-rem   --zoom=N          камера в N раз крупнее
-rem   --spawn=X,Z       старт в точке мира вместо площадки
-rem   --autopilot       машина едет сама
-rem   --course=D        автопилот едет строго по курсу D градусов (0 — +x, 90 — +z), без объезда
-rem   --no-shadows      без теней
-rem   --bench=S         бенчмарк S секунд с автопилотом, затем отчёт и выход
-rem   --shots=N         N скриншотов в build\shots (интервал --shot-every=S, по умолчанию 3 с)
-rem   --snapshot-at=S   отладочный снимок (как по F12) через S секунд
-rem   --debug           отладочный оверлей виден сразу (иначе — по F3)
-rem   --no-threats      без угроз; --threat=N — уровень угрозы не ниже N
-rem   --event=K@S       угроза K (storm, quake) на S-й секунде: --event=storm@5,quake@12
-rem   --idle            без стартового экрана и автопилота: машина стоит
-rem   --shuttle-in=S    первый челнок садится через S секунд; --shuttle-dist=D — площадка на дистанции D
-rem   --fuel=N          топлива в начале забега; --press=radio@8 — нажать F на 8-й секунде
+rem Мир и машина
+rem   --seed=N           задаёт мир (по умолчанию — от времени)
+rem   --vehicle=ID       машина: rover, tank, hover (по умолчанию — последняя выбранная)
+rem   --spawn=X,Z        старт в точке мира вместо площадки
+rem   --fuel=N           топлива в начале забега, единиц
+rem Камера и экран
+rem   --zoom=N           камера в N раз крупнее (0.75 — мельче)
+rem   --no-shadows       без теней
+rem   --debug            отладочный оверлей виден сразу (иначе — по F3)
+rem Угрозы
+rem   --no-threats       без угроз
+rem   --threat=N         уровень угрозы не ниже N (1–6)
+rem   --event=K@S,...    угроза K на S-й секунде: storm, fog, acid, dust, tornado, quake
+rem Сценарии без рук
+rem   --idle             без стартового экрана и автопилота: машина стоит
+rem   --select           показать экран выбора машины и при --idle или --shots
+rem   --press=A@S,...    нажать действие A на S-й секунде: radio@8,move_right@9
+rem   --shuttle-in=S     первый челнок садится через S секунд
+rem   --shuttle-dist=D   площадка челнока на дистанции D (0 — площадка старта)
+rem Автопилот, бенчмарк, снимки
+rem   --autopilot        машина едет сама, гибель — возрождение
+rem   --course=D         автопилот строго по курсу D градусов, без объезда
+rem   --bench=S          бенчмарк S секунд с автопилотом, отчёт и выход
+rem   --log-slow         печатать кадры дольше 20 мс
+rem   --shots=N          N скриншотов в build\shots, интервал --shot-every=S (3 с)
+rem   --snapshot-at=S    отладочный снимок (как по F12) через S секунд
 
 if /i "%~1"=="--help" goto :help
 if /i "%~1"=="-h" goto :help
@@ -32,24 +41,43 @@ for /f "tokens=2 delims=:." %%a in ('chcp') do set "_oldcp=%%a"
 chcp 65001 >nul
 echo Запуск: play.cmd [параметры]   (из любой папки)
 echo.
-echo   --seed=N          задаёт мир (по умолчанию — от времени)
-echo   --vehicle=ID      машина: rover, tank, hover (по умолчанию — последняя выбранная)
-echo   --zoom=N          камера в N раз крупнее
-echo   --spawn=X,Z       старт в точке мира вместо площадки
-echo   --autopilot       машина едет сама
-echo   --course=D        автопилот едет строго по курсу D градусов (0 — +x, 90 — +z), без объезда
-echo   --no-shadows      без теней
-echo   --bench=S         бенчмарк S секунд с автопилотом, затем отчёт и выход
-echo   --shots=N         N скриншотов в build\shots (интервал --shot-every=S, по умолчанию 3 с)
-echo   --snapshot-at=S   отладочный снимок (как по F12) через S секунд
-echo   --debug           отладочный оверлей виден сразу (иначе — по F3)
-echo   --no-threats      без угроз; --threat=N — уровень угрозы не ниже N
-echo   --event=K@S       угроза K (storm, quake) на S-й секунде: --event=storm@5,quake@12
-echo   --idle            без стартового экрана и автопилота: машина стоит
-echo   --shuttle-in=S    первый челнок садится через S секунд; --shuttle-dist=D — площадка на дистанции D
-echo   --fuel=N          топлива в начале забега; --press=radio@8 — нажать F на 8-й секунде
+echo  Мир и машина
+echo   --seed=N           задаёт мир (по умолчанию — от времени)
+echo   --vehicle=ID       машина: rover, tank, hover (по умолчанию — последняя выбранная)
+echo   --spawn=X,Z        старт в точке мира вместо площадки
+echo   --fuel=N           топлива в начале забега, единиц
 echo.
-echo Пример: play.cmd --seed=1 --spawn=79,-18 --zoom=2
-echo В игре: W/A/S/D — движение, F — аварийный челнок, Q/E — поворот камеры, F3 — отладка, F12 — отладочный снимок в build\debug
+echo  Камера и экран
+echo   --zoom=N           камера в N раз крупнее (0.75 — мельче)
+echo   --no-shadows       без теней
+echo   --debug            отладочный оверлей виден сразу (иначе — по F3)
+echo.
+echo  Угрозы
+echo   --no-threats       без угроз
+echo   --threat=N         уровень угрозы не ниже N (1–6)
+echo   --event=K@S,...    угроза K на S-й секунде: storm, fog, acid, dust, tornado, quake
+echo.
+echo  Сценарии без рук
+echo   --idle             без стартового экрана и автопилота: машина стоит
+echo   --select           показать экран выбора машины и при --idle или --shots
+echo   --press=A@S,...    нажать действие A на S-й секунде: radio@8,move_right@9
+echo   --shuttle-in=S     первый челнок садится через S секунд
+echo   --shuttle-dist=D   площадка челнока на дистанции D (0 — площадка старта)
+echo.
+echo  Автопилот, бенчмарк, снимки
+echo   --autopilot        машина едет сама, гибель — возрождение
+echo   --course=D         автопилот строго по курсу D градусов, без объезда
+echo   --bench=S          бенчмарк S секунд с автопилотом, отчёт и выход
+echo   --log-slow         печатать кадры дольше 20 мс
+echo   --shots=N          N скриншотов в build\shots, интервал --shot-every=S (3 с)
+echo   --snapshot-at=S    отладочный снимок (как по F12) через S секунд
+echo.
+echo Примеры:
+echo   play.cmd --vehicle=tank --seed=1                  танк, мир 1
+echo   play.cmd --event=fog@3                            туман сразу; так же storm, acid, dust, tornado
+echo   play.cmd --spawn=100,60 --event=quake@5           землетрясение (у площадки старта разлома не бывает)
+echo   play.cmd --idle --shuttle-in=6 --shuttle-dist=0   челнок на площадке старта через 6 с
+echo.
+echo В игре: W/A/S/D — движение, F — аварийный челнок, Q/E — поворот камеры, F3 — отладка, F12 — снимок в build\debug
 chcp %_oldcp% >nul
 exit /b

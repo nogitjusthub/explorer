@@ -6,6 +6,8 @@ extends RefCounted
 
 const RATE := 22050
 
+static var _cache: Dictionary[StringName, AudioStreamWAV] = {}
+
 
 ## Треск телеграфа молнии: щелчки чаще и громче к удару.
 static func crackle(seconds: float) -> AudioStreamWAV:
@@ -71,6 +73,42 @@ static func rumble(seconds: float, rising: bool) -> AudioStreamWAV:
 		var env := pow(k, 1.4) if rising else minf(t / 0.04, 1.0) * exp(-t * 1.6)
 		data[i] = body * env
 	return _wav(data)
+
+
+## Гул смерча — бесшовная петля: шумовой «вой», который то нарастает, то стихает.
+## Один на все смерчи (генерация не бесплатна — кэш).
+static func wind_loop(seconds: float) -> AudioStreamWAV:
+	if _cache.has(&"wind"):
+		return _cache[&"wind"]
+	var n := int(seconds * RATE)
+	var m := RATE / 8                      # перекрытие для бесшовной петли
+	var raw := PackedFloat32Array()
+	raw.resize(n + m)
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 505
+	var lp1 := 0.0
+	var lp2 := 0.0
+	var mid := 0.0
+	for i in n + m:
+		var t := float(i) / RATE
+		var noise := rng.randf_range(-1.0, 1.0)
+		lp1 = lerpf(lp1, noise, 0.04)
+		lp2 = lerpf(lp2, lp1, 0.06)
+		mid = lerpf(mid, noise, 0.12 + 0.06 * sin(t * TAU * 1.5))
+		raw[i] = lp2 * 8.0 + (mid - lp1) * (0.6 + 0.4 * sin(t * TAU * 0.5))
+	var data := PackedFloat32Array()
+	data.resize(n)
+	for i in n:
+		data[i] = raw[i]
+	for i in m:
+		var k := float(i) / m
+		data[i] = lerpf(raw[n + i], raw[i], k)
+	var wav := _wav(data)
+	wav.loop_mode = AudioStreamWAV.LOOP_FORWARD
+	wav.loop_begin = 0
+	wav.loop_end = n
+	_cache[&"wind"] = wav
+	return wav
 
 
 ## Удар по корпусу: глухой низкий «бум» со щелчком.

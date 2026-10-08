@@ -10,6 +10,7 @@ blurb = "Крепость: в гору без потерь, вброд до 2 я
 hp_max = 160
 max_speed = 4.0
 accel = 2.0
+launch_accel = 6.0
 brake_decel = 5.0
 turn_rate_deg = 75.0
 turn_in_place = true

@@ -2,27 +2,33 @@ class_name DevTools
 extends Node
 ## Отладочные режимы запуска: бенчмарк, серия снимков, отладочный снимок (F12 и по таймеру).
 ##
-## Параметры командной строки (после «--»):
-##   --seed=N          seed мира (по умолчанию — от времени);
-##   --vehicle=ID      класс техники: rover, tank, hover (по умолчанию — последний выбранный);
-##   --autopilot       машина едет сама, забег бесконечный (гибель — возрождение, пустой бак — дозаправка);
-##   --bench=S         автопилот S секунд, затем печать статистики и выход;
-##   --shots=N         автопилот, N снимков экрана в build/shots/ (нужен оконный режим), затем выход;
-##   --shot-every=S    интервал между снимками, секунд (по умолчанию 3);
-##   --no-shadows      без теней (слабые машины, диагностика);
-##   --spawn=X,Z       старт в точке мира вместо площадки (отладка);
-##   --course=D        автопилот едет строго по курсу D градусов (0 — +x, 90 — +z), без объезда;
-##   --snapshot-at=S   отладочный снимок (как по F12) через S секунд;
-##   --zoom=N          камера в N раз крупнее (отладка);
-##   --debug           отладочный оверлей виден сразу (иначе — по F3);
-##   --idle            без стартового экрана и автопилота: машина стоит (проверка челноков, снимки);
-##   --shuttle-in=S    первый челнок садится через S секунд (вместо 90);
-##   --shuttle-dist=D  площадка челнока на дистанции D тайлов (0 — ближайшая, обычно площадка старта);
-##   --fuel=N          топлива в начале забега N единиц;
-##   --press=A@S,...   нажать действие A на S-й секунде (radio@8,move_right@9 — сценарии без рук);
-##   --select          показать экран выбора машины и при --idle/--shots (снимки экрана выбора);
-##   --no-threats      без угроз; --threat=N — уровень угрозы не ниже N;
-##   --event=K@S,...   угроза K (storm, quake) на S-й секунде забега.
+## Параметры командной строки (после «--»; справка — play.cmd --help):
+##   Мир и машина:
+##     --seed=N           задаёт мир (по умолчанию — от времени)
+##     --vehicle=ID       машина: rover, tank, hover (по умолчанию — последняя выбранная)
+##     --spawn=X,Z        старт в точке мира вместо площадки
+##     --fuel=N           топлива в начале забега, единиц
+##   Камера и экран:
+##     --zoom=N           камера в N раз крупнее (0.75 — мельче)
+##     --no-shadows       без теней
+##     --debug            отладочный оверлей виден сразу (иначе — по F3)
+##   Угрозы:
+##     --no-threats       без угроз
+##     --threat=N         уровень угрозы не ниже N (1–6)
+##     --event=K@S,...    угроза K на S-й секунде: storm, fog, acid, dust, tornado, quake
+##   Сценарии без рук:
+##     --idle             без стартового экрана и автопилота: машина стоит
+##     --select           показать экран выбора машины и при --idle или --shots
+##     --press=A@S,...    нажать действие A на S-й секунде: radio@8,move_right@9
+##     --shuttle-in=S     первый челнок садится через S секунд
+##     --shuttle-dist=D   площадка челнока на дистанции D (0 — площадка старта)
+##   Автопилот, бенчмарк, снимки:
+##     --autopilot        машина едет сама, гибель — возрождение
+##     --course=D         автопилот строго по курсу D градусов, без объезда
+##     --bench=S          бенчмарк S секунд с автопилотом, отчёт и выход
+##     --log-slow         печатать кадры дольше 20 мс
+##     --shots=N          N скриншотов в build\shots, интервал --shot-every=S (3 с)
+##     --snapshot-at=S    отладочный снимок (как по F12) через S секунд
 ## В веб-сборке те же параметры берутся из адреса страницы: ?seed=7&bench=30. Результаты бенчмарка
 ## и снимки уходят POST-запросами на /log и /shot (tools/scripts/web_server.py).
 
@@ -150,6 +156,8 @@ func _process(dt: float) -> void:
 		_max_delta = maxf(_max_delta, dt)
 		if dt > 0.02:
 			_slow_frames += 1
+			if args.has("log-slow"):
+				print("slow frame %.1f ms at %.2f s" % [dt * 1000.0, _elapsed])
 	for action in _release:
 		var up := InputEventAction.new()
 		up.action = action
@@ -219,8 +227,9 @@ func _print_bench() -> void:
 	_report("bench: pickups collected %d; current run: hp %d, fuel %.0f, cargo %d slots / %d pts, score %d" % [
 		pickups_collected, run.hp, run.fuel, run.cargo_slots_used(), run.cargo_value(), run.score()])
 	if threats != null:
-		_report("bench: threats — level %d, storms %d, strikes %d, quakes %d" % [
-			threats.level, threats.stats["storm"], threats.stats["strikes"], threats.stats["quake"]])
+		var st := threats.stats
+		_report("bench: threats — level %d, storms %d (strikes %d), quakes %d, fog %d, acid %d, dust %d (tornadoes %d)" % [
+			threats.level, st["storm"], st["strikes"], st["quake"], st["fog"], st["acid"], st["dust"], st["tornado"]])
 	_report("bench: render — draw calls %d, primitives %d, objects in frame %d, video memory %.0f MB" % [
 		Performance.get_monitor(Performance.RENDER_TOTAL_DRAW_CALLS_IN_FRAME),
 		Performance.get_monitor(Performance.RENDER_TOTAL_PRIMITIVES_IN_FRAME),

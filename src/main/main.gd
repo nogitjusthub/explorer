@@ -5,7 +5,8 @@ extends Node
 
 enum Phase { START, RUN, OVER, RESULTS }
 
-const VIS_RADIUS_CLEAR := 1000.0
+const SUN_ENERGY := 1.25
+const AMBIENT_ENERGY := 0.5
 const SELECT_ZOOM := 3.0           ## крупность камеры на экране выбора машины
 const TURNTABLE_SPEED := 0.7       ## рад/с — машина медленно поворачивается на экране выбора
 const SPAWN_HEADING := -PI * 0.75
@@ -29,6 +30,9 @@ var phase := Phase.START
 var sandbox := false               ## автопилот: забег бесконечный, гибель — возрождение
 
 var _toast: Toast
+var _sun: DirectionalLight3D
+var _env: Environment
+var _weather_k := {&"storm": 0.0, &"murk": 0.0}
 var _spawn := Vector2.ZERO
 var _over_timer := 0.0
 var _refused_key := -1             ## находка, на которую уже показали «трюм полон»
@@ -66,8 +70,9 @@ func _build_world(args: Dictionary) -> void:
 	env.background_color = Color(0.36, 0.27, 0.42)
 	env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
 	env.ambient_light_color = Color(0.60, 0.52, 0.72)
-	env.ambient_light_energy = 0.5
+	env.ambient_light_energy = AMBIENT_ENERGY
 	env.tonemap_mode = Environment.TONE_MAPPER_FILMIC
+	_env = env
 	var world_env := WorldEnvironment.new()
 	world_env.environment = env
 	add_child(world_env)
@@ -75,7 +80,7 @@ func _build_world(args: Dictionary) -> void:
 	var sun := DirectionalLight3D.new()
 	sun.rotation_degrees = Vector3(-38.0, -70.0, 0.0)
 	sun.light_color = Color(1.0, 0.88, 0.74)
-	sun.light_energy = 1.25
+	sun.light_energy = SUN_ENERGY
 	sun.shadow_enabled = not args.has("no-shadows")
 	# Одна ортогональная карта теней на небольшую дальность — плотнее тексели. Смещение по нормали
 	# берётся из вершинных нормалей меша (ChunkMesher их пишет), иначе грани затеняют сами себя.
@@ -84,6 +89,8 @@ func _build_world(args: Dictionary) -> void:
 	sun.shadow_bias = 0.1
 	sun.shadow_normal_bias = 2.0
 	add_child(sun)
+	_sun = sun
+	EventBus.weather_changed.connect(_on_weather_changed)
 
 	terrain = TerrainData.new()
 	generator = TerrainGenerator.new(run_seed, TerrainParams.new())
@@ -154,6 +161,14 @@ func _build_world(args: Dictionary) -> void:
 	hud.pager.vehicle = vehicle
 	hud.pager.camera = rig.camera
 
+	var warmup := Warmup.new()
+	warmup.at = Vector3(spawn.x, vehicle.state.y, spawn.y)
+	add_child(warmup)
+
+	var weather_fx := WeatherOverlay.new()
+	weather_fx.camera = rig.camera
+	add_child(weather_fx)
+
 	var audio := AudioDirector.new()
 	audio.vehicle = vehicle
 	add_child(audio)
@@ -178,7 +193,6 @@ func _build_world(args: Dictionary) -> void:
 	dev.toast = _toast
 	add_child(dev)
 
-	RenderingServer.global_shader_parameter_set(&"vis_radius", VIS_RADIUS_CLEAR)
 
 
 ## Точка десанта: центр ближайшей к началу координат площадки челнока (ровно и сухо).
@@ -212,6 +226,15 @@ func _new_run() -> void:
 func _on_vehicle_selected(id: StringName) -> void:
 	vehicle.set_class(Balance.vehicle(id))
 	_new_run()
+
+
+## Свет под непогодой: под тучами сцена заметно темнеет, в тумане и пыли — слегка.
+func _on_weather_changed(kind: StringName, intensity: float) -> void:
+	_weather_k[&"storm" if kind == &"storm" else &"murk"] = intensity
+	var storm: float = _weather_k[&"storm"]
+	var murk: float = _weather_k[&"murk"]
+	_sun.light_energy = SUN_ENERGY * (1.0 - 0.55 * storm) * (1.0 - 0.2 * murk)
+	_env.ambient_light_energy = AMBIENT_ENERGY * (1.0 - 0.35 * storm)
 
 
 func _begin() -> void:

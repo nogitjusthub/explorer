@@ -6,6 +6,7 @@ extends Node
 
 const VOICES := 6
 const HEAR_TILES := 30.0               ## дальше — не слышно
+const THUNDER_SPEED := 30.0            ## тайлов в секунду — гром приходит позже вспышки
 
 var vehicle: Vehicle
 
@@ -26,12 +27,14 @@ func _ready() -> void:
 	_hit = Sfx.hit(0.3)
 	_rumble_build = Sfx.rumble(2.5, true)
 	_rumble_hit = Sfx.rumble(2.4, false)
+	Sfx.wind_loop(2.0)        # гул смерча — в кэш заранее, иначе первый смерч дёрнет кадр
 	for _i in VOICES:
 		var p := AudioStreamPlayer.new()
 		add_child(p)
 		_players.append(p)
 	EventBus.threat_telegraphed.connect(_on_telegraphed)
 	EventBus.lightning_struck.connect(_on_lightning)
+	EventBus.sheet_lightning.connect(func(at: Vector3) -> void: _delayed(_thunder, at, -10.0, 0.7))
 	EventBus.threat_ended.connect(_on_threat_ended)
 	EventBus.vehicle_damaged.connect(func(_amount: int, _source: StringName, _at: Vector3) -> void: _play(_hit, -4.0))
 
@@ -50,8 +53,19 @@ func _on_threat_ended(kind: StringName) -> void:
 		_play(_rumble_hit, 2.0)
 
 
+## Гром запаздывает: чем дальше удар, тем позже (звук «медленнее» вспышки).
 func _on_lightning(at: Vector3) -> void:
-	_play_at(_thunder, at, 0.0, 0.85 + 0.3 * fmod(at.x * 0.37 + at.z * 0.61, 1.0))
+	_delayed(_thunder, at, 0.0, 0.85 + 0.3 * fmod(at.x * 0.37 + at.z * 0.61, 1.0))
+
+
+func _delayed(stream: AudioStream, at: Vector3, volume_db: float, pitch: float) -> void:
+	if vehicle == null:
+		return
+	var delay := Vector2(at.x, at.z).distance_to(vehicle.state.pos) / THUNDER_SPEED
+	if delay < 0.05:
+		_play_at(stream, at, volume_db, pitch)
+	else:
+		get_tree().create_timer(delay).timeout.connect(func() -> void: _play_at(stream, at, volume_db, pitch))
 
 
 func _play_at(stream: AudioStream, at: Vector3, volume_db: float, pitch: float = 1.0) -> void:

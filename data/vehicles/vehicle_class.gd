@@ -10,6 +10,7 @@ extends Resource
 @export_group("Movement")
 @export var max_speed: float = 6.5           ## тайл/с
 @export var accel: float = 5.0               ## тайл/с²
+@export var launch_accel: float = 0.0        ## тайл/с² с места (0 — как accel); к LAUNCH_FADE·Vmax сходит к accel
 @export var brake_decel: float = 8.5         ## тайл/с²
 @export var turn_rate_deg: float = 150.0     ## °/с
 @export var turn_in_place: bool = false

@@ -108,9 +108,29 @@ vis_center={
 "type": "vec3",
 "value": Vector3(0, 0, 0)
 }
-vis_radius={
+weather_center={
+"type": "vec3",
+"value": Vector3(0, 0, 0)
+}
+weather_radius={
 "type": "float",
-"value": 1000.0
+"value": 0.0
+}
+weather_clear={
+"type": "float",
+"value": 4.0
+}
+weather_gas_y={
+"type": "float",
+"value": -1000.0
+}
+weather_max={
+"type": "float",
+"value": 0.9
+}
+weather_gloom={
+"type": "float",
+"value": 0.0
 }
 vis_color={
 "type": "color",
@@ -123,4 +143,8 @@ storm_center={
 storm_radius={
 "type": "float",
 "value": 0.0
+}
+storm_dark={
+"type": "float",
+"value": 0.5
 }

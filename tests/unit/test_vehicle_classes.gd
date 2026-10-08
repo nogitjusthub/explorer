@@ -188,3 +188,32 @@ func test_wall_hit_at_speed_costs_fixed_damage() -> void:
 		touched = touched or r.hit_wall
 	assert_true(touched, "reached the wall")
 	assert_eq(total, 0, "glancing contact")
+
+
+func test_tank_launches_quicker_from_standstill() -> void:
+	var f := TerrainFixture.new(4)
+	var tank := _cls(&"tank")
+	var s := _state(f, tank, Vector2(5.5, 10.5), 0.0)
+	_drive(s, Vector2.RIGHT, tank, f, 30)
+	assert_true(s.vel.length() >= 1.9, "0.5 s from standstill: %.2f tiles/s" % s.vel.length())
+	_drive(s, Vector2.RIGHT, tank, f, 120)
+	assert_near(s.vel.length(), tank.max_speed, 0.01, "top speed unchanged")
+
+
+func test_external_push_drifts_and_walls_stop_it() -> void:
+	var f := TerrainFixture.new(4)
+	f.set_block(14, 0, 30, 30, 6)      # стенка к востоку от x = 14
+	var rover := _cls(&"rover")
+	var s := _state(f, rover, Vector2(10.5, 10.5), -PI * 0.5)
+	for _i in 120:
+		s.ext_accel = Vector2(1.6, 0.0)
+		VehicleKinematics.step(s, Vector2.ZERO, rover, f.query, DT)
+	assert_true(s.pos.x > 11.5, "wind drifts a standing rover: x=%.2f" % s.pos.x)
+	assert_near(s.push_vel.x, 1.6 / VehicleKinematics.PUSH_DAMP, 0.15, "steady drift ≈ a / damping")
+	for _i in 600:
+		s.ext_accel = Vector2(1.6, 0.0)
+		VehicleKinematics.step(s, Vector2.ZERO, rover, f.query, DT)
+	assert_true(s.pos.x <= 14.0 - VehicleKinematics.RADIUS + 1e-3, "wall stops the drift: x=%.3f" % s.pos.x)
+	for _i in 180:
+		VehicleKinematics.step(s, Vector2.ZERO, rover, f.query, DT)
+	assert_true(s.push_vel.length() < 0.05, "drift fades without force")

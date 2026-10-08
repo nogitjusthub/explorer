@@ -103,8 +103,9 @@ static func crater(terrain: TerrainData, center: Vector2, radius: float, depth: 
 
 
 ## Борозда вдоль отрезка: вершины ближе half_width к отрезку опускаются на ярус. На скалах
-## (материал ROCK у любого тайла вокруг вершины) следа не остаётся.
-static func furrow(terrain: TerrainData, from: Vector2, to: Vector2, half_width: float) -> PackedInt64Array:
+## (материал ROCK у любого тайла вокруг вершины) следа не остаётся. done — вершины, уже опущенные этим
+## же источником (смерч): их не трогаем, иначе медленный смерч выкопал бы каньон.
+static func furrow(terrain: TerrainData, from: Vector2, to: Vector2, half_width: float, done: Dictionary = {}) -> PackedInt64Array:
 	var w := Work.new(terrain)
 	var queue: Array[Vector3i] = []
 	var lo := Vector2i(floori(minf(from.x, to.x) - half_width) - 1, floori(minf(from.y, to.y) - half_width) - 1)
@@ -114,9 +115,11 @@ static func furrow(terrain: TerrainData, from: Vector2, to: Vector2, half_width:
 			var p := Vector2(vx, vz)
 			if Geometry2D.get_closest_point_to_segment(p, from, to).distance_to(p) > half_width:
 				continue
-			if _vertex_on_rock(terrain, Vector2i(vx, vz)):
+			var v := Vector2i(vx, vz)
+			if done.has(v) or _vertex_on_rock(terrain, v):
 				continue
-			_shift_vertex(w, Vector2i(vx, vz), -1, LOWER, queue)
+			done[v] = true
+			_shift_vertex(w, v, -1, LOWER, queue)
 	_relax(w, queue)
 	return _commit(w)
 

@@ -50,9 +50,10 @@ extends Resource
 @export var quake_interval_t4_s: float = 45.0    ## …с T = 4 регулярно
 
 @export_group("Storm")
-@export var storm_radius: float = 10.0           ## тень облаков диаметром 20 тайлов
-@export var storm_speed: float = 1.7
-@export var storm_spawn_dist: float = 26.0       ## фронт появляется на таком расстоянии и идёт через машину
+@export var storm_radius: float = 45.0           ## грозовой фронт диаметром 90 тайлов — проще уйти, чем проехать
+@export var storm_dark: float = 0.5              ## насколько темнее земля под тучами
+@export var storm_speed: float = 2.04
+@export var storm_max_s: float = 150.0          ## дольше — фронт рассеивается
 @export var strike_interval_s: float = 2.5
 @export var strike_near_frac: float = 0.35       ## доля ударов рядом с машиной (если она под фронтом)
 @export var strike_near_r: float = 4.0
@@ -62,6 +63,45 @@ extends Resource
 @export var strike_damage_center: int = 25
 @export var strike_damage_edge: int = 10
 @export var strike_crater_depth: int = 1
+
+@export_group("Murk")
+## Плохая видимость — огромная масса, ползущая по карте: проехать насквозь трудно, проще уйти, пока
+## не нагнала. Держится, пока проходит мимо машины, но не дольше murk_max_s — потом рассеивается.
+@export var fog_radius: float = 60.0
+@export var fog_speed: float = 1.56
+@export var dust_radius: float = 72.0
+@export var dust_speed: float = 2.28
+@export var murk_max_s: float = 150.0
+@export var dissipate_s: float = 12.0            ## за столько масса (и гроза) тает в конце жизни
+@export var murk_gap: float = 14.0               ## масса появляется так, чтобы край был за экраном
+@export var fog_weight: float = 0.45             ## жребий вида: туман / кислотный / пылевая буря
+@export var acid_weight: float = 0.2             ## с acid_min_level
+@export var dust_weight: float = 0.35            ## с dust_min_level
+@export var biome_weather_weight: float = 1.8    ## туман чаще у озёр, буря — на кратерах и равнинах
+@export var murk_share: float = 0.5              ## доля плохой видимости среди погодных событий (остальное — гроза)
+@export var fog_visibility: float = 4.0
+@export var acid_min_level: int = 3
+@export var acid_rise: int = 2                   ## газ на столько ярусов выше самой низкой точки вокруг
+@export var acid_scan_r: int = 12
+@export var acid_dps: float = 1.0
+@export var dust_min_level: int = 2
+@export var dust_visibility: float = 3.0
+@export var dust_wind_accel: float = 1.6         ## делится на массу класса
+@export var dust_tornado_chance: float = 0.6     ## с tornado_min_level: смерч при входе в бурю
+
+@export_group("Tornado")
+@export var tornado_min_level: int = 3
+@export var tornado_interval_t3_s: float = 100.0 ## сам по себе (буря прошла где-то рядом)…
+@export var tornado_interval_t4_s: float = 65.0  ## …с T = 4 чаще
+@export var tornado_life_s: float = 45.0
+@export var tornado_speed: float = 2.0
+@export var tornado_spawn_dist: float = 15.0
+@export var tornado_pull_r: float = 6.0
+@export var tornado_pull_accel: float = 5.0      ## a(r) = pull / масса × (1 − r / pull_r)
+@export var tornado_core_r: float = 1.5
+@export var tornado_core_dps: float = 15.0
+@export var tornado_throw_after_s: float = 1.5
+@export var tornado_throw_dist: float = 4.0
 
 @export_group("Quake")
 @export var quake_telegraph_s: float = 2.5

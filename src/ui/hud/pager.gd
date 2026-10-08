@@ -1,17 +1,19 @@
 class_name Pager
 extends Control
 ## Пейджер (GDD §8): под радаром — до трёх сообщений об активных угрозах: тип, стрелка направления
-## относительно экрана (как радар и управление) и секунды до события. Сообщение держится, пока
-## угроза шлёт телеграф, и исчезает с её концом. Звука у большинства угроз нет — это главный канал.
+## относительно экрана (как радар и управление) и секунды до события. У непогоды (гроза, туман, буря)
+## и смерча стрелки нет — откуда придёт, не сказано (указатели — апгрейд радара); кислотный туман
+## подписан просто «ТУМАН» — его выдаёт только цвет. Сообщение держится, пока угроза шлёт телеграф.
 
 const LINES := 3
 const LINE_H := 10.0
 const STALE_S := 1.0                   ## телеграф не обновлялся столько — угроза ушла
 const NEAR := 6.0                      ## ближе — без стрелки, «рядом»
 const NAMES := {
-	&"storm": "ГРОЗА", &"quake": "СЕЙСМИКА", &"fog": "ТУМАН", &"acid": "КИСЛОТНЫЙ ГАЗ",
+	&"storm": "ГРОЗА", &"quake": "СЕЙСМИКА", &"fog": "ТУМАН", &"acid": "ТУМАН",
 	&"dust": "ПЫЛЕВАЯ БУРЯ", &"tornado": "СМЕРЧ",
 }
+const NO_ARROW: Array[StringName] = [&"storm", &"fog", &"acid", &"dust", &"tornado"]   ## без указателя
 const COLOR_TEXT := Color(1.0, 0.55, 0.3)
 const COLOR_NEW := Color(1.0, 0.9, 0.6)
 const COLOR_BG := Color(0.06, 0.04, 0.09, 0.62)
@@ -71,14 +73,15 @@ func _draw() -> void:
 		var seconds: float = e["seconds"]
 		if seconds > 0.0:
 			text += "  %d" % ceili(seconds)
-		var near := d.length() < NEAR
+		var no_arrow := NO_ARROW.has(e["kind"])
+		var near := d.length() < NEAR and not no_arrow
 		if near:
 			text += "  рядом"
 		var col := COLOR_NEW if e["age"] < 1.0 and fmod(e["age"], 0.3) < 0.15 else COLOR_TEXT
-		var text_right := size.x - (4.0 if near else 14.0)
+		var text_right := size.x - (4.0 if near or no_arrow else 14.0)
 		draw_string(_font, Vector2(0, y) + Vector2.ONE, text, HORIZONTAL_ALIGNMENT_RIGHT, text_right, 8, Color(0, 0, 0, 0.85))
 		draw_string(_font, Vector2(0, y), text, HORIZONTAL_ALIGNMENT_RIGHT, text_right, 8, col)
-		if not near:
+		if not near and not no_arrow:
 			var s := Vector2(d.dot(right), -d.dot(up)).normalized()
 			var c := Vector2(size.x - 7.0, y - 3.0)
 			var side := Vector2(-s.y, s.x)

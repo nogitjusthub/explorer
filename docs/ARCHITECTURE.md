@@ -36,15 +36,15 @@ explorer/
 │  │                            chunk_mesher  world_streamer  chunk_node  tree_field  (deformation — M3)
 │  ├─ vehicle/                  vehicle  vehicle_models  vehicle_state  vehicle_kinematics  vehicle_input
 │  ├─ camera/                   iso_camera_rig(.tscn)
-│  ├─ hazards/                  threat_director  storm_front  quake  (tornado  fog  dust_storm — M3b)
+│  ├─ hazards/                  threat_director  storm_front  weather_front  murk_layers  quake  tornado
 │  ├─ fauna/                    fauna_director  worm  hopper  shellback  nest  grid_astar
 │  ├─ pickups/                  pickup_generator  pickup_field
 │  ├─ shuttle/                  shuttle_scheduler  emergency_call  shuttle_craft  shuttle_controller
-│  ├─ render/                   terrain_materials  shaders/ (terrain, water, tree, pickup, pickup_outline,
-│  │                            visibility.gdshaderinc)
+│  ├─ render/                   terrain_materials  warmup  shaders/ (terrain, water, tree, pickup, pickup_outline,
+│  │                            fog_layer, fog_layer_depth, visibility.gdshaderinc, fog_layer.gdshaderinc)
 │  ├─ audio/                    engine_sound  (audio_director — M3)
 │  ├─ debug/                    dev_tools  autopilot  debug_snapshot  map_render  map_preview
-│  └─ ui/                       debug_overlay  start_screen  toast  hud/ (hud, radar)
+│  └─ ui/                       debug_overlay  start_screen  toast  weather_overlay  hud/ (hud, radar, pager)
 │                               screens/ (results_screen, shuttle_menu)
 ├─ data/                        ресурсы баланса (.tres)
 │  ├─ balance_rules.gd  balance.tres  terrain_params.gd  terrain_params.tres
@@ -102,8 +102,13 @@ explorer/
 | `VehicleInput` | Действия ввода → вектор направления относительно экрана |
 | `IsoCameraRig` | Ортокамера, поворот 90°, упреждение, тряска |
 | `GameFlow` (`main.gd`) | Машина состояний: Старт → Десант → Вылазка → Итог; владеет `RunState` |
-| `ThreatDirector` | Уровень угрозы T, цикл погоды «ясно → событие → ясно», таймер землетрясений с T ≥ 3, затишье после сдачи; угрозы — дочерние узлы, урон машине — сигналом `damaged` |
-| `StormFront` | Грозовой фронт: тень облаков (глобальные `storm_center` / `storm_radius`), удары с весом по высоте, телеграф-круг, урон, воронка, деревья, кристаллы, помехи радара |
+| `ThreatDirector` | Уровень угрозы T, цикл непогоды «ясно → гроза или плохая видимость → ясно» (жребий вида — `murk_variant`), таймеры землетрясений и смерчей с T ≥ 3, затишье после сдачи; угрозы — дочерние узлы, урон машине — сигналом `damaged` |
+| `StormFront` | Грозовой фронт: тень туч (глобальные `storm_center` / `storm_radius` / `storm_dark`), слои туч и зарницы, удары с весом по высоте, телеграф-круг, ветвистые молнии со вспышкой света и искрами, урон, воронка, деревья, кристаллы, помехи радара; `weather_changed` — затемнение света и дождь |
+| `WeatherFront` | Плохая видимость — масса (центр, радиус, рваный край), ползёт через машину. Вид — жребий: туман, кислотный туман (уровень газа по низинам, урон ниже него), пылевая буря (ветер в `ext_accel`, шанс смерча). Ставит глобальные `weather_*` и `vis_color`, шлёт `weather_changed` (свет, частицы) и сообщение пейджеру без стрелки |
+| `MurkLayers` | Объём непогоды: слои облачного шума (`fog_layer*.gdshader`) на разной высоте; плотность и край — из глобальных параметров погоды или грозы; дыра у машины сдвинута на высоту слоя, чтобы на экране совпасть с машиной; зарницы — подсветка слоёв |
+| `WeatherOverlay` | Частицы на весь экран (CanvasLayer под HUD): косой дождь под грозой, пыль по ветру в буре |
+| `Warmup` | Прогрев шейдеров эффектов на старте: невидимые копии слоёв, разряда, искр и вспышки света на несколько кадров |
+| `Tornado` | Смерч — сам по себе или из бури: блуждание с уклоном к машине (в буре — снос ветром), тяга `5 / масса × (1 − r/6)`, ядро 15/с и выброс по дуге туда, где посадка не выше, борозда (`Deformation.furrow`, скалы не берёт), вырванные деревья, подхваченные и разброшенные находки, гул по расстоянию |
 | `Quake` | Землетрясение: телеграф (тряска, трещина, пыль, пейджер), разлом рядом с машиной вдали от площадок, подброс машины (`VehicleKinematics.launch`), заливка ям |
 | `FaunaDirector` и виды | Появление по биому и шуму, поведение, A* |
 | `PickupField` | Находки загруженных чанков (по сигналам `chunk_built` / `chunk_removed` стримера), `MultiMesh` на вид, подбор, выпавшее из трюма, канистры по D(t) с запоминанием решения на чанк, запросы радара |
@@ -260,6 +265,8 @@ static func fall_damage(cls: VehicleClass, h: int) -> int             # GDD §3.
 static func fuel_per_second(cls: VehicleClass, throttle: float) -> float
 ```
 
+- Внешние силы (ветер бури, тяга смерча) источник кладёт в `state.ext_accel` (уже делённую на массу); кинематика копит их в сносе `push_vel`, который затухает сам (`PUSH_DAMP = 2`, при силе a снос выходит на a/2) и гасится стенками.
+- Разгон с места может быть сильнее обычного (`launch_accel`, у танка 6): к 60% Vmax сходит к `accel`.
 - Тормоза нет: без ввода машина замедляется с `brake_decel`. Целевая скорость — `max_speed × газ × max(cos(угол до нужного курса), 0)`; с места (скорость < 1) при угле больше 12° она 0 — машина доворачивает на месте и потом разгоняется. Танк (`turn_in_place`) стоит при угле больше 45° и на ходу.
 - Сдвиг за шаг делится на под-шаги по пересечению рёбер тайлов.
 - Перепад берётся в точке пересечения ребра (`edge_rise_at`, линейно между углами). Больше 1/3 яруса вверх — стенка: составляющая скорости поперёк ребра обнуляется, курс выравнивается вдоль стенки (скольжение). Больше 1/3 яруса вниз — падение.
@@ -383,7 +390,8 @@ signal run_ended(result: Dictionary)
 - **Вода** — прозрачный меш чанка (`blend_mix`), цвет по глубине через vertex color, без чтения depth texture.
 - **Силуэт за стеной** — `BaseMaterial3D.stencil_mode = STENCIL_MODE_XRAY` (stencil в Compatibility с Godot 4.5; помечен experimental). Запасной путь — `next_pass` с `render_mode depth_test_inverted, unshaded`. Проверить в браузере к концу M0.
 - **Нет в Compatibility:** volumetric fog, SSR/SSAO/SSIL, декали, VoxelGI/SDFGI, TAA/FXAA/SMAA, DoF, GPU-частицы с trails и SDF-коллизиями, compute. Замены: телеграф-круги и маркер посадки — квад-меш, облегающий рельеф; частицы — `CPUParticles3D`; тени — одна `DirectionalLight3D`, в вебе по настройке; glow — только на десктопе.
-- **Компиляция шейдеров** в Compatibility происходит при первом показе — прогрев всех материалов на стартовом экране.
+- **Компиляция шейдеров** в Compatibility происходит при первом показе — первая гроза дёргала кадр на ~140 мс. `Warmup` на старте показывает невидимые копии материалов эффектов (и вспышку света — первый источник света тоже перекомпилирует варианты) — после этого подвисаний нет.
+- **Погода в шейдерах:** глобальные `vis_center`, `vis_color`, `weather_center` / `_radius` / `_clear` / `_gas_y` / `_max` / `_gloom`, `storm_center` / `_radius` / `_dark` (объявлены в `[shader_globals]`; необъявленный параметр — ошибка в консоли). `vis_hidden()` и `weather_grade()` — в `visibility.gdshaderinc`, их вызывают шейдеры рельефа, воды, деревьев и находок.
 
 ---
 
@@ -426,7 +434,7 @@ $g = ".\tools\godot\Godot_v4.7.2-stable_win64_console.exe"
 | Старт в точке / прямой курс | `play.cmd --seed=N --spawn=X,Z [--course=D --autopilot]` |
 | Класс техники | `play.cmd --vehicle=tank` (rover, tank, hover); снимок экрана выбора — `-- --idle --select --shots=1` |
 | Снимки экрана | `… --path . -- --seed=7 --shots=4 --shot-every=3` → `build/shots/` |
-| Угрозы | `-- --no-threats`, `--threat=N` (уровень не ниже N), `--event=storm@5,quake@12` (событие на заданной секунде; разлом не ложится у площадки старта — для проверки `--spawn=100,60`). В отчёте бенчмарка — число гроз, ударов и землетрясений |
+| Угрозы | `-- --no-threats`, `--threat=N` (уровень не ниже N), `--event=storm@5,quake@12` (storm, quake, fog, acid, dust, tornado — событие на заданной секунде; разлом не ложится у площадки старта — для проверки `--spawn=100,60`). В отчёте бенчмарка — счётчики угроз; `--log-slow` печатает кадры дольше 20 мс со временем (первый запуск после правки шейдеров даёт пики компиляции — со второго их нет, Godot кэширует) |
 | Сценарий без рук | `… -- --seed=7 --idle --shuttle-in=6 --shuttle-dist=0 --shots=2 --press=radio@8`: машина стоит на площадке старта, челнок садится через 6 с, F на 8-й секунде. Ещё: `--fuel=N` (мало топлива — проверка пустого бака), `--debug` (оверлей сразу) |
 | Карта рельефа в PNG | `… --headless --path . --script res://src/debug/map_preview.gd -- --seed=1 --chunks=8` → `build/preview/` |
 | Веб-сборка | `powershell -ExecutionPolicy Bypass -File tools\scripts\export_web.ps1 [-Debug] [-Serve]` → `build/web/` |

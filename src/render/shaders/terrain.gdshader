@@ -38,6 +38,6 @@ void fragment() {
 		albedo = s * (0.92 + 0.08 * fract(tier * 0.37));
 	}
 	float hidden = vis_hidden(world_pos);
-	ALBEDO = albedo * (1.0 - hidden) * (1.0 - storm_shade(world_pos));
+	ALBEDO = weather_grade(albedo) * (1.0 - hidden) * (1.0 - storm_shade(world_pos));
 	EMISSION = vis_color.rgb * hidden;
 }

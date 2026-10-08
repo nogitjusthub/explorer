@@ -1,6 +1,8 @@
 class_name StormFront
 extends Node3D
-## Грозовой фронт (GDD §5.1): тень облаков радиусом storm_radius ползёт через окрестность машины.
+## Грозовой фронт (GDD §5.1): тень облаков радиусом storm_radius ползёт через окрестность машины,
+## над ней — слои туч (MurkLayers), в тучах зарницы; под фронтом сцена темнеет и идёт дождь
+## (через weather_changed — свет и экранный слой частиц).
 ## Внутри — удар молнии каждые strike_interval_s: часть рядом с машиной (если она под фронтом),
 ## остальные — по фронту; точка выбирается с весом по высоте (вершины и деревья притягивают удары).
 ## Телеграф — светящийся круг и треск, удар через strike_telegraph_s: урон, воронка, поваленное дерево,
@@ -10,8 +12,13 @@ extends Node3D
 signal damaged(amount: int, source: StringName)
 
 const CANDIDATES := 6
+const FAR_STRIKE_R := 22.0               ## остальные удары — по фронту не дальше этого от машины
+const NO_TARGET := Vector2(INF, INF)
 const COLOR_TELEGRAPH := Color(1.0, 0.45, 0.2, 0.55)
 const COLOR_BOLT := Color(0.85, 0.92, 1.0)
+const COLOR_GLOW := Color(0.55, 0.7, 1.0, 0.35)
+const COLOR_CLOUD := Color(0.2, 0.21, 0.28)
+const BOLT_S := 0.22
 
 var rules: BalanceRules
 var vehicle: Vehicle
@@ -24,12 +31,18 @@ var rng: RandomNumberGenerator
 
 var center := Vector2.ZERO
 var direction := Vector2.RIGHT
+var radius := 15.0
+var _age := 0.0
 var ended := false                       ## фронт ушёл: новых ударов нет
 var finished := false                    ## ушёл и отгремели начатые удары — узел можно убрать
 
 var _strike_timer := 1.0
 var _pending: Array[Dictionary] = []     ## {pos: Vector2, left: float, node: Node3D}
-var _bolts: Array[Dictionary] = []       ## {node, left}
+var _bolts: Array[Dictionary] = []       ## {node, left, light}
+var _clouds: MurkLayers
+var _sheet_timer := 2.0
+var _sheet := 0.0
+var coverage := 0.0                      ## насколько машина под тучами, 0…1
 
 
 func _init() -> void:
@@ -37,33 +50,51 @@ func _init() -> void:
 	physics_interpolation_mode = Node.PHYSICS_INTERPOLATION_MODE_OFF
 
 
-## Фронт появляется на storm_spawn_dist от машины и идёт через неё с небольшим отклонением.
+## Фронт появляется так, что его край — за краем экрана, и идёт через машину с небольшим отклонением.
 func begin() -> void:
 	var from := Vector2.from_angle(rng.randf() * TAU)
-	center = vehicle.state.pos + from * rules.storm_spawn_dist
+	radius = rules.storm_radius
+	center = vehicle.state.pos + from * (radius + rules.murk_gap)
 	direction = (-from).rotated(rng.randf_range(-0.35, 0.35))
+	RenderingServer.global_shader_parameter_set(&"storm_dark", rules.storm_dark)
+	_clouds = MurkLayers.new()
+	add_child(_clouds)
+	var drift := direction * rules.storm_speed * 0.04
+	_clouds.add_layer(COLOR_CLOUD, 0.42, 5.5, 0.05, drift, 1)
+	_clouds.add_layer(COLOR_CLOUD.lightened(0.08), 0.36, 7.5, 0.035, drift * 1.4, 1)
 	_update_shadow()
 
 
 func covers(p: Vector2) -> bool:
-	return not ended and p.distance_to(center) <= rules.storm_radius
+	return not ended and p.distance_to(center) <= radius
 
 
 func step(dt: float) -> void:
 	center += direction * rules.storm_speed * dt
+	_age += dt
+	if _age > rules.storm_max_s and not ended:
+		radius = rules.storm_radius * clampf(1.0 - (_age - rules.storm_max_s) / rules.dissipate_s, 0.0, 1.0)
+		if radius <= 1.0:
+			_end()
 	_update_shadow()
 	var to_vehicle := vehicle.state.pos - center
+	coverage = 0.0 if ended else 1.0 - smoothstep(radius - 8.0, radius, to_vehicle.length())
+	EventBus.weather_changed.emit(&"storm", coverage)
+	_clouds.update(Vector3(vehicle.state.pos.x, vehicle.state.y, vehicle.state.pos.y), 3.0, 0.0 if ended else 1.0)
+	_step_sheet(dt)
 	var away := to_vehicle.dot(direction) < 0.0
 	if not ended:
 		EventBus.threat_telegraphed.emit(&"storm", Vector3(center.x, 0.0, center.y), 0.0, direction)
 	# Прошёл машину и удалился — кончился (новых ударов нет, ждём начатые).
-	if away and to_vehicle.length() > rules.storm_radius + 6.0:
+	if away and to_vehicle.length() > radius + rules.murk_gap:
 		_end()
 	if not ended:
 		_strike_timer -= dt
 		if _strike_timer <= 0.0:
 			_strike_timer = rules.strike_interval_s
-			_telegraph(_pick_target())
+			var target := _pick_target()
+			if target != NO_TARGET:
+				_telegraph(target)
 	for i in range(_pending.size() - 1, -1, -1):
 		var s: Dictionary = _pending[i]
 		s["left"] -= dt
@@ -77,9 +108,14 @@ func step(dt: float) -> void:
 			_pending.remove_at(i)
 			_strike(s["pos"])
 	for i in range(_bolts.size() - 1, -1, -1):
-		_bolts[i]["left"] -= dt
-		if _bolts[i]["left"] <= 0.0:
-			(_bolts[i]["node"] as Node3D).queue_free()
+		var b: Dictionary = _bolts[i]
+		b["left"] -= dt
+		var k: float = b["left"] / BOLT_S
+		(b["node"] as Node3D).visible = k > 0.55 or (k > 0.15 and k < 0.35)   # мерцание разряда
+		(b["light"] as OmniLight3D).light_energy = 6.0 * maxf(k, 0.0)
+		if b["left"] <= 0.0:
+			(b["node"] as Node3D).queue_free()
+			(b["light"] as Node3D).queue_free()
 			_bolts.remove_at(i)
 	finished = ended and _pending.is_empty() and _bolts.is_empty()
 
@@ -88,21 +124,23 @@ func _end() -> void:
 	if ended:
 		return
 	ended = true
+	coverage = 0.0
+	EventBus.weather_changed.emit(&"storm", 0.0)
 	RenderingServer.global_shader_parameter_set(&"storm_radius", 0.0)
 	EventBus.threat_ended.emit(&"storm")
 
 
-## Точка удара: рядом с машиной (если она под фронтом) или по фронту, выше — вероятнее.
+## Точка удара: рядом с машиной (если она под фронтом) или по фронту в окрестности машины — дальние
+## удары во фронте размером с полкарты никто бы не увидел; выше — вероятнее.
 func _pick_target() -> Vector2:
 	var near := covers(vehicle.state.pos) and rng.randf() < rules.strike_near_frac
-	var base := vehicle.state.pos if near else center
-	var r := rules.strike_near_r if near else rules.storm_radius
-	var best := base
+	var r := rules.strike_near_r if near else FAR_STRIKE_R
+	var best := vehicle.state.pos
 	var best_score := -INF
-	for _i in CANDIDATES:
-		var p := base + Vector2.from_angle(rng.randf() * TAU) * sqrt(rng.randf()) * r
+	for _i in CANDIDATES * 2:
+		var p := vehicle.state.pos + Vector2.from_angle(rng.randf() * TAU) * sqrt(rng.randf()) * r
 		var t := Grid.tile_of_world(p.x, p.y)
-		if not query.is_loaded(t.x, t.y):
+		if not query.is_loaded(t.x, t.y) or not covers(p):
 			continue
 		var score := query.surface_tier(p.x, p.y) + rng.randf() * 1.5
 		if query.has_standing_tree(t.x, t.y):
@@ -115,6 +153,8 @@ func _pick_target() -> Vector2:
 		var own := query.surface_tier(vehicle.state.pos.x, vehicle.state.pos.y) + 1.0 + rng.randf() * 1.5
 		if own > best_score:
 			best = vehicle.state.pos
+	elif best_score == -INF:
+		return NO_TARGET               # фронт далеко от машины — удар никто не увидит
 	return best
 
 
@@ -182,33 +222,100 @@ func _strike(p: Vector2) -> void:
 	Deformation.crater(terrain, p, rules.strike_radius, rules.strike_crater_depth)
 
 
-## Молния — ломаная из тонких ярких отрезков от облака до земли, гаснет за доли секунды.
+## Молния — ломаная от тучи до земли с ответвлениями: яркая сердцевина и голубое свечение, вспышка
+## света над точкой удара и искры. Гаснет, мерцая, за BOLT_S.
 func _spawn_bolt(ground: Vector3) -> void:
 	var node := Node3D.new()
-	var mat := StandardMaterial3D.new()
-	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	mat.albedo_color = COLOR_BOLT
-	var top := ground + Vector3(rng.randf_range(-1.5, 1.5), 14.0, rng.randf_range(-1.5, 1.5))
-	var prev := top
-	for i in range(1, 6):
-		var k := i / 5.0
-		var p := top.lerp(ground, k)
-		if i < 5:
-			p += Vector3(rng.randf_range(-0.6, 0.6), 0.0, rng.randf_range(-0.6, 0.6))
+	var core := StandardMaterial3D.new()
+	core.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	core.albedo_color = COLOR_BOLT
+	var glow := StandardMaterial3D.new()
+	glow.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	glow.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	glow.albedo_color = COLOR_GLOW
+	var top := ground + Vector3(rng.randf_range(-2.0, 2.0), 16.0, rng.randf_range(-2.0, 2.0))
+	var points: Array[Vector3] = [top]
+	for i in range(1, 7):
+		var p := top.lerp(ground, i / 6.0)
+		if i < 6:
+			p += Vector3(rng.randf_range(-0.9, 0.9), 0.0, rng.randf_range(-0.9, 0.9))
+		points.append(p)
+	for i in range(1, points.size()):
+		_bolt_segment(node, points[i - 1], points[i], 0.16, core, glow)
+	# Ответвления от средних изломов — короткие, вниз и в сторону.
+	for j in [2, 3]:
+		var from: Vector3 = points[j]
+		var side := Vector3(rng.randf_range(-1.0, 1.0), 0.0, rng.randf_range(-1.0, 1.0)).normalized()
+		var a := from + side * 1.4 + Vector3(0, -1.6, 0)
+		var b := a + side * 1.0 + Vector3(rng.randf_range(-0.4, 0.4), -1.4, rng.randf_range(-0.4, 0.4))
+		_bolt_segment(node, from, a, 0.08, core, glow)
+		_bolt_segment(node, a, b, 0.06, core, glow)
+	add_child(node)
+	var light := OmniLight3D.new()
+	light.light_color = Color(0.75, 0.85, 1.0)
+	light.light_energy = 6.0
+	light.omni_range = 10.0
+	light.shadow_enabled = false
+	light.position = ground + Vector3(0, 1.5, 0)
+	add_child(light)
+	_spawn_sparks(ground)
+	_bolts.append({"node": node, "left": BOLT_S, "light": light})
+
+
+func _bolt_segment(parent: Node3D, a: Vector3, b: Vector3, width: float, core: Material, glow: Material) -> void:
+	for layer in [[width, core], [width * 3.2, glow]]:
 		var seg := MeshInstance3D.new()
 		var box := BoxMesh.new()
-		box.size = Vector3(0.09, prev.distance_to(p), 0.09)
+		box.size = Vector3(layer[0], a.distance_to(b), layer[0])
 		seg.mesh = box
-		seg.material_override = mat
+		seg.material_override = layer[1]
 		seg.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-		seg.position = (prev + p) * 0.5
-		seg.basis = Basis(Quaternion(Vector3.UP, (p - prev).normalized()))
-		node.add_child(seg)
-		prev = p
-	add_child(node)
-	_bolts.append({"node": node, "left": 0.16})
+		seg.position = (a + b) * 0.5
+		seg.basis = Basis(Quaternion(Vector3.UP, (b - a).normalized()))
+		parent.add_child(seg)
+
+
+## Искры в точке удара — короткий выброс.
+func _spawn_sparks(ground: Vector3) -> void:
+	var sparks := CPUParticles3D.new()
+	sparks.position = ground + Vector3(0, 0.1, 0)
+	sparks.one_shot = true
+	sparks.explosiveness = 1.0
+	sparks.amount = 24
+	sparks.lifetime = 0.6
+	sparks.direction = Vector3.UP
+	sparks.spread = 70.0
+	sparks.initial_velocity_min = 2.5
+	sparks.initial_velocity_max = 6.0
+	sparks.gravity = Vector3(0, -12.0, 0)
+	var quad := QuadMesh.new()
+	quad.size = Vector2(0.08, 0.08)
+	var mat := StandardMaterial3D.new()
+	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	mat.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
+	mat.albedo_color = Color(1.0, 0.95, 0.7)
+	quad.material = mat
+	sparks.mesh = quad
+	add_child(sparks)
+	sparks.emitting = true
+	get_tree().create_timer(1.0).timeout.connect(sparks.queue_free)
+
+
+## Зарницы: тучи вспыхивают изнутри, далёкий гром; вспышка экрана — когда машина под фронтом.
+func _step_sheet(dt: float) -> void:
+	_sheet = maxf(_sheet - dt * 6.0, 0.0)
+	_clouds.set_flash(_sheet)
+	if ended:
+		return
+	_sheet_timer -= dt
+	if _sheet_timer <= 0.0:
+		_sheet_timer = rng.randf_range(1.5, 4.0)
+		_sheet = 1.0
+		var p := center + Vector2.from_angle(rng.randf() * TAU) * rng.randf() * radius
+		EventBus.sheet_lightning.emit(Vector3(p.x, 0.0, p.y))
+		EventBus.screen_flash_requested.emit(0.18 * coverage)
 
 
 func _update_shadow() -> void:
 	RenderingServer.global_shader_parameter_set(&"storm_center", Vector3(center.x, 0.0, center.y))
-	RenderingServer.global_shader_parameter_set(&"storm_radius", 0.0 if ended else rules.storm_radius)
+	RenderingServer.global_shader_parameter_set(&"storm_radius", 0.0 if ended else radius)

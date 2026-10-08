@@ -17,6 +17,9 @@ extends RefCounted
 ## - В воду глубже допустимой для класса можно заехать или упасть, но машина тонет: управления
 ##   нет, за DROWN_TIME уходит на дно — гибель. Ховер не тонет.
 ## - Деревья валятся на скорости от порога класса, иначе машина упирается.
+## - Внешние силы (ветер пылевой бури, тяга смерча) копятся в сносе push_vel, который затухает сам;
+##   снос складывается со скоростью машины, стенки его гасят. Делить силу на массу — дело источника.
+## - Разгон с места может быть сильнее обычного (launch_accel, танк): к LAUNCH_FADE·Vmax сходит к accel.
 ## - Машина на подушке (ховер) держится на зеркале воды: рёбра и склоны для неё считаются по
 ##   высоте «не ниже воды»; её заносит — боковая скорость гаснет не сразу (cls.drift).
 
@@ -32,6 +35,8 @@ const STEP_TOLERANCE := 1.0 / 3.0   ## ярусов: такую ступеньк
 const DROWN_TIME := 2.0             ## секунд от погружения до гибели
 const SINK_SPEED := 0.35            ## мировых единиц/с — скорость погружения
 const DEEP_MARGIN := 0.1            ## ярусов сверх допустимой глубины — уже тонет
+const PUSH_DAMP := 2.0              ## 1/с — затухание сноса: при силе a снос выходит на a / PUSH_DAMP
+const LAUNCH_FADE := 0.6            ## доля Vmax, к которой разгон с места сходит к обычному
 
 
 ## Что произошло за шаг — для урона, звука и событий.
@@ -50,6 +55,9 @@ class StepResult:
 
 static func step(s: VehicleState, inp: Vector2, cls: VehicleClass, q: TerrainQuery, dt: float) -> StepResult:
 	var r := StepResult.new()
+	if s.drowning or s.falling:
+		s.ext_accel = Vector2.ZERO
+		s.push_vel = Vector2.ZERO
 	if s.drowning:
 		_drown_step(s, q, dt, r)
 		return r
@@ -89,6 +97,8 @@ static func step(s: VehicleState, inp: Vector2, cls: VehicleClass, q: TerrainQue
 		speed = maxf(s.vel.dot(fwd), 0.0)
 	if speed < target_speed:
 		var accel := cls.accel
+		if cls.launch_accel > cls.accel:
+			accel = lerpf(cls.launch_accel, cls.accel, clampf(speed / (LAUNCH_FADE * cls.max_speed), 0.0, 1.0))
 		if _slope(cls, q, s.pos, fwd) < -0.05:
 			accel *= 1.0 + cls.downhill_accel_bonus
 		speed = minf(speed + accel * dt, target_speed)
@@ -98,7 +108,9 @@ static func step(s: VehicleState, inp: Vector2, cls: VehicleClass, q: TerrainQue
 	if lateral != 0.0:
 		s.vel = (s.vel + Vector2(-fwd.y, fwd.x) * lateral).limit_length(cls.max_speed)
 
-	var delta := s.vel * dt
+	s.push_vel = (s.push_vel + s.ext_accel * dt) * exp(-PUSH_DAMP * dt)
+	s.ext_accel = Vector2.ZERO
+	var delta := (s.vel + s.push_vel) * dt
 	_move_axis(s, cls, q, 0, delta.x, r)
 	if not s.falling:
 		_move_axis(s, cls, q, 1, delta.y, r)
@@ -230,6 +242,7 @@ static func _move_axis(s: VehicleState, cls: VehicleClass, q: TerrainQuery, axis
 ## Удар о стенку по оси axis: скорость теряется один раз по углу удара, курс выравнивается вдоль
 ## стенки. Без выравнивания машина каждый кадр снова упиралась бы носом и почти останавливалась.
 static func _slide_along_wall(s: VehicleState, axis: int) -> void:
+	s.push_vel[axis] = 0.0
 	var tangent := s.forward()
 	tangent[axis] = 0.0
 	if tangent.length() < 0.1:
