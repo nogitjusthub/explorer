@@ -72,7 +72,7 @@ func _rebuild_model() -> void:
 	_beacon_light = OmniLight3D.new()
 	_beacon_light.light_color = VehicleModels.BEACON
 	_beacon_light.light_energy = 1.5
-	_beacon_light.omni_range = 1.8
+	_beacon_light.omni_range = 0.9
 	_beacon_light.shadow_enabled = false
 	_beacon_light.position = _model.beacon_pos + Vector3(0, 0.05, 0)
 	_beacon_light.visible = false
