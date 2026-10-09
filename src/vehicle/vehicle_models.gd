@@ -96,9 +96,9 @@ static func _tank(m: Model) -> void:
 	var r := m.root
 	# Купол-кабина спереди — самая высокая точка, кузов сзади ниже купола: перед читается сразу.
 	for x in [-0.245, 0.245]:
-		_box(r, Vector3(0.15, 0.18, 0.84), Vector3(x, 0.09, 0.0), track)
+		_side_prism(r, _octagon(0.18, 0.84, 0.06), x, 0.15, track)   # гусеница: углы срезаны под 45°
 		var side := signf(x)
-		for z in [-0.27, -0.09, 0.09, 0.27]:
+		for z in [-0.33, -0.11, 0.11, 0.33]:          # катки равномерно, крайние — у концов гусеницы
 			_cyl(r, 0.065, 0.03, Vector3(x + side * 0.08, 0.085, z), wheel, Vector3(0, 0, PI * 0.5), 8)
 	_box(r, Vector3(0.62, 0.03, 0.8), Vector3(0, 0.195, 0.0), paint)       # полки над гусеницами
 	_box(r, Vector3(0.4, 0.19, 0.82), Vector3(0, 0.275, 0.0), paint)       # корпус
@@ -212,6 +212,23 @@ static func _bow(half_w: float, z_front: float, z_back: float, nose: float) -> P
 	var d := (half_w - nose) * tan(deg_to_rad(BOW_DEG))
 	return PackedVector2Array([Vector2(-nose, z_front), Vector2(nose, z_front), Vector2(half_w, z_front + d),
 			Vector2(half_w, z_back), Vector2(-half_w, z_back), Vector2(-half_w, z_front + d)])
+
+
+## Профиль сбоку (y, z) высотой h от земли и длиной len по центру, углы срезаны на c под 45°.
+static func _octagon(h: float, len: float, c: float) -> PackedVector2Array:
+	var l := len * 0.5
+	return PackedVector2Array([Vector2(c, -l), Vector2(h - c, -l), Vector2(h, -l + c), Vector2(h, l - c),
+			Vector2(h - c, l), Vector2(c, l), Vector2(0, l - c), Vector2(0, -l + c)])
+
+
+## Призма по профилю сбоку (y, z), шириной width по x вокруг x_center: та же _prism, повёрнутая так,
+## что её ось выдавливания смотрит вбок.
+static func _side_prism(parent: Node3D, profile: PackedVector2Array, x_center: float, width: float,
+		mat: Material) -> MeshInstance3D:
+	var mi := _prism(parent, profile, -width * 0.5, width, mat)
+	mi.rotation = Vector3(0, 0, PI * 0.5)     # локальные (x, y, z) → мировые (−y, x, z)
+	mi.position = Vector3(x_center, 0, 0)
+	return mi
 
 
 ## Призма: выпуклый контур poly (x, z), низ на y0, высота h. Грани плоские.
