@@ -64,7 +64,7 @@ func _ready() -> void:
 	else:
 		vehicle.control_enabled = false
 		var hangar := HangarScreen.new()
-		hangar.vehicle_ids = Balance.vehicle_ids()
+		hangar.vehicle_ids = HangarScreen.display_order(Balance.vehicle_ids())
 		hangar.selected = maxi(hangar.vehicle_ids.find(vehicle.cls.id), 0)
 		hangar.vehicle_changed.connect(_on_vehicle_selected)
 		hangar.started.connect(_begin)

@@ -3,10 +3,11 @@ extends RefCounted
 ## Модели техники из примитивов: перед — по −Z, размеры — в тайлах. Единый габарит ~0,85 × 0,65 тайла,
 ## один цвет экспедиции на всех, крупная ходовая, немного деталей. У всех одинаковый стеклянный
 ## купол-кабина (полусфера диаметром 0,3) и антенна.
-## Ровер — квадратный корпус на шести колёсах почти вплотную.
+## Ровер — квадратный корпус на шести колёсах почти вплотную, спереди бампер из тонких труб.
 ## Танк — гусеничный транспортёр (design_references: ТМ-140, ГАЗ-71): купол спереди — самая высокая
-## точка, кузов сзади ниже, чтобы перед читался сразу.
-## Ховер — судно на воздушной подушке (Griffon): чёрная юбка, палуба с надстройкой, два вентилятора в кожухах.
+## точка, кузов сзади ниже, чтобы перед читался сразу; спереди кенгурятник по мотивам Humvee.
+## Ховер — судно на воздушной подушке (Griffon): крупная чёрная юбка, палуба с надстройкой — прямой нос со
+## скосами 60° по бокам, два вентилятора в кожухах.
 ##
 ## Силуэт сквозь стены: крупные окрашенные части — stencil XRAY (силуэт рисуется там, где в stencil
 ## не 1), остальные непрозрачные детали пишут в stencil ту же 1 — иначе силуэт корпуса ложился бы
@@ -21,6 +22,10 @@ const UNDER := Color(0.24, 0.24, 0.27)      ## днище, кант
 const METAL := Color(0.72, 0.72, 0.76)      ## диски и катки
 const DOME_GLASS := Color(0.4, 0.82, 0.98, 0.7)
 const DOME_R := 0.15
+const ROD_R := 0.014                       ## толщина антенны — по ней трубы бамперов и кенгурятника
+const BEACON := Color(1.0, 0.35, 0.25)       ## огонёк антенны: ярко — вызов аварийного челнока
+const BEACON_DIM := Color(0.5, 0.15, 0.11)   ## обычно тлеет
+const BOW_DEG := 60.0                      ## скосы носа ховера от поперечной линии
 
 
 ## Собранная модель: корень, все материалы (для потемнения при гибели) и вращающиеся части.
@@ -30,6 +35,8 @@ class Model:
 	var materials: Array[StandardMaterial3D] = []
 	var spinners: Array[Node3D] = []        ## вращаются вокруг своей оси Z (вентиляторы)
 	var hover_height := 0.0                 ## модель парит над поверхностью (ховер)
+	var beacon: StandardMaterial3D          ## огонёк на конце антенны (мигает, пока летит аварийный челнок)
+	var beacon_pos := Vector3.ZERO          ## его точка в координатах модели
 
 
 ## Без силуэта сквозь препятствия (экраны вне игры: трюм, портреты) — stencil не нужен.
@@ -71,6 +78,13 @@ static func _rover(m: Model) -> void:
 	_dome(m, Vector3(0, 0.39, -0.08))
 	for x in [-0.12, 0.12]:
 		_box(r, Vector3(0.06, 0.04, 0.02), Vector3(x, 0.3, -0.325), lamp)
+	# Бампер: перекладина между передними колёсами, две стойки, крепления к корпусу.
+	var bar := _solid(m, UNDER, 0.4)
+	const BZ := -0.4
+	_rod(r, Vector3(-0.18, 0.2, BZ), Vector3(0.18, 0.2, BZ), bar)
+	for x in [-0.06, 0.06]:
+		_rod(r, Vector3(x, 0.15, BZ), Vector3(x, 0.29, BZ), bar)
+		_rod(r, Vector3(x, 0.26, BZ), Vector3(x, 0.26, -0.32), bar)
 	_antenna(m, Vector3(0.15, 0.39, 0.22))
 
 
@@ -92,12 +106,23 @@ static func _tank(m: Model) -> void:
 	_box(r, Vector3(0.42, 0.11, 0.38), Vector3(0, 0.425, 0.22), paint)     # трюм — вровень с кормой, ниже купола
 	for x in [-0.12, 0.12]:
 		_box(r, Vector3(0.06, 0.04, 0.02), Vector3(x, 0.3, -0.415), lamp)
-	# Пуш-бар: намёк, что танк таранит деревья и прочее.
-	var bar := _solid(m, UNDER)
-	_box(r, Vector3(0.48, 0.05, 0.04), Vector3(0, 0.2, -0.47), bar)
-	for x in [-0.16, 0.16]:
-		_box(r, Vector3(0.04, 0.16, 0.04), Vector3(x, 0.24, -0.46), bar)
-		_box(r, Vector3(0.04, 0.04, 0.06), Vector3(x, 0.3, -0.43), bar)
+	# Кенгурятник как у Humvee (design_references/tank/front_guard*): плоская прямоугольная рамка перед
+	# корпусом, верх — вровень с крышей корпуса; вертикальные планки, две широкие пластины креплений
+	# выступают вперёд на толщину трубы и уходят ниже рамки. Трубы — толщиной в антенну.
+	var bar := _solid(m, UNDER, 0.4)
+	const GZ := -0.47                  # плоскость рамки
+	const GX := 0.245                  # полуширина: края — по середине гусениц
+	const GTOP := 0.37                 # крыша корпуса
+	const GY1 := GTOP - ROD_R          # ось верхней трубы: её верх — вровень с корпусом
+	const GY0 := GY1 - 0.141           # высота рамки
+	const PLATE_H := 0.205             # пластины — от крыши корпуса вниз, ниже рамки
+	for y in [GY0, GY1]:
+		_rod(r, Vector3(-GX, y, GZ), Vector3(GX, y, GZ), bar)
+	for x in [-GX, -0.05, 0.05, GX]:                          # торцы и планки (фары — между средними и пластинами)
+		_rod(r, Vector3(x, GY0, GZ), Vector3(x, GY1, GZ), bar)
+	for s: float in [-1.0, 1.0]:
+		_box(r, Vector3(0.05, PLATE_H, ROD_R * 2.0), Vector3(0.17 * s, GTOP - PLATE_H * 0.5, GZ - ROD_R * 2.0), bar)
+		_rod(r, Vector3(0.17 * s, 0.2, GZ), Vector3(0.17 * s, 0.2, -0.41), bar)   # крепление к корпусу (за пластиной)
 	_antenna(m, Vector3(0.14, 0.48, 0.32))
 
 
@@ -111,17 +136,18 @@ static func _hover(m: Model) -> void:
 	var r := m.root
 	# Юбка — сплюснутая капсула во весь габарит; палуба, надстройка с куполом, вентиляторы на корме.
 	var cushion := CapsuleMesh.new()
-	cushion.radius = 0.31
-	cushion.height = 0.86
+	cushion.radius = 0.34
+	cushion.height = 0.94
 	cushion.radial_segments = 16
 	cushion.rings = 4
-	var sk := _mesh(r, cushion, Vector3(0, 0.13, 0), skirt)
+	var sk := _mesh(r, cushion, Vector3(0, 0.15, 0), skirt)
 	sk.rotation = Vector3(PI * 0.5, 0, 0)
-	sk.scale = Vector3(1, 1, 0.42)
-	_box(r, Vector3(0.5, 0.035, 0.74), Vector3(0, 0.265, 0.0), under)      # кант палубы
-	_box(r, Vector3(0.46, 0.05, 0.7), Vector3(0, 0.3, 0.0), paint)         # палуба
-	_box(r, Vector3(0.36, 0.1, 0.46), Vector3(0, 0.37, -0.02), paint)      # надстройка
-	_dome(m, Vector3(0, 0.42, -0.08))
+	sk.scale = Vector3(1, 1, 0.45)
+	# Корпус — призмы с прямым носом и скосами по бокам (BOW_DEG от поперечной линии).
+	_prism(r, _bow(0.25, -0.37, 0.37, 0.11), 0.27, 0.035, under)          # кант палубы
+	_prism(r, _bow(0.23, -0.35, 0.35, 0.1), 0.3, 0.05, paint)              # палуба
+	_prism(r, _bow(0.18, -0.25, 0.21, 0.09), 0.35, 0.1, paint)             # надстройка
+	_dome(m, Vector3(0, 0.45, -0.08))
 	# Два вентилятора в длинных кожухах на корме; лопасти вращаются.
 	for x in [-0.13, 0.13]:
 		var ring := TorusMesh.new()
@@ -129,17 +155,17 @@ static func _hover(m: Model) -> void:
 		ring.outer_radius = 0.13
 		ring.rings = 12
 		ring.ring_segments = 6
-		var duct := _mesh(r, ring, Vector3(x, 0.45, 0.3), fan)
+		var duct := _mesh(r, ring, Vector3(x, 0.47, 0.3), fan)
 		duct.rotation = Vector3(PI * 0.5, 0, 0)
 		duct.scale = Vector3(1, 2.4, 1)      # кожух вытянут вдоль оси вентилятора
 		var rotor := Node3D.new()
-		rotor.position = Vector3(x, 0.45, 0.3)
+		rotor.position = Vector3(x, 0.47, 0.3)
 		rotor.physics_interpolation_mode = Node.PHYSICS_INTERPOLATION_MODE_OFF
 		r.add_child(rotor)
 		_box(rotor, Vector3(0.17, 0.03, 0.01), Vector3.ZERO, blade)
 		_box(rotor, Vector3(0.03, 0.17, 0.01), Vector3.ZERO, blade)
 		m.spinners.append(rotor)
-	_antenna(m, Vector3(0.12, 0.42, 0.14))
+	_antenna(m, Vector3(0.12, 0.45, 0.14))
 
 
 ## Купол-кабина — у всех классов одинаковый: прозрачная полусфера, в stencil не пишет.
@@ -162,8 +188,68 @@ static func _dome(m: Model, pos: Vector3) -> void:
 ## Антенна: тонкий штырь с огоньком на конце (основание — pos).
 static func _antenna(m: Model, pos: Vector3) -> void:
 	var rod := _solid(m, TRIM)
-	_cyl(m.root, 0.014, 0.24, pos + Vector3(0, 0.12, 0), rod)
-	_box(m.root, Vector3(0.035, 0.035, 0.035), pos + Vector3(0, 0.25, 0), _lamp(m, Color(1.0, 0.35, 0.25)))
+	_cyl(m.root, ROD_R, 0.24, pos + Vector3(0, 0.12, 0), rod)
+	m.beacon = _lamp(m, BEACON_DIM)
+	m.beacon_pos = pos + Vector3(0, 0.25, 0)
+	_box(m.root, Vector3(0.035, 0.035, 0.035), m.beacon_pos, m.beacon)
+
+
+## Труба от a до b (толщиной в антенну).
+static func _rod(parent: Node3D, a: Vector3, b: Vector3, mat: Material, radius: float = ROD_R) -> MeshInstance3D:
+	if b.y < a.y:
+		var tmp := a
+		a = b
+		b = tmp
+	var d := b - a
+	var mi := _cyl(parent, radius, d.length() + radius, (a + b) * 0.5, mat)
+	mi.basis = Basis(Quaternion(Vector3.UP, d.normalized()))
+	return mi
+
+
+## Контур палубы с носом: прямой нос шириной 2·nose, по бокам скосы под BOW_DEG к поперечной линии.
+## Точки — (x, z), перед — по −Z.
+static func _bow(half_w: float, z_front: float, z_back: float, nose: float) -> PackedVector2Array:
+	var d := (half_w - nose) * tan(deg_to_rad(BOW_DEG))
+	return PackedVector2Array([Vector2(-nose, z_front), Vector2(nose, z_front), Vector2(half_w, z_front + d),
+			Vector2(half_w, z_back), Vector2(-half_w, z_back), Vector2(-half_w, z_front + d)])
+
+
+## Призма: выпуклый контур poly (x, z), низ на y0, высота h. Грани плоские.
+static func _prism(parent: Node3D, poly: PackedVector2Array, y0: float, h: float, mat: Material) -> MeshInstance3D:
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var center := Vector2.ZERO
+	for v in poly:
+		center += v
+	center /= poly.size()
+	var y1 := y0 + h
+	for i in range(1, poly.size() - 1):
+		_tri(st, Vector3(poly[0].x, y1, poly[0].y), Vector3(poly[i].x, y1, poly[i].y),
+				Vector3(poly[i + 1].x, y1, poly[i + 1].y), Vector3.UP)
+		_tri(st, Vector3(poly[0].x, y0, poly[0].y), Vector3(poly[i].x, y0, poly[i].y),
+				Vector3(poly[i + 1].x, y0, poly[i + 1].y), Vector3.DOWN)
+	for i in poly.size():
+		var a := poly[i]
+		var b := poly[(i + 1) % poly.size()]
+		var e := b - a
+		var n2 := Vector2(e.y, -e.x).normalized()
+		if n2.dot((a + b) * 0.5 - center) < 0.0:
+			n2 = -n2
+		var n := Vector3(n2.x, 0, n2.y)
+		_tri(st, Vector3(a.x, y0, a.y), Vector3(b.x, y0, b.y), Vector3(b.x, y1, b.y), n)
+		_tri(st, Vector3(a.x, y0, a.y), Vector3(b.x, y1, b.y), Vector3(a.x, y1, a.y), n)
+	return _mesh(parent, st.commit(), Vector3.ZERO, mat)
+
+
+## Треугольник лицом к n: в Godot лицевая сторона — обход по часовой стрелке, если смотреть на неё.
+static func _tri(st: SurfaceTool, a: Vector3, b: Vector3, c: Vector3, n: Vector3) -> void:
+	if (b - a).cross(c - a).dot(n) > 0.0:
+		var tmp := b
+		b = c
+		c = tmp
+	for v in [a, b, c]:
+		st.set_normal(n)
+		st.add_vertex(v)
 
 
 ## Крупная окрашенная часть: даёт силуэт сквозь препятствия.

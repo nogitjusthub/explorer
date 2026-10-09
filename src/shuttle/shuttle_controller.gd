@@ -77,6 +77,7 @@ func step(dt: float) -> void:
 		_main_craft.descend(_pad_ground(), scheduler.time_left)
 	_update_menu()
 	_step_emergency(dt)
+	vehicle.beacon_calling = emergency.state == EmergencyCall.State.INBOUND
 	if _decision_left >= 0.0 and _menu == null:
 		_decision_left -= dt
 		if _decision_left <= 0.0:

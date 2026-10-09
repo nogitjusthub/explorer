@@ -9,6 +9,7 @@ signal died(cause: StringName)                    ## гибель, котору�
 
 const WRECK_DARKEN := 0.72
 const FAN_SPEED := 18.0            ## рад/с — вентиляторы ховера
+const BEACON_BLINK_S := 0.4        ## период мигания огонька антенны при вызове аварийного челнока
 
 var cls: VehicleClass
 var query: TerrainQuery
@@ -20,9 +21,11 @@ var engine_running := true      ## false — двигатель заглох (п
 var wrecked := false
 var total_distance := 0.0
 var engine: EngineSound
+var beacon_calling := false     ## летит аварийный челнок: огонёк антенны ярко мигает и подсвечивает всё вокруг
 
 var _tilt := Basis.IDENTITY
 var _model: VehicleModels.Model
+var _beacon_light: OmniLight3D
 var _time := 0.0
 var _lift_t := -1.0
 var _lift_from := 0.0
@@ -54,6 +57,14 @@ func _rebuild_model() -> void:
 		_model.root.queue_free()
 	_model = VehicleModels.build(cls.id)
 	add_child(_model.root)
+	_beacon_light = OmniLight3D.new()
+	_beacon_light.light_color = VehicleModels.BEACON
+	_beacon_light.light_energy = 1.5
+	_beacon_light.omni_range = 1.8
+	_beacon_light.shadow_enabled = false
+	_beacon_light.position = _model.beacon_pos + Vector3(0, 0.05, 0)
+	_beacon_light.visible = false
+	_model.root.add_child(_beacon_light)
 	engine.pitch_mult = cls.engine_pitch
 
 
@@ -65,6 +76,21 @@ func _animate(dt: float) -> void:
 	if _model.hover_height > 0.0:
 		var bob := 0.0 if wrecked else sin(_time * 3.0) * 0.012
 		_model.root.position.y = _model.hover_height + bob
+	_animate_beacon()
+
+
+## Огонёк антенны: обычно тлеет и чуть дышит; пока летит аварийный челнок — ярко мигает со вспышкой света.
+func _animate_beacon() -> void:
+	if wrecked:
+		_beacon_light.visible = false
+		return
+	if beacon_calling:
+		var on := fmod(_time, BEACON_BLINK_S) < BEACON_BLINK_S * 0.5
+		_model.beacon.albedo_color = VehicleModels.BEACON.lightened(0.35) if on else VehicleModels.BEACON_DIM.darkened(0.5)
+		_beacon_light.visible = on
+	else:
+		_model.beacon.albedo_color = VehicleModels.BEACON_DIM.lerp(VehicleModels.BEACON, 0.15 + 0.15 * sin(_time * 2.0))
+		_beacon_light.visible = false
 
 
 func place(pos: Vector2, heading: float = 0.0) -> void:

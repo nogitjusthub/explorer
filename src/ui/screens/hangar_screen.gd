@@ -1,7 +1,7 @@
 class_name HangarScreen
 extends CanvasLayer
-## Экран перед забегом (GDD §2): трюм челнока на орбите. Три машины стоят на люках; выбранная —
-## под прожектором и медленно поворачивается, остальные — тёмные силуэты на фоне подсвеченных стен.
+## Экран перед забегом (GDD §2): трюм челнока на орбите. Три машины стоят на люках в ряд вдоль задней
+## стены; выбранная — под прожектором и медленно поворачивается, остальные — тёмные силуэты.
 ## Под выбранной — характеристики значками (1–5) и одна строка о характере; названий классов нет.
 ## Выбор: A / D, стрелки, тап по машине или кнопкам; старт — F / Enter / кнопка: люк раскрывается,
 ## машина уходит вниз — дальше сцена десанта. Нужен и вебу: звук включается после действия игрока.
@@ -11,11 +11,16 @@ signal started
 signal vehicle_changed(id: StringName)
 
 const VIEW := Vector2i(480, 320)
-const SPACING := 1.6                    ## между машинами, вдоль горизонтали экрана
+const SPACING := 1.6                     ## между люками вдоль задней стены
 const CAM_SIZE := 3.7
 const CAM_ELEVATION_DEG := 38.0
+const CAM_YAW_DEG := 15.0                ## почти фронтально: ряд люков на экране почти горизонтален
+const BACK_Z := -1.0                     ## задняя стена; люки — по z = 0
+const LEFT_X := -(SPACING + 1.1)         ## левая стена
+const COLOR_BAY_ON := Color(0.35, 1.0, 0.45)
+const COLOR_BAY_OFF := Color(0.45, 0.3, 0.08)
 const SPIN := 0.5                        ## рад/с — выбранная машина на поворотном круге
-const SPOT_ON := 9.0
+const SPOT_ON := 3.0
 const SPOT_FADE_S := 0.18
 const SINK_S := 0.7                      ## старт: машина уходит в люк
 const FADE_S := 0.3                      ## затемнение до и после
@@ -23,6 +28,9 @@ const COLOR_SPOT := Color(1.0, 0.93, 0.8)
 const COLOR_STRIP := Color(0.35, 0.6, 1.0)
 const COLOR_HAZARD := Color(0.95, 0.72, 0.15)
 const PICK_RADIUS_PX := 44.0
+const CAPTION := "выбор машины"
+const DISPLAY_ORDER: Array[StringName] = [&"tank", &"rover", &"hover"]   ## универсал — в центре
+const CAPTION_Y := 52.0                  ## строка «выбор машины» между кнопками «<» и «>»
 
 const BEAM_SHADER := """
 shader_type spatial;
@@ -73,6 +81,7 @@ var _leave_t := -1.0
 var _emitted := false
 var _time := 0.0
 var _blinkers: Array[StandardMaterial3D] = []
+var _bay_lamps: Array[StandardMaterial3D] = []
 
 
 func _ready() -> void:
@@ -110,17 +119,18 @@ func _ready() -> void:
 func _build_hold() -> void:
 	var env := Environment.new()
 	env.background_mode = Environment.BG_COLOR
-	env.background_color = Color(0.03, 0.025, 0.05)
+	env.background_color = Color(0.02, 0.018, 0.035)
 	env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
 	env.ambient_light_color = Color(0.42, 0.4, 0.62)
-	env.ambient_light_energy = 0.08
+	env.ambient_light_energy = 0.05
 	env.tonemap_mode = Environment.TONE_MAPPER_FILMIC
 	var we := WorldEnvironment.new()
 	we.environment = env
 	_vp.add_child(we)
 
-	# Камера — как в игре: изометрия, ортогональная проекция; трюм развёрнут углом к зрителю.
-	var yaw := deg_to_rad(45.0)
+	# Камера — изометрия, но трюм развёрнут почти фронтально: ряд люков вдоль задней стены идёт
+	# по экрану почти горизонтально, слева видна боковая стена.
+	var yaw := deg_to_rad(CAM_YAW_DEG)
 	var el := deg_to_rad(CAM_ELEVATION_DEG)
 	var dir := Vector3(sin(yaw) * cos(el), sin(el), cos(yaw) * cos(el))
 	_cam = Camera3D.new()
@@ -132,39 +142,40 @@ func _build_hold() -> void:
 	var focus := Vector3(0, 0.35, 0) - basis.y * 0.25        # машины чуть выше центра кадра
 	_cam.transform = Transform3D(basis, focus + dir * 20.0)
 	_vp.add_child(_cam)
-	var right := Vector3(basis.x.x, 0, basis.x.z).normalized()
-	var toward := Vector3(dir.x, 0, dir.z).normalized()
 
-	# Контровой свет из глубины трюма: обводит силуэты, пол и стены почти не трогает.
+	# Контровой свет сверху-сзади: обводит силуэты, пол и стены почти не трогает.
 	var rim := DirectionalLight3D.new()
 	rim.light_color = Color(0.45, 0.55, 1.0)
-	rim.light_energy = 0.3
+	rim.light_energy = 0.22
 	_vp.add_child(rim)
-	rim.look_at_from_position(Vector3(-3, 2.5, -3), Vector3(0, 0, 0))
+	rim.look_at_from_position(Vector3(-1.0, 3.0, BACK_Z), Vector3(0, 0, 0.6))
 
 	_build_room()
 
+	var toward := Vector3(dir.x, 0, dir.z).normalized()
 	for i in vehicle_ids.size():
-		var at := right * SPACING * (i - (vehicle_ids.size() - 1) * 0.5)
+		var at := Vector3(SPACING * (i - (vehicle_ids.size() - 1) * 0.5), 0, 0)
 		_build_bay(at)
 		var m := VehicleModels.build_plain(vehicle_ids[i])
 		m.root.position = at + Vector3(0, m.hover_height, 0)
-		var face := toward + right * 0.55              # три четверти: нос к зрителю и чуть вправо
+		var face := toward + Vector3(0.6, 0, 0)        # три четверти: нос к зрителю и чуть вправо
 		m.root.rotation.y = atan2(-face.x, -face.z)
 		_vp.add_child(m.root)
 		_models.append(m)
 
 
+## Трюм: задняя стена (z = BACK_Z) и левая (x = LEFT_X), рёбра шпангоутов, светящаяся полоса,
+## огоньки, ящики в дальнем правом углу. Люки — в ряд вдоль задней стены.
 func _build_room() -> void:
 	var floor_mat := ShaderMaterial.new()
 	floor_mat.shader = _shader(FLOOR_SHADER)
-	_box(Vector3(12, 0.2, 12), Vector3(1.5, -0.1, 1.5), floor_mat)
+	_box(Vector3(12, 0.2, 10), Vector3(1.0, -0.1, 3.0), floor_mat)
 
 	var wall := StandardMaterial3D.new()
-	wall.albedo_color = Color(0.2, 0.19, 0.26)
+	wall.albedo_color = Color(0.17, 0.16, 0.22)
 	wall.roughness = 0.8
 	wall.emission_enabled = true
-	wall.emission = Color(0.16, 0.17, 0.3)                 # стены светлее силуэтов
+	wall.emission = Color(0.09, 0.1, 0.18)                 # стены чуть светлее силуэтов
 	var rib := StandardMaterial3D.new()
 	rib.albedo_color = Color(0.2, 0.19, 0.25)
 	rib.roughness = 0.6
@@ -173,44 +184,42 @@ func _build_room() -> void:
 	strip.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	strip.albedo_color = COLOR_STRIP
 	var hazard := StandardMaterial3D.new()
-	hazard.albedo_color = COLOR_HAZARD.darkened(0.35)
+	hazard.albedo_color = COLOR_HAZARD.darkened(0.45)
 	hazard.roughness = 0.7
 
-	const W := 1.85         # стены — по x = −W и z = −W: угол трюма сразу за средней машиной
 	const H := 3.2
-	_box(Vector3(0.2, H, 9.0), Vector3(-W - 0.1, H * 0.5, 1.5), wall)
-	_box(Vector3(9.0, H, 0.2), Vector3(1.5, H * 0.5, -W - 0.1), wall)
-	# Нижний отбойник, светящаяся полоса, рёбра шпангоутов.
-	_box(Vector3(0.06, 0.18, 9.0), Vector3(-W + 0.03, 0.09, 1.5), hazard)
-	_box(Vector3(9.0, 0.18, 0.06), Vector3(1.5, 0.09, -W + 0.03), hazard)
-	_box(Vector3(0.04, 0.05, 9.0), Vector3(-W + 0.02, 2.2, 1.5), strip)
-	_box(Vector3(9.0, 0.05, 0.04), Vector3(1.5, 2.2, -W + 0.02), strip)
-	for i in 6:
-		var s := -W + 0.6 + i * 1.4
-		_box(Vector3(0.1, H, 0.12), Vector3(-W + 0.05, H * 0.5, s), rib)
-		_box(Vector3(0.12, H, 0.1), Vector3(s, H * 0.5, -W + 0.05), rib)
-	# Огоньки на стенах: мигают вразнобой.
-	for i in 5:
+	_box(Vector3(12, H, 0.2), Vector3(1.0, H * 0.5, BACK_Z - 0.1), wall)
+	_box(Vector3(0.2, H, 10), Vector3(LEFT_X - 0.1, H * 0.5, BACK_Z + 5.0), wall)
+	# Нижний отбойник и светящаяся полоса по обеим стенам.
+	_box(Vector3(12, 0.16, 0.05), Vector3(1.0, 0.08, BACK_Z + 0.025), hazard)
+	_box(Vector3(0.05, 0.16, 10), Vector3(LEFT_X + 0.025, 0.08, BACK_Z + 5.0), hazard)
+	_box(Vector3(12, 0.05, 0.03), Vector3(1.0, 1.9, BACK_Z + 0.015), strip)
+	_box(Vector3(0.03, 0.05, 10), Vector3(LEFT_X + 0.015, 1.9, BACK_Z + 5.0), strip)
+	# Шпангоуты: на задней стене — между люками, на левой — с шагом.
+	for i in 4:
+		_box(Vector3(0.12, H, 0.1), Vector3((i - 1.5) * SPACING, H * 0.5, BACK_Z + 0.05), rib)
+	for i in 4:
+		_box(Vector3(0.1, H, 0.12), Vector3(LEFT_X + 0.05, H * 0.5, BACK_Z + 1.4 + i * 1.6), rib)
+	# Огоньки на левой стене — мигают вразнобой.
+	for i in 3:
 		var lamp := StandardMaterial3D.new()
 		lamp.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 		lamp.albedo_color = Color(1.0, 0.3, 0.2) if i % 2 == 0 else Color(0.3, 1.0, 0.5)
 		_blinkers.append(lamp)
-		var s := -W + 1.3 + i * 1.4
-		if i % 2 == 0:
-			_box(Vector3(0.03, 0.06, 0.06), Vector3(-W + 0.02, 1.4, s), lamp)
-		else:
-			_box(Vector3(0.06, 0.06, 0.03), Vector3(s, 1.4, -W + 0.02), lamp)
-	# Ящики в углу.
+		_box(Vector3(0.03, 0.06, 0.06), Vector3(LEFT_X + 0.02, 1.3, BACK_Z + 0.7 + i * 1.6), lamp)
+	# Ящики в дальнем правом углу.
 	var crate := StandardMaterial3D.new()
 	crate.albedo_color = Color(0.3, 0.27, 0.22)
 	crate.roughness = 0.9
-	_box(Vector3(0.45, 0.35, 0.45), Vector3(-1.5, 0.175, -1.5), crate)
-	_box(Vector3(0.35, 0.28, 0.35), Vector3(-1.5, 0.49, -1.48), crate, Vector3(0, 0.3, 0))
-	_box(Vector3(0.4, 0.3, 0.4), Vector3(-0.95, 0.15, -1.55), crate, Vector3(0, -0.2, 0))
+	var cx := SPACING * 1.5 + 0.15
+	_box(Vector3(0.45, 0.35, 0.45), Vector3(cx, 0.175, BACK_Z + 0.3), crate)
+	_box(Vector3(0.35, 0.28, 0.35), Vector3(cx + 0.02, 0.49, BACK_Z + 0.3), crate, Vector3(0, 0.3, 0))
+	_box(Vector3(0.4, 0.3, 0.4), Vector3(cx + 0.1, 0.15, BACK_Z + 0.85), crate, Vector3(0, -0.2, 0))
 
 
-## Люк под машиной: жёлтое кольцо, створка (уходит при старте), под ней — темнота шахты; прожектор
-## сверху и видимый конус его луча.
+## Люк под машиной: жёлтое кольцо, створка (уходит при старте), под ней — темнота шахты; пятно тени,
+## прожектор сверху (без теней — они давали артефакты на гранях) и видимый конус луча; над люком на
+## задней стене — лампа отсека: у выбранной горит зелёным.
 func _build_bay(at: Vector3) -> void:
 	var hole := StandardMaterial3D.new()
 	hole.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
@@ -221,6 +230,11 @@ func _build_bay(at: Vector3) -> void:
 	door.roughness = 0.5
 	door.metallic = 0.5
 	_doors.append(_disc(0.58, at + Vector3(0, 0.008, 0), door))
+	var blob := StandardMaterial3D.new()
+	blob.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	blob.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	blob.albedo_color = Color(0, 0, 0, 0.55)
+	_disc(0.42, at + Vector3(0, 0.012, 0), blob)
 	var ring := TorusMesh.new()
 	ring.inner_radius = 0.58
 	ring.outer_radius = 0.7
@@ -230,7 +244,7 @@ func _build_bay(at: Vector3) -> void:
 	ring_mat.albedo_color = COLOR_HAZARD
 	ring_mat.roughness = 0.6
 	ring_mat.emission_enabled = true
-	ring_mat.emission = COLOR_HAZARD * 0.25          # кольцо видно и в темноте — по нему читается силуэт
+	ring_mat.emission = COLOR_HAZARD * 0.2           # кольцо видно и в темноте — по нему читается силуэт
 	var ring_mi := MeshInstance3D.new()
 	ring_mi.mesh = ring
 	ring_mi.material_override = ring_mat
@@ -238,12 +252,17 @@ func _build_bay(at: Vector3) -> void:
 	ring_mi.scale = Vector3(1, 0.08, 1)
 	_vp.add_child(ring_mi)
 
+	var bay_lamp := StandardMaterial3D.new()
+	bay_lamp.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	_box(Vector3(0.22, 0.07, 0.03), Vector3(at.x, 0.45, BACK_Z + 0.02), bay_lamp)
+	_bay_lamps.append(bay_lamp)
+
 	var spot := SpotLight3D.new()
 	spot.light_color = COLOR_SPOT
 	spot.spot_range = 8.0
 	spot.spot_angle = 17.0
 	spot.spot_attenuation = 0.6
-	spot.shadow_enabled = true
+	spot.shadow_enabled = false
 	spot.light_energy = 0.0
 	_vp.add_child(spot)
 	spot.look_at_from_position(at + Vector3(0, 5.0, 0), at, Vector3.FORWARD)
@@ -315,31 +334,46 @@ func _build_ui() -> void:
 	add_child(_ui)
 	var go := UiKit.button("ВЫСАДКА", "F", 8)
 	go.pressed.connect(_start)
-	_place(go, Vector2(VIEW.x * 0.5, VIEW.y - 18), true)
-	var help := UiKit.button("?", "F1")
+	_place(go, Vector2(VIEW.x * 0.5, VIEW.y - 34), true)
+	var help := UiKit.button("Справка", "F1")
 	help.pressed.connect(_open_help)
-	_place(help, Vector2(VIEW.x - 10, 10), false, true)
+	_place(help, Vector2(VIEW.x * 0.5, VIEW.y - 12), true)
+	# Стрелки — по бокам от строки «выбор машины».
+	var half := ThemeDB.fallback_font.get_string_size(CAPTION, HORIZONTAL_ALIGNMENT_LEFT, -1, 8).x * 0.5 + 8.0
 	var prev := UiKit.button("<", "A")
 	prev.pressed.connect(_step.bind(-1))
-	_place(prev, Vector2(10, 142), false)
-	var next := UiKit.button(">", "D")
+	_place(prev, Vector2(VIEW.x * 0.5 - half, CAPTION_Y - 3), false, true)
+	var next := UiKit.button("", "")
+	next.text = "[D]   >"
 	next.pressed.connect(_step.bind(1))
-	_place(next, Vector2(VIEW.x - 10, 142), false, true)
+	_place(next, Vector2(VIEW.x * 0.5 + half, CAPTION_Y - 3), false)
 
 
-## Кнопку — в точку: по центру (center) или от левого/правого края (from_right).
+## Кнопку — в точку: по вертикали всегда центром; по горизонтали — центром (center), правым краем
+## (from_right) или левым.
 func _place(b: Button, at: Vector2, center: bool, from_right: bool = false) -> void:
 	add_child(b)
 	b.reset_size()
 	var x := at.x - b.size.x * 0.5 if center else (at.x - b.size.x if from_right else at.x)
-	b.position = Vector2(x, at.y - b.size.y * 0.5 if center else at.y)
+	b.position = Vector2(x, at.y - b.size.y * 0.5)
+
+
+## Порядок машин в трюме: DISPLAY_ORDER, неизвестные классы — в конце.
+static func display_order(ids: Array[StringName]) -> Array[StringName]:
+	var out: Array[StringName] = []
+	for id in DISPLAY_ORDER:
+		if ids.has(id):
+			out.append(id)
+	for id in ids:
+		if not out.has(id):
+			out.append(id)
+	return out
 
 
 func _draw_ui() -> void:
 	var w := float(VIEW.x)
 	UiKit.text(_ui, Vector2(0, 26), "EXPLORER", 16, UiKit.COLOR_TEXT, HORIZONTAL_ALIGNMENT_CENTER, w)
-	UiKit.text(_ui, Vector2(0, 38), "трюм челнока · выбор машины", 8, UiKit.COLOR_DIM,
-			HORIZONTAL_ALIGNMENT_CENTER, w)
+	UiKit.text(_ui, Vector2(0, CAPTION_Y), CAPTION, 8, UiKit.COLOR_DIM, HORIZONTAL_ALIGNMENT_CENTER, w)
 	if vehicle_ids.is_empty():
 		return
 	var cls := Balance.vehicle(vehicle_ids[selected])
@@ -415,6 +449,7 @@ func _apply_lights(dt: float) -> void:
 		_spots[i].light_energy = SPOT_ON * k * flick
 		_spots[i].visible = k > 0.0
 		_beams[i].set_shader_parameter("intensity", k * flick)
+		_bay_lamps[i].albedo_color = COLOR_BAY_OFF.lerp(COLOR_BAY_ON, k * flick)
 
 
 func _start() -> void:
