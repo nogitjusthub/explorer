@@ -335,7 +335,7 @@ func _build_ui() -> void:
 	add_child(_ui)
 	var go := UiKit.button("ВЫСАДКА", "F", 8)
 	go.pressed.connect(_start)
-	_place(go, Vector2(VIEW.x * 0.5, VIEW.y - 34), true)
+	_place(go, Vector2(VIEW.x * 0.5, CAPTION_Y + 16), true)        # сразу под строкой выбора
 	var help := UiKit.button("Справка", "F1")
 	help.pressed.connect(_open_help)
 	_place(help, Vector2(VIEW.x * 0.5, VIEW.y - 12), true)
