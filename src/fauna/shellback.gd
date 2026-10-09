@@ -1,25 +1,28 @@
 class_name Shellback
 extends Creature
-## Панцирник (GDD §5.4): ходит как танк — склоны, вброд до 2 ярусов, — медленно (shellback_speed).
-## Услышав машину, подбирается по полю путей вида SHELLBACK; когда до неё прямой путь короче рывка —
-## роет землю shellback_dig_s (телеграф) и бросается по прямой на shellback_charge_dist со скоростью
-## shellback_charge_speed. Попал — урон и отбрасывает машину; в стенку — оглушён. Спасение — уйти с
-## линии атаки.
+## Панцирник (GDD §5.4): размером с машину — купол-панцирь с полосами, рог, шесть ног. Ходит как танк —
+## склоны, вброд до 2 ярусов (shellback_speed — быстрее танка, медленнее ровера). Услышав машину,
+## подбирается по полю путей вида SHELLBACK; когда до неё прямой путь короче рывка — роет землю
+## shellback_dig_s (телеграф) и бросается по прямой на shellback_charge_dist со скоростью
+## shellback_charge_speed (медленнее ровера). Сдвинуть машину может только таран: урон, отброс и
+## раскачка корпуса; в стенку — оглушён. Не подобраться fauna_give_up_s — сдаётся и CALM_S не слышит
+## машину. Спасение — уйти с линии атаки или уехать.
 
 enum State { IDLE, APPROACH, DIG, CHARGE, STUN }
 
 const SHELL_COLOR := Color(0.27, 0.33, 0.3)
 const STRIPE_COLOR := Color(0.5, 0.6, 0.45)
 const LEG_COLOR := Color(0.16, 0.18, 0.17)
-const CONTACT := 0.9
+const SIZE := 0.68                       ## модель ужата по плоскости — размером с машину
+const CONTACT := 0.75
 const STUN_S := 1.5
-const GIVE_UP_S := 25.0
+const CALM_S := 10.0                     ## сдался — столько не слышит машину
 const WANDER_SPEED := 0.8
 
 var state := State.IDLE
 
 var _timer := 0.0
-var _aggro_t := 0.0
+var _calm := 0.0
 var _charge_dir := Vector2.ZERO
 var _charge_left := 0.0
 var _hit := false
@@ -46,16 +49,17 @@ func step(dt: float) -> void:
 	var d := pos.distance_to(vp)
 	match state:
 		State.IDLE:
+			_calm = maxf(_calm - dt, 0.0)
 			if pos.distance_to(_goal) < 0.3:
 				_goal = pos + Vector2.from_angle(rng.randf() * TAU) * 3.0
 			_walk_to(_goal, WANDER_SPEED, dt)
-			if noise.hears_vehicle(pos):
+			if _calm <= 0.0 and noise.hears_vehicle(pos):
 				state = State.APPROACH
 				aggressive = true
-				_aggro_t = 0.0
+				reset_interest()
 		State.APPROACH:
-			_aggro_t += dt
 			if d <= rules.shellback_charge_dist and _line_clear(pos, vp):
+				lost_interest(dt, d, true)
 				state = State.DIG
 				_timer = rules.shellback_dig_s
 				_charge_dir = (vp - pos).normalized()
@@ -64,10 +68,12 @@ func step(dt: float) -> void:
 				var field: FlowField = director.call(&"field", FlowField.Mode.SHELLBACK)
 				var t := Grid.tile_of_world(pos.x, pos.y)
 				var next := field.next_tile(query, t) if field != null else t
-				_walk_to(Vector2(next.x + 0.5, next.y + 0.5) if next != t else vp, rules.shellback_speed, dt)
-			if _aggro_t > GIVE_UP_S or d > 30.0:
+				if d > CONTACT + 0.3:                           # вплотную не лезет — только таран
+					_walk_to(Vector2(next.x + 0.5, next.y + 0.5) if next != t else vp, rules.shellback_speed, dt)
+			if state == State.APPROACH and (lost_interest(dt, d) or d > 30.0):
 				state = State.IDLE
 				aggressive = false
+				_calm = CALM_S
 		State.DIG:
 			_timer -= dt
 			_model.rotation.z = sin(_timer * 40.0) * 0.08    # дрожит, роет
@@ -92,6 +98,10 @@ func step(dt: float) -> void:
 				_hit = true
 				damaged.emit(rules.shellback_damage, &"shellback")
 				vehicle.state.push_vel += _charge_dir * 7.0 / vehicle.cls.mass
+				vehicle.rock(Vehicle.ROCK_RAM, _charge_dir)
+				# Удар останавливает рывок: отскок назад, оглушён — сквозь машину не проходит.
+				pos = Creature.move_on_grid(query, FlowField.Mode.SHELLBACK, pos, pos - _charge_dir * 0.3)
+				_stun()
 				EventBus.camera_shake_requested.emit(0.7, 0.3)
 			if _charge_left <= 0.0 and state == State.CHARGE:
 				_stun()
@@ -148,9 +158,13 @@ func _place(_dt: float) -> void:
 	_dust.position = _model.position + Vector3(0, 0.1, 0)
 
 
-## Панцирник: тёмный купол-панцирь с полосами, рог, шесть ног.
+## Панцирник: тёмный купол-панцирь с полосами, рог, шесть ног. По плоскости ужат до размера машины
+## (SIZE), высота прежняя.
 func _build_model() -> Node3D:
+	var top := Node3D.new()
 	var root := Node3D.new()
+	root.scale = Vector3(SIZE, 1.0, SIZE)
+	top.add_child(root)
 	var shell := MeshInstance3D.new()
 	var sm := SphereMesh.new()
 	sm.radius = 0.42
@@ -220,4 +234,5 @@ func _build_model() -> Node3D:
 	_dust.mesh = q
 	_dust.local_coords = false
 	add_child(_dust)
-	return root
+	return top
+

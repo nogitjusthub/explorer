@@ -1,7 +1,7 @@
 class_name Creature
 extends Node3D
-## Общее у существ (GDD §5.4): ссылки на мир и машину, позиция на сетке, урон машине сигналом.
-## FaunaDirector вызывает step() в физическом кадре; finished — существо можно убрать.
+## Общее у существ (GDD §5.4): ссылки на мир и машину, позиция на сетке, урон машине сигналом,
+## потеря интереса. FaunaDirector вызывает step() в физическом кадре; finished — существо можно убрать.
 
 signal damaged(amount: int, source: StringName)
 
@@ -17,6 +17,9 @@ var pos := Vector2.ZERO
 var finished := false
 var aggressive := false                  ## атакует (не уйдёт за кольцо, пока гоняется)
 
+var _best_d := INF                       ## ближе всего к машине за погоню
+var _no_progress := 0.0                  ## сколько секунд не удаётся подобраться ближе
+
 
 func _init() -> void:
 	name = "Creature"
@@ -24,6 +27,48 @@ func _init() -> void:
 
 func step(_dt: float) -> void:
 	pass
+
+
+## Потеря интереса (GDD §5.4): погоня идёт, пока существо подбирается к машине. Не стало ближе на
+## INTEREST_STEP за fauna_give_up_s (машина ушла — она быстрее; забралась туда, куда не пройти) — true,
+## существо сдаётся. reached — атакует вплотную: интерес не теряет.
+const INTEREST_STEP := 0.5
+
+
+func lost_interest(dt: float, d: float, reached: bool = false) -> bool:
+	if reached or d < _best_d - INTEREST_STEP:
+		_best_d = minf(_best_d, d) if not reached else d
+		_no_progress = 0.0
+		return false
+	_no_progress += dt
+	return _no_progress > rules.fauna_give_up_s
+
+
+func reset_interest() -> void:
+	_best_d = INF
+	_no_progress = 0.0
+
+
+## Труба от a до b (лапы, рога): тонкий цилиндр.
+static func rod(parent: Node3D, a: Vector3, b: Vector3, radius: float, mat: Material) -> MeshInstance3D:
+	if b.y < a.y:
+		var tmp := a
+		a = b
+		b = tmp
+	var d := b - a
+	var c := CylinderMesh.new()
+	c.top_radius = radius
+	c.bottom_radius = radius
+	c.height = d.length() + radius
+	c.radial_segments = 4
+	c.rings = 0
+	var mi := MeshInstance3D.new()
+	mi.mesh = c
+	mi.material_override = mat
+	mi.position = (a + b) * 0.5
+	mi.basis = Basis(Quaternion(Vector3.UP, d.normalized()))
+	parent.add_child(mi)
+	return mi
 
 
 func ground_y(p: Vector2) -> float:

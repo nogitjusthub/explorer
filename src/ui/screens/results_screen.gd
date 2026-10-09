@@ -102,7 +102,7 @@ func _button(text: String, hotkey: String, action: Callable, at: Vector2, center
 
 
 func _on_button(action: Callable) -> void:
-	if _age >= INPUT_DELAY_S and not HelpScreen.is_open:
+	if _age >= INPUT_DELAY_S and not HelpScreen.shown(get_tree()):
 		action.call()
 
 
@@ -119,7 +119,7 @@ func _letter_arrow(i: int, up: bool) -> Rect2:
 
 
 func _input(event: InputEvent) -> void:
-	if _age < INPUT_DELAY_S or HelpScreen.is_open:
+	if _age < INPUT_DELAY_S or HelpScreen.shown(get_tree()):
 		return
 	if _entering and UiKit.is_click(event):
 		var p: Vector2 = (event as InputEventMouseButton).position

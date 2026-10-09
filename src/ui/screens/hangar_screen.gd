@@ -30,6 +30,7 @@ const COLOR_HAZARD := Color(0.95, 0.72, 0.15)
 const PICK_RADIUS_PX := 44.0
 const CAPTION := "выбор машины"
 const DISPLAY_ORDER: Array[StringName] = [&"tank", &"rover", &"hover"]   ## универсал — в центре
+const DEFAULT_ID := &"rover"             ## выбран при открытии трюма
 const CAPTION_Y := 52.0                  ## строка «выбор машины» между кнопками «<» и «>»
 
 const BEAM_SHADER := """
@@ -397,7 +398,7 @@ func _process(dt: float) -> void:
 	if _leave_t >= 0.0:
 		_leave(dt)
 		return
-	if not HelpScreen.is_open:
+	if not HelpScreen.shown(get_tree()):
 		if Input.is_action_just_pressed(&"move_left") or Input.is_action_just_pressed(&"ui_left"):
 			_step(-1)
 		elif Input.is_action_just_pressed(&"move_right") or Input.is_action_just_pressed(&"ui_right"):
@@ -414,7 +415,7 @@ func _process(dt: float) -> void:
 
 ## Тап или клик по машине — выбрать её.
 func _unhandled_input(event: InputEvent) -> void:
-	if _leave_t >= 0.0 or HelpScreen.is_open or not UiKit.is_click(event):
+	if _leave_t >= 0.0 or HelpScreen.shown(get_tree()) or not UiKit.is_click(event):
 		return
 	var p: Vector2 = (event as InputEventMouseButton).position
 	for i in _models.size():
@@ -427,7 +428,7 @@ func _unhandled_input(event: InputEvent) -> void:
 
 
 func _step(d: int) -> void:
-	if _leave_t < 0.0 and vehicle_ids.size() > 1 and not HelpScreen.is_open:
+	if _leave_t < 0.0 and vehicle_ids.size() > 1 and not HelpScreen.shown(get_tree()):
 		_select(wrapi(selected + d, 0, vehicle_ids.size()))
 
 
@@ -453,7 +454,7 @@ func _apply_lights(dt: float) -> void:
 
 
 func _start() -> void:
-	if _leave_t >= 0.0 or HelpScreen.is_open:
+	if _leave_t >= 0.0 or HelpScreen.shown(get_tree()):
 		return
 	_leave_t = 0.0
 	_clunk.play()

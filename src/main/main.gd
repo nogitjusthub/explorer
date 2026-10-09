@@ -65,7 +65,11 @@ func _ready() -> void:
 		vehicle.control_enabled = false
 		var hangar := HangarScreen.new()
 		hangar.vehicle_ids = HangarScreen.display_order(Balance.vehicle_ids())
-		hangar.selected = maxi(hangar.vehicle_ids.find(vehicle.cls.id), 0)
+		# По умолчанию в трюме выбран универсал в центре; «Заново» на экране итога сохраняет машину.
+		var first: StringName = vehicle.cls.id if dev.args.has("vehicle") else HangarScreen.DEFAULT_ID
+		hangar.selected = maxi(hangar.vehicle_ids.find(first), 0)
+		if vehicle.cls.id != hangar.vehicle_ids[hangar.selected]:
+			_on_vehicle_selected(hangar.vehicle_ids[hangar.selected])
 		hangar.vehicle_changed.connect(_on_vehicle_selected)
 		hangar.started.connect(_begin)
 		rig.turn_enabled = false

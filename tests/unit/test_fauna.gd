@@ -44,3 +44,32 @@ func test_hoppers_go_around_walls_and_not_through_water() -> void:
 	f.set_water(30, 10, 4)
 	var wet := _field(f, FlowField.Mode.HOPPER, Vector2i(20, 10))
 	assert_eq(wet.distance(Vector2i(30, 10)), FlowField.UNREACHED, "hoppers avoid water")
+
+
+func test_rover_and_hover_outrun_fauna_tank_does_not() -> void:
+	# GDD §5.4: скорости погони — быстрее танка, медленнее ровера и ховера.
+	var r := BalanceRules.new()
+	var tank: VehicleClass = load("res://data/vehicles/tank.tres")
+	var rover: VehicleClass = load("res://data/vehicles/rover.tres")
+	var hover: VehicleClass = load("res://data/vehicles/hover.tres")
+	for s: float in [r.hopper_speed, r.worm_speed, r.shellback_speed, r.shellback_charge_speed]:
+		assert_true(s > tank.max_speed, "fauna %.1f catches the tank (%.1f)" % [s, tank.max_speed])
+		assert_true(s < rover.max_speed and s < hover.max_speed, "rover and hover outrun fauna %.1f" % s)
+
+
+func test_creature_loses_interest_without_progress() -> void:
+	var c := Creature.new()
+	c.rules = BalanceRules.new()
+	var dt := 0.1
+	# Подбирается: расстояние сокращается — интерес не теряет.
+	var d := 20.0
+	for _i in 100:
+		d -= 0.5
+		assert_false(c.lost_interest(dt, maxf(d, 1.0), d <= 1.0), "approaching keeps interest")
+	# Машина уходит (или недостижима): ближе не становится — сдаётся через fauna_give_up_s.
+	var t := 0.0
+	while not c.lost_interest(dt, 5.0 + t):
+		t += dt
+		assert_true(t < c.rules.fauna_give_up_s + 1.0, "gives up in time")
+	assert_near(t, c.rules.fauna_give_up_s, 0.2, "gives up after fauna_give_up_s")
+	c.free()

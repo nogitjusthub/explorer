@@ -8,7 +8,8 @@ extends Creature
 ## огромный червь вырывается прямо под машиной с раскрытой пастью — три челюсти-лепестка, внутри
 ## кольцо зубов и глотка; челюсти захлопываются над машиной (урон worm_damage) и выплёвывают её на
 ## worm_toss тайла; червь вздымается над песком и уходит обратно, оставив яму. Сомкнутые челюсти —
-## округлая морда. Спасение — уйти с песка: червь теряет след.
+## округлая морда. Спасение — уйти с песка (через LOSE_S червь теряет след) или уехать: он медленнее
+## ровера и ховера, и если fauna_give_up_s не может подобраться ближе — уходит в глубину и пропадает.
 
 enum State { IDLE, HUNT, TELEGRAPH, STRIKE, COOLDOWN }
 
@@ -82,8 +83,9 @@ func step(dt: float) -> void:
 			if not on_sand(vp):
 				_lost += dt
 				if _lost > LOSE_S:
-					state = State.IDLE
-					aggressive = false
+					_leave()
+			elif lost_interest(dt, pos.distance_to(vp)):
+				_leave()
 			else:
 				_lost = 0.0
 				var delta := vp - pos
@@ -129,8 +131,7 @@ func step(dt: float) -> void:
 				if on_sand(vp):
 					start_hunt()
 				else:
-					state = State.IDLE
-					aggressive = false
+					_leave()
 	var underground := state == State.HUNT or state == State.TELEGRAPH
 	if not underground:
 		_settle(-1.0)            # ушёл в глубину — вал оседает целиком
@@ -183,8 +184,16 @@ func start_hunt() -> void:
 	state = State.HUNT
 	aggressive = true
 	_lost = 0.0
+	reset_interest()
 	_ridge_from = pos
 	EventBus.fauna_alerted.emit(&"worm", Vector3(pos.x, ground_y(pos), pos.y))
+
+
+## Потерял интерес: уходит в глубину — вал оседает, червя больше нет.
+func _leave() -> void:
+	state = State.IDLE
+	aggressive = false
+	finished = true
 
 
 func _strike() -> void:
@@ -239,6 +248,7 @@ func _bite() -> void:
 		return
 	damaged.emit(rules.worm_damage, &"worm")
 	var dir := (s.pos - _strike_at).normalized() if d > 0.05 else Vector2.from_angle(rng.randf() * TAU)
+	vehicle.rock(Vehicle.ROCK_RAM, dir)
 	var target := _strike_at + dir * rules.worm_toss
 	var t := Grid.tile_of_world(target.x, target.y)
 	if query.is_loaded(t.x, t.y):

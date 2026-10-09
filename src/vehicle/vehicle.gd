@@ -10,6 +10,15 @@ signal died(cause: StringName)                    ## гибель, котору�
 const WRECK_DARKEN := 0.72
 const FAN_SPEED := 18.0            ## рад/с — вентиляторы ховера
 const BEACON_BLINK_S := 0.4        ## период мигания огонька антенны при вызове аварийного челнока
+const ROCK_STIFFNESS := 170.0      ## раскачка корпуса от ударов: пружина (≈2 Гц)…
+const ROCK_DAMPING := 7.0          ## …с затуханием за полсекунды-секунду
+const ROCK_MAX := 0.35             ## рад
+## Сила раскачки (начальная угловая скорость, рад/с) от разных ударов.
+const ROCK_BITE := 0.9
+const ROCK_TREE := 0.8
+const ROCK_WALL := 1.8
+const ROCK_LANDING := 1.0
+const ROCK_RAM := 2.8
 
 var cls: VehicleClass
 var query: TerrainQuery
@@ -26,6 +35,8 @@ var beacon_calling := false     ## летит аварийный челнок: �
 var _tilt := Basis.IDENTITY
 var _model: VehicleModels.Model
 var _beacon_light: OmniLight3D
+var _rock := Vector2.ZERO          ## наклон модели от ударов: x — тангаж (нос вверх +), y — крен (правый борт вверх +)
+var _rock_vel := Vector2.ZERO
 var _time := 0.0
 var _lift_t := -1.0
 var _lift_from := 0.0
@@ -76,7 +87,17 @@ func _animate(dt: float) -> void:
 	if _model.hover_height > 0.0:
 		var bob := 0.0 if wrecked else sin(_time * 3.0) * 0.012
 		_model.root.position.y = _model.hover_height + bob
+	_animate_rock(dt)
 	_animate_beacon()
+
+
+func _animate_rock(dt: float) -> void:
+	if wrecked:
+		return
+	_rock_vel += (-_rock * ROCK_STIFFNESS - _rock_vel * ROCK_DAMPING) * dt
+	_rock = (_rock + _rock_vel * dt).clamp(Vector2(-ROCK_MAX, -ROCK_MAX), Vector2(ROCK_MAX, ROCK_MAX))
+	_model.root.rotation.x = _rock.x
+	_model.root.rotation.z = _rock.y
 
 
 ## Огонёк антенны: обычно тлеет и чуть дышит; пока летит аварийный челнок — ярко мигает со вспышкой света.
@@ -102,6 +123,18 @@ func place(pos: Vector2, heading: float = 0.0) -> void:
 	_tilt = _ground_basis()
 	_apply_transform()
 	reset_physics_interpolation()
+
+
+## Раскачка корпуса от удара (укус, таран, стенка, дерево): push — куда толкнули (в мире, по
+## плоскости); корпус кренится от удара и качается на пружине. Модель, не кинематика: машину это не двигает.
+func rock(strength: float, push: Vector2) -> void:
+	if push.length_squared() < 0.0001:
+		push = -state.forward()
+	push = push.normalized()
+	var fwd := state.forward()
+	var right := Vector2(-fwd.y, fwd.x)
+	# Толкнули назад — нос задирается; толкнули вправо — левый борт поднимается.
+	_rock_vel += Vector2(-push.dot(fwd), -push.dot(right)) * strength
 
 
 ## Эвакуация: машину плавно втягивает вверх (в челнок), потом она скрывается.
@@ -136,10 +169,14 @@ func _physics_process(dt: float) -> void:
 		EventBus.vehicle_fell.emit(r.fell_tiers, r.fall_damage)
 		if r.fall_damage > 0:
 			damaged.emit(r.fall_damage, &"fall")
+			rock(ROCK_LANDING, -state.forward())
 	if r.tree_damage > 0:
 		damaged.emit(r.tree_damage, &"tree")
+	if r.felled_tree or r.tree_damage > 0:
+		rock(ROCK_TREE, -state.forward())
 	if r.wall_damage > 0:
 		damaged.emit(r.wall_damage, &"wall")
+		rock(ROCK_WALL, -state.forward())
 	if r.drowned:
 		died.emit(&"drowned")
 	if not state.falling and not state.drowning:

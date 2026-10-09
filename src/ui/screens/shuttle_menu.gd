@@ -45,7 +45,7 @@ func _ready() -> void:
 func _process(dt: float) -> void:
 	_age += dt
 	# Выбор — опросом: стик шлёт поток событий, а нужен один шаг на нажатие. Пунктов два — любое направление.
-	if _age >= INPUT_DELAY_S and not HelpScreen.is_open:
+	if _age >= INPUT_DELAY_S and not HelpScreen.shown(get_tree()):
 		for action: StringName in [&"move_up", &"move_down", &"ui_up", &"ui_down"]:
 			if Input.is_action_just_pressed(action):
 				_selected = wrapi(_selected + 1, 0, ITEMS.size()) as Item
@@ -58,7 +58,7 @@ func _row(i: int) -> Rect2:
 
 
 func _input(event: InputEvent) -> void:
-	if _age < INPUT_DELAY_S or HelpScreen.is_open:
+	if _age < INPUT_DELAY_S or HelpScreen.shown(get_tree()):
 		return
 	if UiKit.is_click(event):
 		for i in ITEMS.size():

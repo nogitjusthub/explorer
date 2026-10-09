@@ -2,7 +2,7 @@ class_name HelpScreen
 extends CanvasLayer
 ## Справка (F1 или кнопка «?»): цель игры, намёк на угрозы, управление. Вся справочная информация —
 ## здесь, на остальных экранах только кнопки. Во время вылазки ставит игру на паузу и снимает её при
-## закрытии (если паузу ставила сама). Пока справка открыта, другие экраны ввод не берут (is_open).
+## закрытии (если паузу ставила сама). Пока справка открыта, другие экраны ввод не берут (shown()).
 
 const GOAL := "Вас высадили на чужую планету! Собирайте находки и попытайтесь довезти их до челнока — " \
 		+ "он садится на площадку по расписанию.\n" \
@@ -21,16 +21,18 @@ const CONTROLS := [
 	["Справка", "F1", ""],
 ]
 
-static var is_open := false
+const GROUP := &"help_screen"
 
 var pause_game := false                ## во время вылазки — ставить игру на паузу
 var _paused_here := false
 var _canvas: Control
+var _closed_frame := -1
 var _close: Button
 
 
 func _ready() -> void:
 	name = "HelpScreen"
+	add_to_group(GROUP)
 	layer = 30
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	var shade := ColorRect.new()
@@ -90,7 +92,6 @@ func open() -> void:
 	if visible:
 		return
 	visible = true
-	is_open = true
 	if pause_game and not get_tree().paused:
 		get_tree().paused = true
 		_paused_here = true
@@ -103,8 +104,7 @@ func close() -> void:
 	if _paused_here:
 		get_tree().paused = false
 		_paused_here = false
-	# Сбросить флаг кадром позже: Esc, закрывший справку, не должен дойти до экрана под ней.
-	(func() -> void: is_open = visible).call_deferred()
+	_closed_frame = Engine.get_process_frames()   # в этом кадре экраны под справкой ввод ещё не берут
 
 
 func _input(event: InputEvent) -> void:
@@ -119,5 +119,10 @@ func _input(event: InputEvent) -> void:
 		close()
 
 
-func _exit_tree() -> void:
-	is_open = false
+## Открыта ли справка (или закрылась в этом кадре — Esc, закрывший её, не должен дойти до экрана под ней).
+static func shown(tree: SceneTree) -> bool:
+	for n in tree.get_nodes_in_group(GROUP):
+		# Без «as HelpScreen»: ссылка скрипта на собственный класс держит его в памяти — утечка при выходе.
+		if (n as CanvasLayer).visible or int(n.get(&"_closed_frame")) == Engine.get_process_frames():
+			return true
+	return false
