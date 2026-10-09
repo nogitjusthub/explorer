@@ -6,7 +6,6 @@
 script = ExtResource("1_vclass")
 id = &"hover"
 display_name = "Ховер"
-blurb = "Гонщик: скользит над водой, обрывы почти не страшны. Заносит, жжёт топливо."
 hp_max = 70
 max_speed = 7.5
 accel = 6.5

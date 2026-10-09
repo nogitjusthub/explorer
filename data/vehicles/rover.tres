@@ -6,7 +6,6 @@
 script = ExtResource("1_vclass")
 id = &"rover"
 display_name = "Ровер"
-blurb = "Универсал: держит дорогу, мелководье — вброд, деревья — с разгона."
 hp_max = 100
 max_speed = 6.5
 accel = 5.0

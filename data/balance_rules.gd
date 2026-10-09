@@ -141,7 +141,7 @@ extends Resource
 @export var worm_spawn_min: float = 20.0          ## появляется ближе остальных — в 20…30 тайлах, на своём грунте
 @export var worm_spawn_max: float = 30.0
 @export var worm_telegraph_s: float = 0.9
-@export var worm_damage: int = 30
+@export var worm_damage: int = 50                 ## два броска убивают ровер (100) и ховер (70); танк (150) — три
 @export var worm_toss: float = 3.0
 @export var shellback_min_level: int = 3
 @export var shellback_speed: float = 4.6

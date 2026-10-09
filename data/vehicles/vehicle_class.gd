@@ -4,7 +4,6 @@ extends Resource
 
 @export var id: StringName
 @export var display_name: String             ## внутреннее имя (логи, отладка) — игроку не показываем
-@export_multiline var blurb: String          ## одна строка о характере класса (экран выбора)
 @export var hp_max: int = 100
 
 @export_group("Movement")

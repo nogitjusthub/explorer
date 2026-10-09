@@ -1,27 +1,22 @@
 class_name Pager
 extends Control
-## Пейджер (GDD §8): под радаром — до трёх сообщений об активных угрозах: тип, стрелка направления
-## относительно экрана (как радар и управление) и секунды до события. У непогоды (гроза, туман, буря)
-## и смерча стрелки нет — откуда придёт, не сказано (указатели — апгрейд радара); кислотный туман
-## подписан просто «ТУМАН» — его выдаёт только цвет. Сообщение держится, пока угроза шлёт телеграф.
+## Пейджер (GDD §8): под радаром, той же ширины, — до трёх сообщений об активных угрозах: только
+## название, без направления и без отсчёта (направление на угрозы — апгрейд «продвинутый радар», §12).
+## Кислотный туман подписан просто «ТУМАН» — его выдаёт только цвет. Новое сообщение мигает;
+## держится, пока угроза шлёт телеграф.
 
 const LINES := 3
 const LINE_H := 10.0
 const STALE_S := 1.0                   ## телеграф не обновлялся столько — угроза ушла
-const NEAR := 6.0                      ## ближе — без стрелки, «рядом»
 const NAMES := {
-	&"storm": "ГРОЗА", &"quake": "СЕЙСМИЧЕСКАЯ АКТИВНОСТЬ", &"fog": "ТУМАН", &"acid": "ТУМАН",
+	&"storm": "ГРОЗА", &"quake": "ЗЕМЛЕТРЯСЕНИЕ", &"fog": "ТУМАН", &"acid": "ТУМАН",
 	&"dust": "ПЫЛЕВАЯ БУРЯ", &"tornado": "СМЕРЧ",
 }
-const NO_ARROW: Array[StringName] = [&"storm", &"fog", &"acid", &"dust", &"tornado", &"quake"]   ## без указателя
 const COLOR_TEXT := Color(1.0, 0.55, 0.3)
 const COLOR_NEW := Color(1.0, 0.9, 0.6)
 const COLOR_BG := Color(0.06, 0.04, 0.09, 0.62)
 
-var vehicle: Vehicle
-var camera: Camera3D
-
-var _entries: Array[Dictionary] = []   ## {kind, at: Vector3, seconds, stale, age}
+var _entries: Array[Dictionary] = []   ## {kind, stale, age}
 var _font: Font
 
 
@@ -32,16 +27,14 @@ func _ready() -> void:
 	EventBus.threat_ended.connect(_on_ended)
 
 
-func _on_telegraphed(kind: StringName, at: Vector3, seconds: float, _dir_hint: Vector2) -> void:
+func _on_telegraphed(kind: StringName, _at: Vector3, _seconds: float, _dir_hint: Vector2) -> void:
 	if not NAMES.has(kind):
 		return
 	for e in _entries:
 		if e["kind"] == kind:
-			e["at"] = at
-			e["seconds"] = seconds
 			e["stale"] = 0.0
 			return
-	_entries.push_front({"kind": kind, "at": at, "seconds": seconds, "stale": 0.0, "age": 0.0})
+	_entries.push_front({"kind": kind, "stale": 0.0, "age": 0.0})
 	if _entries.size() > LINES:
 		_entries.pop_back()
 
@@ -59,31 +52,13 @@ func _process(dt: float) -> void:
 
 
 func _draw() -> void:
-	if _entries.is_empty() or vehicle == null or camera == null:
+	if _entries.is_empty():
 		return
-	draw_rect(Rect2(Vector2(size.x - 150.0, 0.0), Vector2(150.0, LINE_H * _entries.size() + 2.0)), COLOR_BG)
-	var b := camera.global_transform.basis
-	var right := Vector2(b.x.x, b.x.z).normalized()
-	var up := Vector2(-b.z.x, -b.z.z).normalized()
+	draw_rect(Rect2(Vector2.ZERO, Vector2(size.x, LINE_H * _entries.size() + 2.0)), COLOR_BG)
 	var y := LINE_H - 1.0
 	for e in _entries:
-		var at: Vector3 = e["at"]
-		var d := Vector2(at.x, at.z) - vehicle.state.pos
 		var text: String = NAMES[e["kind"]]
-		var seconds: float = e["seconds"]
-		if seconds > 0.0:
-			text += "  %d" % ceili(seconds)
-		var no_arrow := NO_ARROW.has(e["kind"])
-		var near := d.length() < NEAR and not no_arrow
-		if near:
-			text += "  рядом"
 		var col := COLOR_NEW if e["age"] < 1.0 and fmod(e["age"], 0.3) < 0.15 else COLOR_TEXT
-		var text_right := size.x - (4.0 if near or no_arrow else 14.0)
-		draw_string(_font, Vector2(0, y) + Vector2.ONE, text, HORIZONTAL_ALIGNMENT_RIGHT, text_right, 8, Color(0, 0, 0, 0.85))
-		draw_string(_font, Vector2(0, y), text, HORIZONTAL_ALIGNMENT_RIGHT, text_right, 8, col)
-		if not near and not no_arrow:
-			var s := Vector2(d.dot(right), -d.dot(up)).normalized()
-			var c := Vector2(size.x - 7.0, y - 3.0)
-			var side := Vector2(-s.y, s.x)
-			draw_colored_polygon(PackedVector2Array([c + s * 4.0, c - s * 3.0 + side * 3.0, c - s * 3.0 - side * 3.0]), col)
+		draw_string(_font, Vector2(0, y) + Vector2.ONE, text, HORIZONTAL_ALIGNMENT_RIGHT, size.x - 4.0, 8, Color(0, 0, 0, 0.85))
+		draw_string(_font, Vector2(0, y), text, HORIZONTAL_ALIGNMENT_RIGHT, size.x - 4.0, 8, col)
 		y += LINE_H

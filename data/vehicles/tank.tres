@@ -6,8 +6,7 @@
 script = ExtResource("1_vclass")
 id = &"tank"
 display_name = "Танк"
-blurb = "Крепость: в гору без потерь, лес валит с малого хода. Неспешен."
-hp_max = 160
+hp_max = 150
 max_speed = 4.0
 accel = 2.0
 launch_accel = 6.0

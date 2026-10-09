@@ -7,7 +7,7 @@ extends CanvasLayer
 
 const FUEL_WARN := 0.2                 ## доля бака, ниже которой полоса топлива мигает
 const BAR_W := 60
-const PANEL := Rect2(3, 3, 96, 33)
+const PANEL := Rect2(3, 3, 93, 33)
 const COLOR_PANEL := Color(0.06, 0.04, 0.09, 0.62)
 const COLOR_TEXT := Color(0.95, 0.92, 0.85)
 const COLOR_DIM := Color(0.62, 0.58, 0.66)
@@ -29,7 +29,6 @@ var _fuel := 0.0
 var _fuel_max := 1.0
 var _slots := 0
 var _slots_max := 1
-var _cargo_value := 0
 var _score := 0
 var _score_shown := 0.0
 var _time := 0.0
@@ -70,7 +69,7 @@ func _ready() -> void:
 	pager = Pager.new()
 	pager.anchor_left = 1.0
 	pager.anchor_right = 1.0
-	pager.offset_left = -160.0
+	pager.offset_left = -2.0 * Radar.R - 5.0          # ровно под радаром, той же ширины
 	pager.offset_right = -5.0
 	pager.offset_top = 8.0 + 2.0 * Radar.R
 	pager.offset_bottom = 8.0 + 2.0 * Radar.R + 34.0
@@ -125,10 +124,9 @@ func _on_score_changed(total: int) -> void:
 	_score = total
 
 
-func _on_cargo_changed(used: int, mx: int, value: int) -> void:
+func _on_cargo_changed(used: int, mx: int, _value: int) -> void:
 	_slots = used
 	_slots_max = mx
-	_cargo_value = value
 
 
 func _on_pickup_collected(kind: StringName, value: int) -> void:
@@ -187,8 +185,6 @@ func _draw_hud() -> void:
 	for i in _slots_max:
 		var r := Rect2(32 + i * (slot_w + 1), 26, slot_w, 5)
 		_canvas.draw_rect(r, COLOR_SLOT if i < _slots else COLOR_SLOT_EMPTY)
-	var cargo_x := 32 + _slots_max * (slot_w + 1) + 2
-	_text(Vector2(cargo_x, 31), str(_cargo_value), 8, COLOR_SLOT if _cargo_value > 0 else COLOR_DIM)
 
 	_text(Vector2(0, 17), "%06d" % roundi(_score_shown), 16, COLOR_TEXT, HORIZONTAL_ALIGNMENT_CENTER, size.x)
 	var y := 30.0

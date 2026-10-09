@@ -27,7 +27,7 @@ func _drive(s: VehicleState, inp: Vector2, cls: VehicleClass, f: TerrainFixture,
 func test_table_and_tank_times() -> void:
 	# Время на одном баке (GDD §4): полный ход 6,7 / 10 / 5 мин, холостой 33 / 45 / 22 мин.
 	var expected := {
-		&"rover": [100, 10, 6.67, 33.3], &"tank": [160, 12, 10.0, 45.0], &"hover": [70, 8, 5.0, 22.0]}
+		&"rover": [100, 10, 6.67, 33.3], &"tank": [150, 12, 10.0, 45.0], &"hover": [70, 8, 5.0, 22.0]}
 	for id: StringName in expected:
 		var cls := _cls(id)
 		var e: Array = expected[id]

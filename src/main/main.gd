@@ -190,8 +190,6 @@ func _build_world(args: Dictionary) -> void:
 	streamer.chunk_removed.connect(fauna.on_chunk_removed)
 	fauna.damaged.connect(_on_vehicle_damaged)
 	dev.fauna = fauna
-	hud.pager.vehicle = vehicle
-	hud.pager.camera = rig.camera
 
 	_pause = PauseOverlay.new()
 	add_child(_pause)
