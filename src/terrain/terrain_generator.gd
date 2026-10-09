@@ -45,6 +45,8 @@ var _n_crater: FastNoiseLite
 var _n_mineral: FastNoiseLite
 var _n_warp: FastNoiseLite
 var _n_water_warp: FastNoiseLite
+var _n_rough: FastNoiseLite
+var _n_mire: FastNoiseLite
 
 var _pads: Dictionary[Vector2i, Vector3i] = {}       ## блок → (центр x, центр z, ярус), кэш
 var _nests: Dictionary[Vector2i, Vector2i] = {}      ## блок → тайл гнезда (или NO_NEST), кэш
@@ -87,6 +89,8 @@ func _init(run_seed: int, params: TerrainParams) -> void:
 	_n_mineral = _make_noise(12, p.mineral_freq, 2)
 	_n_warp = _make_noise(13, p.avenue_warp_freq, 1)
 	_n_water_warp = _make_noise(14, 1.0 / 150.0, 1)
+	_n_rough = _make_noise(15, p.rough_freq, 2)
+	_n_mire = _make_noise(16, p.mire_freq, 1)
 
 
 ## Полная генерация за один вызов (тесты, предзагрузка).
@@ -170,10 +174,79 @@ func step(job: GenJob, deadline_usec: int) -> bool:
 		job.row += 1
 		if job.row >= Grid.WINDOW:
 			job.stage = 4
+			job.row = 0
+		if Time.get_ticks_usec() >= deadline_usec:
+			return false
+	while job.stage == 4:
+		# Свойства грунта — по соседям, когда всё окно готово; по ряду за шаг (бюджет кадра).
+		_ground_flags_row(job.data, job.row)
+		job.row += 1
+		if job.row >= Grid.WINDOW:
+			job.stage = 5
 			return true
 		if Time.get_ticks_usec() >= deadline_usec:
 			return false
 	return true
+
+
+## Свойства грунта (GDD §3.5a, §5.6), ряд lz окна — после того как готово всё окно, по соседям:
+## - зыбучий: песок или грунт у самой воды, пятнами по шуму: тайл частью в воде (не целиком) или
+##   сухой с водой в соседнем тайле — и при этом нижним углом не выше уровня этой воды (тайл над
+##   обрывом к воде — не зыбкий);
+## - неровный: россыпи камней по шуму (на скалах чаще, в лесу и у воды реже) и осыпи у подножия
+##   обрывов от talus_tiers ярусов.
+## Площадки, гнёзда и вода — без свойств. Соседи — в пределах одного тайла, все есть в окне чанка.
+func _ground_flags_row(data: ChunkData, lz: int) -> void:
+	var n := Grid.WINDOW
+	var origin := data.window_origin()
+	for lx in n:
+		var i := lz * n + lx
+		if (data.flags[i] & (ChunkData.FLAG_PAD | ChunkData.FLAG_NEST)) != 0:
+			continue
+		var hi := 0
+		var lo := 1000
+		for c in 4:
+			hi = maxi(hi, data.get_corner(i, c))
+			lo = mini(lo, data.get_corner(i, c))
+		var wet := data.water_level[i] != 0
+		if wet and hi < data.water_level[i] - Grid.HEIGHT_OFFSET:
+			continue                                   # целиком под водой (скат с верхом на уровне воды — кромка)
+		var tx := origin.x + lx
+		var tz := origin.y + lz
+		var mat := data.material[i]
+		if mat == ChunkData.Mat.SAND or mat == ChunkData.Mat.GROUND:
+			# Уровень воды рядом: своей или самой высокой в соседних тайлах.
+			var level := data.water_level[i] - Grid.HEIGHT_OFFSET if wet else -1000
+			for dz in range(-1, 2):
+				for dx in range(-1, 2):
+					var x := lx + dx
+					var z := lz + dz
+					if x >= 0 and z >= 0 and x < n and z < n and data.water_level[z * n + x] != 0:
+						level = maxi(level, data.water_level[z * n + x] - Grid.HEIGHT_OFFSET)
+			var shore := level > -1000 and lo <= level
+			if shore and _n_mire.get_noise_2d(tx + 0.5, tz + 0.5) > p.mire_threshold:
+				data.flags[i] |= ChunkData.FLAG_MIRE
+				continue
+		if wet:
+			continue                                   # кромку воды россыпью не покрываем
+		var talus := false
+		for o: Vector2i in [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)]:
+			var x := lx + o.x
+			var z := lz + o.y
+			if x < 0 or z < 0 or x >= n or z >= n:
+				continue
+			var j := z * n + x
+			var lo_n := mini(mini(data.get_corner(j, 0), data.get_corner(j, 1)), mini(data.get_corner(j, 2), data.get_corner(j, 3)))
+			if lo_n - hi >= p.talus_tiers:
+				talus = true
+		var thr := p.rough_threshold
+		if mat == ChunkData.Mat.ROCK or mat == ChunkData.Mat.CRYSTAL:
+			thr -= p.rough_rocky_bonus
+		elif data.biome[i] == ChunkData.Biome.FOREST or data.biome[i] == ChunkData.Biome.LAKESIDE:
+			thr += 0.1
+		if (talus and DetRng.unit(seed, tx, tz, 303) < p.talus_chance) \
+				or _n_rough.get_noise_2d(tx + 0.5, tz + 0.5) > thr:
+			data.flags[i] |= ChunkData.FLAG_ROUGH
 
 
 ## Высота вершины (ярусы, до округления) с учётом площадок челнока и луж.

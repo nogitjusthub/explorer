@@ -47,6 +47,11 @@ func set_water(tx: int, tz: int, level: int) -> void:
 
 
 ## Дерево в центре тайла (смещение 0x77 ≈ середина).
+func set_flags(tx: int, tz: int, flags: int) -> void:
+	var d := terrain.owner_of(tx, tz)
+	d.flags[d.local_index(tx, tz)] = flags
+
+
 func set_tree(tx: int, tz: int) -> void:
 	var d := terrain.owner_of(tx, tz)
 	var i := d.local_index(tx, tz)

@@ -158,6 +158,11 @@ func _plough() -> void:
 		# Под водой дно не трогаем: борозда сквозь водоём выглядела криво и ломала берега.
 		if not _wet(_furrow_from) and not _wet(pos):
 			Deformation.furrow(terrain, _furrow_from, pos, 0.6, _ploughed)
+			# Камень смерч не пашет, но крошит: на скалах за ним остаётся россыпь обломков.
+			var t := Grid.tile_of_world(pos.x, pos.y)
+			var m := query.material(t.x, t.y)
+			if m == ChunkData.Mat.ROCK or m == ChunkData.Mat.CRYSTAL:
+				Deformation.mark_ground(terrain, [t] as Array[Vector2i], ChunkData.FLAG_ROUGH)
 		_furrow_from = pos
 	var c := Grid.tile_of_world(pos.x, pos.y)
 	for dz in range(-1, 2):

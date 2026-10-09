@@ -77,6 +77,15 @@ extends Resource
 @export var mineral_freq: float = 1.0 / 30.0
 @export var crystal_threshold: float = 0.5
 
+@export_group("Ground")
+@export var rough_freq: float = 1.0 / 11.0        ## пятна неровного грунта (россыпи камней)
+@export var rough_threshold: float = 0.42         ## выше — неровный; на скалах порог ниже, у воды и в лесу — выше
+@export var rough_rocky_bonus: float = 0.18
+@export var talus_tiers: int = 3                  ## под обрывом от стольких ярусов — осыпь
+@export var talus_chance: float = 0.8
+@export var mire_freq: float = 1.0 / 7.0          ## зыбучий грунт — пятнами вдоль кромки воды
+@export var mire_threshold: float = 0.33          ## зыбким становится около четверти кромки
+
 @export_group("Trees")
 @export var tree_density_forest: float = 0.35
 @export var tree_density_plain: float = 0.03

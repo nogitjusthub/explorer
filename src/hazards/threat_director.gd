@@ -183,6 +183,7 @@ func _start(kind: StringName) -> bool:
 			if _quake != null:
 				return false
 			var quake := Quake.new()
+			quake.level = level
 			_setup(quake)
 			add_child(quake)
 			if quake.begin():

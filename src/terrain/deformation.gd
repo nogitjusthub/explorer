@@ -224,13 +224,67 @@ static func fault(terrain: TerrainData, start: Vector2i, along_x: bool, length: 
 	return _commit(w)
 
 
+## Разлом по ломаной path (мировые точки): то же, что fault, но линия — любая кривая (дуга,
+## полумесяц, зигзаг). Сторона тайла — по знаку расстояния от его центра до линии; стенка ложится
+## по рёбрам тайлов вдоль кривой «лесенкой». Пандус — каждые ramp_every тайлов вдоль линии.
+## coords — координаты точек относительно линии (FaultLine): можно посчитать заранее, пока идёт
+## телеграф; чего там нет — досчитается здесь.
+static func fault_path(terrain: TerrainData, path: PackedVector2Array, up: int, down: int,
+		ramp_every: int = RAMP_EVERY, coords: FaultLine = null) -> PackedInt64Array:
+	if coords == null:
+		coords = FaultLine.new(path, up, down)
+	var w := Work.new(terrain)
+	var queue: Array[Vector3i] = []
+	var total := coords.total
+	var box := coords.box
+	for tz in range(floori(box.position.y), ceili(box.end.y)):
+		for tx in range(floori(box.position.x), ceili(box.end.x)):
+			var cc := coords.at_center(tx, tz)
+			if absf(cc.y) > coords.band + 1.0 or not w.load_tile(tx, tz):
+				continue
+			var plus := cc.y >= 0.0
+			var ia := floori(cc.x)
+			var ramp := ramp_every > 0 and posmod(ia, ramp_every) >= 2 and posmod(ia, ramp_every) < 2 + RAMP_WIDTH
+			var moved := false
+			for c in 4:
+				var v := Vector2i(tx, tz) + CORNER_OFFSETS[c]
+				var av := coords.at_vertex(v.x, v.y)
+				var delta := fault_delta(av.x, av.y, plus, ramp, total, up, down)
+				if delta == 0 or w.vertex_fixed(v):
+					continue
+				w.set_corner(tx, tz, c, w.corner(tx, tz, c) + delta)
+				moved = true
+			if moved:
+				queue.append(Vector3i(tx, tz, RAISE if plus else LOWER))
+	_relax(w, queue)
+	return _commit(w)
+
+
+## Свойство грунта (неровный / зыбучий) на тайлах: россыпь после землетрясения, молнии, смерча на скалах.
+## Вода, площадки и гнёзда не меняются. Пишется через write_tile — переживает выгрузку, меш пересоберётся.
+static func mark_ground(terrain: TerrainData, tiles: Array[Vector2i], flag: int) -> void:
+	for t in tiles:
+		var d := terrain.owner_of(t.x, t.y)
+		if d == null:
+			continue
+		var i := d.local_index(t.x, t.y)
+		if d.water_level[i] != 0 or (d.flags[i] & (ChunkData.FLAG_PAD | ChunkData.FLAG_NEST)) != 0:
+			continue
+		var r := d.read_record(i)
+		var f := (r[7] & ~ChunkData.GROUND_FLAGS) | flag
+		if f == r[7]:
+			continue
+		r[7] = f
+		terrain.write_tile(t.x, t.y, r, true, false)
+
+
 ## Сдвиг вершины разлома: va — вдоль линии (0…length), vs — поперёк (0 — на линии, > 0 — сторона «+»).
 ## У вершины на линии сдвиг зависит от стороны тайла — так получается стенка; на пандусе — нет.
-static func fault_delta(va: int, vs: int, plus: bool, ramp: bool, length: int, up: int, down: int) -> int:
+static func fault_delta(va: float, vs: float, plus: bool, ramp: bool, length: float, up: int, down: int) -> int:
 	var endf := clampf(minf(va, length - va) / END_TAPER, 0.0, 1.0)
 	if endf <= 0.0:
 		return 0
-	var s := float(vs)
+	var s := vs
 	var step_up := up * clampf(1.0 - (s - 2.0) / (up + 1.0), 0.0, 1.0)
 	var step_down := -down * clampf(1.0 - (-s - 2.0) / (down + 1.0), 0.0, 1.0)
 	var v: float

@@ -18,6 +18,20 @@ const MATERIAL_COLORS: Array[Color] = [
 ## Массивы поверхности секции s (0..3: x — s % 2, z — s / 2).
 ## Горячий цикл: углы читаются прямо из байтов (сдвиг яруса сокращается в сравнениях),
 ## оттенок тайла — дешёвый целочисленный хэш мировых координат.
+## Альфа цвета верха тайла — свойство грунта для шейдера (стенки — 1): 0 — обычный, ALPHA_ROUGH —
+## неровный (точки камней), ALPHA_MIRE — зыбучий (рябь).
+const ALPHA_ROUGH := 0.12
+const ALPHA_MIRE := 0.24
+
+
+static func ground_alpha(flags: int) -> float:
+	if (flags & ChunkData.FLAG_MIRE) != 0:
+		return ALPHA_MIRE
+	if (flags & ChunkData.FLAG_ROUGH) != 0:
+		return ALPHA_ROUGH
+	return 0.0
+
+
 static func build_section(data: ChunkData, s: int, _run_seed: int = 0) -> Array:
 	var i0 := (s % 2) * SECTION + Grid.APRON
 	var j0 := (s / 2) * SECTION + Grid.APRON
@@ -77,7 +91,7 @@ static func build_section(data: ChunkData, s: int, _run_seed: int = 0) -> Array:
 			normals[vi + 3] = tile_normal
 			var hsh := (((origin.x + lx) * 374761393) ^ ((origin.y + lz) * 668265263)) & 0xFFFF
 			var col := MATERIAL_COLORS[mats[i]] * (0.94 + 0.12 * hsh / 65535.0)
-			col.a = 0.0
+			col.a = ground_alpha(data.flags[i])
 			colors[vi] = col
 			colors[vi + 1] = col
 			colors[vi + 2] = col

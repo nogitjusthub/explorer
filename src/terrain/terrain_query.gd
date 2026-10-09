@@ -155,6 +155,14 @@ func biome(tx: int, tz: int) -> int:
 	return d.biome[d.local_index(tx, tz)]
 
 
+## Флаги тайла (ChunkData.FLAG_*); незагруженный — 0.
+func flags(tx: int, tz: int) -> int:
+	var d := data.owner_of(tx, tz)
+	if d == null:
+		return 0
+	return d.flags[d.local_index(tx, tz)]
+
+
 func material(tx: int, tz: int) -> int:
 	var d := data.owner_of(tx, tz)
 	if d == null:

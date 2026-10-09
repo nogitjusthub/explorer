@@ -80,3 +80,34 @@ func test_tornado_throws_where_landing_is_not_higher() -> void:
 	var target := Tornado.throw_target(f.query, Vector2(10.5, 10.5), 4.0, 0.0)
 	assert_true(f.query.surface_tier(target.x, target.y) <= 6.0, "not onto the plateau: %s" % target)
 	assert_near(target.distance_to(Vector2(10.5, 10.5)), 4.0, 1e-3)
+
+
+func test_fault_polyline_shape() -> void:
+	# GDD §5.3: 1–4 отрезка не короче 5 тайлов, угол между соседними 135…180°, сгибы чередуются.
+	var rng := RandomNumberGenerator.new()
+	var counts := {}
+	for k in 60:
+		rng.seed = k
+		var length := 12.0 + k % 23
+		var path := Quake.make_path(Vector2(100, -40), rng.randf() * TAU, length, rng)
+		var lengths := FaultLine.path_lengths(path)
+		assert_near(lengths[lengths.size() - 1], length, 0.01, "total length")
+		assert_true(FaultLine.path_bounds(path).grow(0.5).has_point(Vector2(100, -40)), "placed around the center")
+		var n := path.size() - 1
+		counts[n] = true
+		assert_true(n >= 1 and n <= 4, "1–4 segments: %d" % n)
+		var prev_turn := 0.0
+		for i in n:
+			assert_true(path[i].distance_to(path[i + 1]) >= Quake.SEGMENT_MIN - 0.01, "segment ≥ 5 tiles")
+			if i > 0:
+				var turn := (path[i] - path[i - 1]).angle_to(path[i + 1] - path[i])
+				assert_true(absf(turn) <= deg_to_rad(Quake.MAX_BEND) + 1e-4, "bend ≤ 45°")
+				if i > 1 and absf(turn) > 1e-3 and absf(prev_turn) > 1e-3:
+					assert_true(signf(turn) != signf(prev_turn), "bends alternate")
+				prev_turn = turn
+	assert_true(counts.size() >= 3, "several segment counts seen: %s" % [counts.keys()])
+	# Знак расстояния: слева от направления — «+».
+	var line := PackedVector2Array([Vector2(0, 0), Vector2(10, 0)])
+	var cc := FaultLine.path_coords(line, FaultLine.path_lengths(line), Vector2(5, 2))
+	assert_near(cc.x, 5.0, 1e-4, "along")
+	assert_near(cc.y, 2.0, 1e-4, "signed distance")

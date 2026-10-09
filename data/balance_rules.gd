@@ -19,6 +19,7 @@ extends Resource
 @export var sample_chance_lakeside: float = 0.0045
 @export var sample_chance_forest: float = 0.0025
 @export var core_chance_rocky: float = 0.0008
+@export var rough_pickup_mult: float = 1.5      ## в россыпях камней находки чуть чаще (риск и награда)
 @export var repair_per_chunk: float = 1.0 / 30.0
 @export var canister_d0: float = 1.0 / 18.0     ## канистр на чанк в начале забега
 @export var canister_floor: float = 0.3         ## доля от D0, ниже которой плотность не падает
@@ -104,10 +105,17 @@ extends Resource
 @export var tornado_throw_dist: float = 4.0
 
 @export_group("Quake")
-@export var quake_telegraph_s: float = 2.5
-@export var fault_length: int = 20
+@export var quake_telegraph_s: float = 2.5        ## от сообщения на пейджере до сдвига: гул и тряска нарастают
+@export var quake_line_s: float = 1.0             ## линия разлома проступает за столько до сдвига: белая → красная
+## Сила толчка 0…1 (случайно, выше на высоком уровне угрозы) задаёт длину разлома, высоту сброса
+## и редкость пандусов — сильный толчок даёт длинный разлом со сплошными обрывами.
+@export var fault_length_min: float = 12.0
+@export var fault_length_max: float = 34.0
 @export var fault_up_max: int = 3                ## одна сторона поднимается на 1…up_max
 @export var fault_down_max: int = 2              ## другая опускается на 0…down_max
+@export var fault_ramp_every_min: int = 5        ## пандус через столько тайлов у слабого толчка…
+@export var fault_ramp_every_max: int = 12       ## …и у сильного
+@export var fault_debris_r: float = 1.3          ## осыпь (неровный грунт) по обе стороны линии
 @export var fault_pad_clearance: float = 6.0
 @export var quake_toss_dist: float = 3.0
 @export var quake_toss_damage: int = 10

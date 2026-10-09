@@ -26,6 +26,9 @@ extends Resource
 @export_group("Water")
 @export var max_water_depth: int = 1         ## в ярусах; -1 — любая глубина (ховер)
 @export var water_speed_mult: float = 0.7
+@export_group("Ground")
+@export var rough_speed_mult: float = 0.65   ## неровный грунт: предел скорости × это (ховер — 1)
+@export var mire_speed_mult: float = 0.4     ## зыбучий грунт
 @export var hovers: bool = false
 
 @export_group("Falls")

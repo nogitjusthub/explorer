@@ -13,6 +13,43 @@ var diffs := DiffStore.new()
 func add_chunk(data: ChunkData) -> void:
 	diffs.apply_to(data)
 	chunks[data.coord] = data
+	_sync_ground_flags(data)
+
+
+## Свойства грунта (неровный, зыбучий) генератор считает по соседям в окне чанка — у тайлов фартука
+## соседей не хватает. Поэтому фартук берёт их у чанка-владельца, а свои тайлы чанк отдаёт в фартуки
+## уже загруженных соседей: копии тайла во всех окнах совпадают.
+func _sync_ground_flags(data: ChunkData) -> void:
+	var n := ChunkData.N
+	var o := data.window_origin()
+	for lz in n:
+		for lx in n:
+			if lx > 0 and lz > 0 and lx < n - 1 and lz < n - 1:
+				continue
+			var tx := o.x + lx
+			var tz := o.y + lz
+			var owner := owner_of(tx, tz)
+			if owner == null or owner == data:
+				continue
+			_copy_ground(owner, owner.local_index(tx, tz), data, lz * n + lx)
+	for dz in range(-1, 2):
+		for dx in range(-1, 2):
+			var nb: ChunkData = chunks.get(data.coord + Vector2i(dx, dz))
+			if nb == null or nb == data:
+				continue
+			var no := nb.window_origin()
+			for lz in n:
+				for lx in n:
+					if lx > 0 and lz > 0 and lx < n - 1 and lz < n - 1:
+						continue
+					var tx := no.x + lx
+					var tz := no.y + lz
+					if Grid.chunk_of_tile(tx, tz) == data.coord:
+						_copy_ground(data, data.local_index(tx, tz), nb, lz * n + lx)
+
+
+static func _copy_ground(src: ChunkData, i: int, dst: ChunkData, j: int) -> void:
+	dst.flags[j] = (dst.flags[j] & ~ChunkData.GROUND_FLAGS) | (src.flags[i] & ChunkData.GROUND_FLAGS)
 
 
 func remove_chunk(coord: Vector2i) -> void:

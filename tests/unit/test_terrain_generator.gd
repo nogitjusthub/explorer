@@ -144,3 +144,37 @@ func test_nests_in_canyons_and_lakes_away_from_pads() -> void:
 					if pad.z != TerrainGenerator.NO_PAD:
 						assert_true(Vector2(n).distance_to(Vector2(pad.x, pad.y)) >= 14.0, "nest away from pads")
 	assert_true(found > 0, "some nests in 8×8 blocks: %d" % found)
+
+
+func test_ground_flags_placement() -> void:
+	# Неровный и зыбучий грунт (GDD §3.5a, §5.6): не на воде (кроме кромки), не на площадках;
+	# зыбучий — только песок или грунт у воды; оба вместе не бывают.
+	var gen := TerrainGenerator.new(7, TerrainParams.new())
+	var rough := 0
+	var mire := 0
+	for coord in [Vector2i(0, 0), Vector2i(-2, 1), Vector2i(1, -1)]:
+		var d := gen.generate(coord)
+		var n := ChunkData.N
+		for lz in range(1, 33):
+			for lx in range(1, 33):
+				var i := lz * n + lx
+				var f := d.flags[i]
+				assert_false((f & ChunkData.FLAG_ROUGH) != 0 and (f & ChunkData.FLAG_MIRE) != 0, "exclusive")
+				if (f & ChunkData.FLAG_ROUGH) != 0:
+					rough += 1
+					assert_eq(d.water_level[i], 0, "rough is dry")
+				if (f & ChunkData.FLAG_MIRE) != 0:
+					mire += 1
+					assert_true(d.material[i] == ChunkData.Mat.SAND or d.material[i] == ChunkData.Mat.GROUND, "mire on sand or ground")
+					# У самой воды: вода в тайле или соседнем, и нижний угол не выше её уровня (не над обрывом).
+					var level := -1000
+					for dz in range(-1, 2):
+						for dx in range(-1, 2):
+							var j := (lz + dz) * n + lx + dx
+							if d.water_level[j] != 0:
+								level = maxi(level, d.water_level[j] - Grid.HEIGHT_OFFSET)
+					var lo := mini(mini(d.get_corner(i, 0), d.get_corner(i, 1)), mini(d.get_corner(i, 2), d.get_corner(i, 3)))
+					assert_true(level > -1000 and lo <= level, "mire at the water's edge, not above a cliff")
+				if (f & ChunkData.FLAG_PAD) != 0:
+					assert_eq(f & ChunkData.GROUND_FLAGS, 0, "pads stay plain")
+	assert_true(rough > 0 and mire > 0, "both kinds present: rough %d, mire %d" % [rough, mire])

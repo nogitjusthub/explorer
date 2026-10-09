@@ -238,6 +238,14 @@ func _strike(p: Vector2) -> void:
 		for _i in 1 + rng.randi() % 2:
 			pickups.drop(&"crystal", p, 0.8)
 	Deformation.crater(terrain, p, rules.strike_radius, rules.strike_crater_depth)
+	# Каменное крошево на дне воронки — неровный грунт.
+	var debris: Array[Vector2i] = []
+	for dz in range(-1, 2):
+		for dx in range(-1, 2):
+			var n := t + Vector2i(dx, dz)
+			if Vector2(n.x + 0.5, n.y + 0.5).distance_to(p) < rules.strike_radius * 0.9:
+				debris.append(n)
+	Deformation.mark_ground(terrain, debris, ChunkData.FLAG_ROUGH)
 
 
 ## Молния — ломаная от тучи до земли с ответвлениями: яркая сердцевина и голубое свечение, вспышка

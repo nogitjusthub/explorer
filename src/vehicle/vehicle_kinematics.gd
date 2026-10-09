@@ -35,7 +35,7 @@ const STEP_TOLERANCE := 1.0 / 3.0   ## ярусов: такую ступеньк
 const DROWN_TIME := 2.0             ## секунд от погружения до гибели
 const SINK_SPEED := 0.35            ## мировых единиц/с — скорость погружения
 const DEEP_MARGIN := 0.1            ## ярусов сверх допустимой глубины — уже тонет
-const WATER_DRAG := 45.0            ## тайл/с²: въезд в воду гасит лишнюю скорость почти мгновенно
+const SURFACE_DRAG := 45.0          ## тайл/с²: въезд в воду, на неровный или зыбучий грунт гасит лишнюю скорость почти мгновенно
 const PUSH_DAMP := 2.0              ## 1/с — затухание сноса: при силе a снос выходит на a / PUSH_DAMP
 const LAUNCH_FADE := 0.6            ## доля Vmax, к которой разгон с места сходит к обычному
 
@@ -83,11 +83,12 @@ static func step(s: VehicleState, inp: Vector2, cls: VehicleClass, q: TerrainQue
 			align = 0.0
 		target_speed = cls.max_speed * s.throttle * align
 
-	# Предел скорости: подъём подряд и вода.
+	# Предел скорости: подъём подряд, вода, неровный и зыбучий грунт.
 	var limit := cls.max_speed * maxf(cls.uphill_floor, 1.0 - cls.uphill_loss_per_tile * s.uphill_tiles)
 	var wading := not cls.hovers and q.water_depth(s.pos.x, s.pos.y) > 0.05
-	if wading:
-		limit *= cls.water_speed_mult
+	var ground := ground_speed_mult(cls, q.flags(s.tile.x, s.tile.y))
+	# Зыбучая кромка, частью под водой: действует сильнейшее из двух замедлений, а не оба сразу.
+	limit *= minf(cls.water_speed_mult if wading else 1.0, ground)
 	target_speed = minf(target_speed, limit)
 
 	var fwd := s.forward()
@@ -105,7 +106,7 @@ static func step(s: VehicleState, inp: Vector2, cls: VehicleClass, q: TerrainQue
 			accel *= 1.0 + cls.downhill_accel_bonus
 		speed = minf(speed + accel * dt, target_speed)
 	else:
-		var decel := WATER_DRAG if wading and speed > limit else cls.brake_decel
+		var decel := SURFACE_DRAG if (wading or ground < 1.0) and speed > limit else cls.brake_decel
 		speed = maxf(speed - decel * dt, target_speed)
 	s.vel = fwd * speed
 	if lateral != 0.0:
@@ -147,6 +148,15 @@ static func launch(s: VehicleState, target: Vector2, apex: float, cls: VehicleCl
 	s.fall_tile = Grid.tile_of_world(target.x, target.y)
 	s.vel = (target - s.pos) / maxf(t, 0.1)
 	s.uphill_tiles = 0
+
+
+## Предел скорости на грунте тайла: неровный или зыбучий — по данным класса (ховеру — 1).
+static func ground_speed_mult(cls: VehicleClass, tile_flags: int) -> float:
+	if (tile_flags & ChunkData.FLAG_MIRE) != 0:
+		return cls.mire_speed_mult
+	if (tile_flags & ChunkData.FLAG_ROUGH) != 0:
+		return cls.rough_speed_mult
+	return 1.0
 
 
 ## Урон от падения со стенки высотой h ярусов (GDD §3.2).

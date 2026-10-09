@@ -16,6 +16,9 @@ const TREE_FELLED := 0x40
 const FLAG_PAD := 1
 const FLAG_NEST := 2
 const FLAG_WRECK := 4
+const FLAG_ROUGH := 8                    ## неровный грунт: россыпь камней, осыпь (GDD §3.5a)
+const FLAG_MIRE := 16                    ## зыбучий грунт у кромки воды (GDD §5.6)
+const GROUND_FLAGS := FLAG_ROUGH | FLAG_MIRE
 
 var coord: Vector2i
 var corners := PackedByteArray()        ## N*N*4: ярус + HEIGHT_OFFSET

@@ -239,3 +239,28 @@ func test_external_push_drifts_and_walls_stop_it() -> void:
 	for _i in 180:
 		VehicleKinematics.step(s, Vector2.ZERO, rover, f.query, DT)
 	assert_true(s.push_vel.length() < 0.05, "drift fades without force")
+
+
+func test_rough_and_mire_ground_slow_wheels_not_hover() -> void:
+	# GDD §3.5a, §5.6: неровный — ровер и танк ×0,65; зыбучий — ровер ×0,4, танк ×0,7; ховер — без замедления.
+	for flag in [ChunkData.FLAG_ROUGH, ChunkData.FLAG_MIRE]:
+		var f := TerrainFixture.new(4)
+		for tz in range(0, 30):
+			for tx in range(12, 30):
+				f.set_flags(tx, tz, flag)
+		for id: StringName in [&"rover", &"tank", &"hover"]:
+			var cls := _cls(id)
+			var s := _state(f, cls, Vector2(4.5, 10.5), 0.0)
+			var top := 0.0
+			for _i in 400:
+				VehicleKinematics.step(s, Vector2.RIGHT, cls, f.query, DT)
+				if s.pos.x > 13.5 and s.pos.x < 20.0:          # въезд гасит скорость почти сразу
+					top = maxf(top, s.vel.length())
+				if s.pos.x > 20.0:
+					break
+			var mult := VehicleKinematics.ground_speed_mult(cls, flag)
+			assert_true(top <= cls.max_speed * mult + 1e-3, "%s on flag %d: %.2f" % [id, flag, top])
+			if id == &"hover":
+				assert_near(mult, 1.0, 1e-6, "hover is not slowed")
+			else:
+				assert_true(mult < 1.0, "%s slowed on flag %d" % [id, flag])

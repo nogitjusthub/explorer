@@ -21,9 +21,11 @@ static func for_chunk(data: ChunkData, run_seed: int, rules: BalanceRules) -> Ar
 	for lz in range(Grid.APRON, Grid.APRON + Grid.CHUNK):
 		for lx in range(Grid.APRON, Grid.APRON + Grid.CHUNK):
 			var roll := rng.randf()
+			var i := lz * ChunkData.N + lx
+			if (data.flags[i] & ChunkData.FLAG_ROUGH) != 0:
+				roll /= rules.rough_pickup_mult
 			if roll >= max_chance:
 				continue
-			var i := lz * ChunkData.N + lx
 			if not free_tile(data, i):
 				continue
 			var kind := _tile_kind(data, i, roll, rules)

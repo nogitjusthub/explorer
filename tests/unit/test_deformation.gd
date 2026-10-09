@@ -169,3 +169,33 @@ func test_temporary_ridge_settles_back_exactly() -> void:
 		if f.query.corner(key.x, key.y, key.z) != before[key]:
 			diff += 1
 	assert_eq(diff, 0, "terrain fully restored")
+
+
+func test_fault_path_curve_has_walls_and_tapers() -> void:
+	# Разлом по ломаной (GDD §5.3): вдоль линии — стенки, у концов сдвиг сходит на нет, тайлы валидны.
+	var f := TerrainFixture.new(10)
+	var path := PackedVector2Array([Vector2(7, 12), Vector2(15, 17), Vector2(25, 15)])
+	Deformation.fault_path(f.terrain, path, 2, 1, 0)        # без пандусов
+	assert_true(_max_delta(f, 0, 0, 32, 32) <= 1, "tiles stay valid")
+	var lengths := FaultLine.path_lengths(path)
+	var walls := 0
+	for tz in range(0, 33):
+		for tx in range(0, 33):
+			var cc := FaultLine.path_coords(path, lengths, Vector2(tx + 0.5, tz + 0.5))
+			if cc.x > 4.0 and cc.x < lengths[lengths.size() - 1] - 4.0 and absf(cc.y) < 1.0:
+				for dir in 4:
+					if f.query.edge_rise(tx, tz, dir) >= 2:
+						walls += 1
+	assert_true(walls >= 10, "walls along the curve: %d" % walls)
+	var a := path[0]
+	assert_eq(f.query.corner(floori(a.x), floori(a.y), 0), 10, "no offset at the end")
+
+
+func test_mark_ground_persists() -> void:
+	var f := TerrainFixture.new(4)
+	Deformation.mark_ground(f.terrain, [Vector2i(5, 5)] as Array[Vector2i], ChunkData.FLAG_ROUGH)
+	assert_true((f.query.flags(5, 5) & ChunkData.FLAG_ROUGH) != 0, "rough set")
+	assert_eq(f.terrain.diffs.get_record(5, 5)[7] & ChunkData.FLAG_ROUGH, ChunkData.FLAG_ROUGH, "stored in DiffStore")
+	f.set_water(6, 5, 6)
+	Deformation.mark_ground(f.terrain, [Vector2i(6, 5)] as Array[Vector2i], ChunkData.FLAG_ROUGH)
+	assert_eq(f.query.flags(6, 5) & ChunkData.FLAG_ROUGH, 0, "water tiles are not marked")

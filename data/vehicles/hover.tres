@@ -34,3 +34,5 @@ stat_fuel = 2
 stat_armor = 2
 stat_handling = 5
 stat_cargo = 2
+rough_speed_mult = 1.0
+mire_speed_mult = 1.0
