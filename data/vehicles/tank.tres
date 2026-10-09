@@ -6,7 +6,7 @@
 script = ExtResource("1_vclass")
 id = &"tank"
 display_name = "Танк"
-blurb = "Крепость: в гору без потерь, глубокий брод, лес валит с малого хода. Неспешен."
+blurb = "Крепость: в гору без потерь, лес валит с малого хода. Неспешен."
 hp_max = 160
 max_speed = 4.0
 accel = 2.0
@@ -19,7 +19,7 @@ mass = 2.5
 uphill_loss_per_tile = 0.0
 uphill_floor = 1.0
 downhill_accel_bonus = 0.2
-max_water_depth = 2
+max_water_depth = 1
 water_speed_mult = 0.5
 hovers = false
 fall_damage_mode = "exp"

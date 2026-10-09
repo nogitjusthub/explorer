@@ -103,6 +103,7 @@ func _toss() -> void:
 			break
 		target = s.pos + (target - s.pos) * 0.5
 	VehicleKinematics.launch(s, target, 1.0, vehicle.cls, query)
+	vehicle.tumble(target - s.pos, 0.25)
 	damaged.emit(rules.quake_toss_damage, &"quake")
 
 

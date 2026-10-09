@@ -144,9 +144,9 @@ static func _hover(m: Model) -> void:
 	sk.rotation = Vector3(PI * 0.5, 0, 0)
 	sk.scale = Vector3(1, 1, 0.45)
 	# Корпус — призмы с прямым носом и скосами по бокам (BOW_DEG от поперечной линии).
-	_prism(r, _bow(0.25, -0.37, 0.37, 0.11), 0.27, 0.035, under)          # кант палубы
-	_prism(r, _bow(0.23, -0.35, 0.35, 0.1), 0.3, 0.05, paint)              # палуба
-	_prism(r, _bow(0.18, -0.25, 0.21, 0.09), 0.35, 0.1, paint)             # надстройка
+	MeshKit.prism(r, _bow(0.25, -0.37, 0.37, 0.11), 0.27, 0.035, under)          # кант палубы
+	MeshKit.prism(r, _bow(0.23, -0.35, 0.35, 0.1), 0.3, 0.05, paint)              # палуба
+	MeshKit.prism(r, _bow(0.18, -0.25, 0.21, 0.09), 0.35, 0.1, paint)             # надстройка
 	_dome(m, Vector3(0, 0.45, -0.08))
 	# Два вентилятора в длинных кожухах на корме; лопасти вращаются.
 	for x in [-0.13, 0.13]:
@@ -221,52 +221,14 @@ static func _octagon(h: float, len: float, c: float) -> PackedVector2Array:
 			Vector2(h - c, l), Vector2(c, l), Vector2(0, l - c), Vector2(0, -l + c)])
 
 
-## Призма по профилю сбоку (y, z), шириной width по x вокруг x_center: та же _prism, повёрнутая так,
+## Призма по профилю сбоку (y, z), шириной width по x вокруг x_center: MeshKit.prism, повёрнутая так,
 ## что её ось выдавливания смотрит вбок.
 static func _side_prism(parent: Node3D, profile: PackedVector2Array, x_center: float, width: float,
 		mat: Material) -> MeshInstance3D:
-	var mi := _prism(parent, profile, -width * 0.5, width, mat)
+	var mi := MeshKit.prism(parent, profile, -width * 0.5, width, mat)
 	mi.rotation = Vector3(0, 0, PI * 0.5)     # локальные (x, y, z) → мировые (−y, x, z)
 	mi.position = Vector3(x_center, 0, 0)
 	return mi
-
-
-## Призма: выпуклый контур poly (x, z), низ на y0, высота h. Грани плоские.
-static func _prism(parent: Node3D, poly: PackedVector2Array, y0: float, h: float, mat: Material) -> MeshInstance3D:
-	var st := SurfaceTool.new()
-	st.begin(Mesh.PRIMITIVE_TRIANGLES)
-	var center := Vector2.ZERO
-	for v in poly:
-		center += v
-	center /= poly.size()
-	var y1 := y0 + h
-	for i in range(1, poly.size() - 1):
-		_tri(st, Vector3(poly[0].x, y1, poly[0].y), Vector3(poly[i].x, y1, poly[i].y),
-				Vector3(poly[i + 1].x, y1, poly[i + 1].y), Vector3.UP)
-		_tri(st, Vector3(poly[0].x, y0, poly[0].y), Vector3(poly[i].x, y0, poly[i].y),
-				Vector3(poly[i + 1].x, y0, poly[i + 1].y), Vector3.DOWN)
-	for i in poly.size():
-		var a := poly[i]
-		var b := poly[(i + 1) % poly.size()]
-		var e := b - a
-		var n2 := Vector2(e.y, -e.x).normalized()
-		if n2.dot((a + b) * 0.5 - center) < 0.0:
-			n2 = -n2
-		var n := Vector3(n2.x, 0, n2.y)
-		_tri(st, Vector3(a.x, y0, a.y), Vector3(b.x, y0, b.y), Vector3(b.x, y1, b.y), n)
-		_tri(st, Vector3(a.x, y0, a.y), Vector3(b.x, y1, b.y), Vector3(a.x, y1, a.y), n)
-	return _mesh(parent, st.commit(), Vector3.ZERO, mat)
-
-
-## Треугольник лицом к n: в Godot лицевая сторона — обход по часовой стрелке, если смотреть на неё.
-static func _tri(st: SurfaceTool, a: Vector3, b: Vector3, c: Vector3, n: Vector3) -> void:
-	if (b - a).cross(c - a).dot(n) > 0.0:
-		var tmp := b
-		b = c
-		c = tmp
-	for v in [a, b, c]:
-		st.set_normal(n)
-		st.add_vertex(v)
 
 
 ## Крупная окрашенная часть: даёт силуэт сквозь препятствия.

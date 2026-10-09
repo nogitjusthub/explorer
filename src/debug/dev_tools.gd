@@ -18,7 +18,7 @@ extends Node
 ##     --no-fauna         без фауны
 ##     --threat=N         уровень угрозы не ниже N (1–6)
 ##     --event=K@S,...    событие K на S-й секунде: storm, fog, acid, dust, tornado, quake,
-##                          hoppers, worm, shellback (червь — только если рядом песок)
+##                          hoppers, worm, shellback (червь — если рядом песок или равнина)
 ##   Сценарии без рук:
 ##     --idle             без стартового экрана и автопилота: машина стоит
 ##     --select           показать трюм с выбором машины и при --idle или --shots

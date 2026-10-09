@@ -35,6 +35,7 @@ const STEP_TOLERANCE := 1.0 / 3.0   ## ярусов: такую ступеньк
 const DROWN_TIME := 2.0             ## секунд от погружения до гибели
 const SINK_SPEED := 0.35            ## мировых единиц/с — скорость погружения
 const DEEP_MARGIN := 0.1            ## ярусов сверх допустимой глубины — уже тонет
+const WATER_DRAG := 45.0            ## тайл/с²: въезд в воду гасит лишнюю скорость почти мгновенно
 const PUSH_DAMP := 2.0              ## 1/с — затухание сноса: при силе a снос выходит на a / PUSH_DAMP
 const LAUNCH_FADE := 0.6            ## доля Vmax, к которой разгон с места сходит к обычному
 
@@ -84,7 +85,8 @@ static func step(s: VehicleState, inp: Vector2, cls: VehicleClass, q: TerrainQue
 
 	# Предел скорости: подъём подряд и вода.
 	var limit := cls.max_speed * maxf(cls.uphill_floor, 1.0 - cls.uphill_loss_per_tile * s.uphill_tiles)
-	if not cls.hovers and q.water_depth(s.pos.x, s.pos.y) > 0.05:
+	var wading := not cls.hovers and q.water_depth(s.pos.x, s.pos.y) > 0.05
+	if wading:
 		limit *= cls.water_speed_mult
 	target_speed = minf(target_speed, limit)
 
@@ -103,7 +105,8 @@ static func step(s: VehicleState, inp: Vector2, cls: VehicleClass, q: TerrainQue
 			accel *= 1.0 + cls.downhill_accel_bonus
 		speed = minf(speed + accel * dt, target_speed)
 	else:
-		speed = maxf(speed - cls.brake_decel * dt, target_speed)
+		var decel := WATER_DRAG if wading and speed > limit else cls.brake_decel
+		speed = maxf(speed - decel * dt, target_speed)
 	s.vel = fwd * speed
 	if lateral != 0.0:
 		s.vel = (s.vel + Vector2(-fwd.y, fwd.x) * lateral).limit_length(cls.max_speed)

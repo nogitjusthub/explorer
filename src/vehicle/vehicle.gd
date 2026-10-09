@@ -37,6 +37,7 @@ var _model: VehicleModels.Model
 var _beacon_light: OmniLight3D
 var _rock := Vector2.ZERO          ## наклон модели от ударов: x — тангаж (нос вверх +), y — крен (правый борт вверх +)
 var _rock_vel := Vector2.ZERO
+var _tumble := Vector2.ZERO        ## наклон в полёте после броска — равновесие пружины, пока машина в воздухе
 var _time := 0.0
 var _lift_t := -1.0
 var _lift_from := 0.0
@@ -94,8 +95,11 @@ func _animate(dt: float) -> void:
 func _animate_rock(dt: float) -> void:
 	if wrecked:
 		return
-	_rock_vel += (-_rock * ROCK_STIFFNESS - _rock_vel * ROCK_DAMPING) * dt
-	_rock = (_rock + _rock_vel * dt).clamp(Vector2(-ROCK_MAX, -ROCK_MAX), Vector2(ROCK_MAX, ROCK_MAX))
+	if not state.launched:
+		_tumble = Vector2.ZERO
+	_rock_vel += (-(_rock - _tumble) * ROCK_STIFFNESS - _rock_vel * ROCK_DAMPING) * dt
+	var lim := maxf(ROCK_MAX, _tumble.length() + 0.1)
+	_rock = (_rock + _rock_vel * dt).clamp(Vector2(-lim, -lim), Vector2(lim, lim))
 	_model.root.rotation.x = _rock.x
 	_model.root.rotation.z = _rock.y
 
@@ -135,6 +139,18 @@ func rock(strength: float, push: Vector2) -> void:
 	var right := Vector2(-fwd.y, fwd.x)
 	# Толкнули назад — нос задирается; толкнули вправо — левый борт поднимается.
 	_rock_vel += Vector2(-push.dot(fwd), -push.dot(right)) * strength
+
+
+## Бросок (червь, смерч, толчок землетрясения): в полёте корпус наклонён в сторону толчка на angle
+## (рад) — для кинематографичности; после приземления качается обратно на пружине.
+func tumble(push: Vector2, angle: float) -> void:
+	if push.length_squared() < 0.0001:
+		return
+	push = push.normalized()
+	var fwd := state.forward()
+	var right := Vector2(-fwd.y, fwd.x)
+	_tumble = Vector2(-push.dot(fwd), -push.dot(right)) * angle
+	rock(ROCK_RAM, push)
 
 
 ## Эвакуация: машину плавно втягивает вверх (в челнок), потом она скрывается.

@@ -149,12 +149,15 @@ func _affect_vehicle(dt: float) -> void:
 		_core_time = 0.0
 		var target := throw_target(query, s.pos, rules.tornado_throw_dist, rng.randf() * TAU)
 		VehicleKinematics.launch(s, target, 1.6, vehicle.cls, query)
+		vehicle.tumble(target - s.pos, 0.4)
 
 
 ## След: борозда (скалы не берёт), вырванные деревья, подхваченные находки.
 func _plough() -> void:
 	if _furrow_from.distance_to(pos) > 0.2:
-		Deformation.furrow(terrain, _furrow_from, pos, 0.6, _ploughed)
+		# Под водой дно не трогаем: борозда сквозь водоём выглядела криво и ломала берега.
+		if not _wet(_furrow_from) and not _wet(pos):
+			Deformation.furrow(terrain, _furrow_from, pos, 0.6, _ploughed)
 		_furrow_from = pos
 	var c := Grid.tile_of_world(pos.x, pos.y)
 	for dz in range(-1, 2):
@@ -165,6 +168,15 @@ func _plough() -> void:
 	for p in pickups.near(pos, CATCH_R):
 		pickups.take(p["key"])
 		_carried.append({"kind": p["kind"], "left": rng.randf_range(2.0, 5.0)})
+
+
+## Вода в точке или рядом (в полутайле) — борозду там не копаем.
+func _wet(p: Vector2) -> bool:
+	for o in [Vector2.ZERO, Vector2(0.6, 0), Vector2(-0.6, 0), Vector2(0, 0.6), Vector2(0, -0.6)]:
+		var t := Grid.tile_of_world(p.x + o.x, p.y + o.y)
+		if query.water_tier(t.x, t.y) != TerrainQuery.NO_WATER:
+			return true
+	return false
 
 
 func _place() -> void:

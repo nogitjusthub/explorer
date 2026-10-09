@@ -133,7 +133,13 @@ extends Resource
 @export var pack_min: int = 3
 @export var pack_max: int = 4
 @export var worm_min_level: int = 2
+@export var worm_first_s: float = 90.0            ## червь редок: первый — не раньше этого времени забега…
+@export var worm_gap_s: float = 150.0             ## …следующий — не раньше этого после встречи (гнался за машиной)
+@export var worm_chance: float = 0.15             ## шанс появиться на каждой проверке (раз в 2 с), когда можно
 @export var worm_speed: float = 5.0
+@export var worm_idle_speed: float = 1.5          ## не слышит машину — незаметно подтягивается к ней
+@export var worm_spawn_min: float = 20.0          ## появляется ближе остальных — в 20…30 тайлах, на своём грунте
+@export var worm_spawn_max: float = 30.0
 @export var worm_telegraph_s: float = 0.9
 @export var worm_damage: int = 30
 @export var worm_toss: float = 3.0

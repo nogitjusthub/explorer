@@ -33,6 +33,7 @@ var _fields: Dictionary = {}              ## FlowField.Mode → готовое �
 var _field_busy: Dictionary = {}          ## FlowField.Mode → идёт построение
 var _field_timer: Dictionary = {}
 var _spawn_timer := 1.0
+var _worm_wait := -1.0                    ## до следующего червя, с; < 0 — ещё не задано (begin)
 var _time := 0.0
 var _shuttle_state := &""
 var _emergency_state := &""
@@ -101,6 +102,9 @@ func step(dt: float) -> void:
 			forced.remove_at(i)
 	_update_fields(dt)
 	_check_nests(dt)
+	if _worm_wait < 0.0:
+		_worm_wait = rules.worm_first_s
+	_worm_wait = maxf(_worm_wait - dt, 0.0)
 	_spawn_timer -= dt
 	if _spawn_timer <= 0.0:
 		_spawn_timer = SPAWN_EVERY_S
@@ -110,6 +114,8 @@ func step(dt: float) -> void:
 	for i in range(_creatures.size() - 1, -1, -1):
 		var c := _creatures[i]
 		if c.finished or (not c.aggressive and c.pos.distance_to(s.pos) > rules.fauna_despawn):
+			if c is Worm and (c as Worm).met:
+				_worm_wait = rules.worm_gap_s
 			c.queue_free()
 			_creatures.remove_at(i)
 
@@ -154,7 +160,7 @@ func _wanted(kind: StringName) -> int:
 		&"packs":
 			return 1 + (1 if level >= 2 else 0) + (1 if level >= 4 else 0)
 		&"worms":
-			return 2 if level >= rules.worm_min_level else 0
+			return 1 if level >= rules.worm_min_level else 0
 		&"shellbacks":
 			return (1 + (1 if level >= 5 else 0)) if level >= rules.shellback_min_level else 0
 	return 0
@@ -173,8 +179,11 @@ func _spawn() -> void:
 		var at: Variant = _ring_point(func(t: Vector2i) -> bool: return _dry(t))
 		if at != null:
 			_spawn_pack(at, _rng.randi_range(rules.pack_min, rules.pack_max))
-	if counts["worms"] < _wanted(&"worms"):
-		var at: Variant = _ring_point(func(t: Vector2i) -> bool: return _dry(t) and query.material(t.x, t.y) == ChunkData.Mat.SAND)
+	# Червь — когда машина на его грунте: рядом, за кадром, на том же грунте.
+	var on_habitat := Worm.habitat(query, Grid.tile_of_world(vehicle.state.pos.x, vehicle.state.pos.y))
+	if counts["worms"] < _wanted(&"worms") and on_habitat and _worm_wait <= 0.0 and _rng.randf() < rules.worm_chance:
+		var at: Variant = _ring_point(func(t: Vector2i) -> bool: return Worm.habitat(query, t),
+				rules.worm_spawn_min, rules.worm_spawn_max)
 		if at != null:
 			_spawn_worm(at)
 	if counts["shellbacks"] < _wanted(&"shellbacks"):
@@ -269,11 +278,11 @@ func _force(kind: StringName) -> void:
 			if at != null:
 				_spawn_pack(at, rules.pack_max).wake()
 		&"worm":
-			var at: Variant = _ring_point(func(t: Vector2i) -> bool: return _dry(t) and query.material(t.x, t.y) == ChunkData.Mat.SAND, 3.0, 25.0)
+			var at: Variant = _ring_point(func(t: Vector2i) -> bool: return Worm.habitat(query, t), 3.0, 25.0)
 			if at != null:
 				_spawn_worm(at).start_hunt()
 			else:
-				print("fauna: no sand near the vehicle for a worm")
+				print("fauna: no worm ground (sand, plains) near the vehicle")
 		&"shellback":
 			var at: Variant = _ring_point(func(t: Vector2i) -> bool: return _dry(t), 10.0, 12.0)
 			if at != null:

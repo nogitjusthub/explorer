@@ -91,28 +91,31 @@ func test_tank_stops_to_turn_on_the_move() -> void:
 	assert_true(s.vel.length() > 1.0, "drives again after turning")
 
 
-func test_tank_wades_two_tiers_rover_does_not() -> void:
-	var f := TerrainFixture.new(4)
-	f.set_block(0, 0, 40, 30, 2)
-	for tz in range(0, 30):
-		for tx in range(14, 20):
-			f.set_water(tx, tz, 4)    # глубина 2 яруса
-	var tank := _cls(&"tank")
-	var s := _state(f, tank, Vector2(8.5, 10.5), 0.0)
-	var max_in_water := 0.0
-	for _i in 600:
-		VehicleKinematics.step(s, Vector2.RIGHT, tank, f.query, DT)
-		if s.pos.x > 16.5 and s.pos.x < 19.5:     # первый тайл воды — торможение до предела
-			max_in_water = maxf(max_in_water, s.vel.length())
-		if s.pos.x > 22.0:
-			break
-	assert_false(s.drowning, "tank wades 2 tiers")
-	assert_true(s.pos.x > 22.0, "tank crossed, x=%.2f" % s.pos.x)
-	assert_true(max_in_water <= tank.max_speed * 0.5 + 1e-3, "half speed in water: %.2f" % max_in_water)
-	var rover := _cls(&"rover")
-	var r := _state(f, rover, Vector2(8.5, 10.5), 0.0)
-	_drive(r, Vector2.RIGHT, rover, f, 300)
-	assert_true(r.drowning or r.drowned, "rover drowns at depth 2")
+func test_tank_and_rover_wade_one_tier_slowly() -> void:
+	# Брод у танка — как у ровера: ярус вброд (медленнее), два — тонут оба.
+	for depth in [1, 2]:
+		var f := TerrainFixture.new(4)
+		f.set_block(0, 0, 40, 30, 2)
+		for tz in range(0, 30):
+			for tx in range(14, 20):
+				f.set_water(tx, tz, 2 + depth)
+		for id: StringName in [&"tank", &"rover"]:
+			var cls := _cls(id)
+			var s := _state(f, cls, Vector2(8.5, 10.5), 0.0)
+			var max_in_water := 0.0
+			for _i in 600:
+				VehicleKinematics.step(s, Vector2.RIGHT, cls, f.query, DT)
+				if s.pos.x > 16.5 and s.pos.x < 19.5:     # первый тайл воды — торможение до предела
+					max_in_water = maxf(max_in_water, s.vel.length())
+				if s.pos.x > 22.0 or s.drowned:
+					break
+			if depth == 1:
+				assert_false(s.drowning, "%s wades 1 tier" % id)
+				assert_true(s.pos.x > 22.0, "%s crossed, x=%.2f" % [id, s.pos.x])
+				assert_true(max_in_water <= cls.max_speed * cls.water_speed_mult + 1e-3,
+						"%s slower in water: %.2f" % [id, max_in_water])
+			else:
+				assert_true(s.drowning or s.drowned, "%s drowns at depth 2" % id)
 
 
 func test_tank_fells_trees_from_low_speed() -> void:

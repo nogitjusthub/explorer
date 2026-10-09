@@ -18,8 +18,10 @@ func _run() -> void:
 
 	for path in _test_files():
 		var script := load(path) as GDScript
-		if script == null:
-			print("  FAIL  %s — cannot load script" % path.get_file())
+		# При ошибке разбора (в самом тесте или в скрипте, от которого он зависит) load() отдаёт
+		# пустой скрипт без методов — без этой проверки его тесты молча пропали бы из счёта.
+		if script == null or not script.can_instantiate():
+			print("  FAIL  %s — cannot load script (parse error?)" % path.get_file())
 			failed += 1
 			continue
 		for method: Dictionary in script.get_script_method_list():

@@ -1,19 +1,24 @@
 class_name Worm
 extends Creature
-## Песчаный червь (GDD §5.4) — как в «Дюне». Живёт под песком (материал SAND) и только там ходит.
+## Песчаный червь (GDD §5.4) — как в «Дюне». Живёт под рыхлым грунтом — песок (SAND) и грунт равнин
+## (GROUND в биоме PLAINS) — и только там ходит (habitat). Пока не слышит машину — незаметно, без вала,
+## дрейфует к ней (worm_idle_speed), если она на его грунте.
 ## Слышит машину на песке — идёт к ней под землёй: песок над ним вспучивается валом (деформация рельефа,
 ## «обратная» борозде смерча, не выше яруса) и оседает обратно в RIDGE_KEEP тайлах позади; летит пыль,
 ## гудит. Деревья на пути валятся.
 ## Догнал — за worm_telegraph_s до броска песок вокруг машины трескается кольцом и дрожит. Бросок:
-## огромный червь вырывается прямо под машиной с раскрытой пастью — три челюсти-лепестка, внутри
-## кольцо зубов и глотка; челюсти захлопываются над машиной (урон worm_damage) и выплёвывают её на
-## worm_toss тайла; червь вздымается над песком и уходит обратно, оставив яму. Сомкнутые челюсти —
-## округлая морда. Спасение — уйти с песка (через LOSE_S червь теряет след) или уехать: он медленнее
+## огромный червь вырывается прямо под машиной — не строго вверх, а качаясь, как смерч, — с раскрытой
+## пастью: три вытянутые челюсти с зазубренными краями (low-poly из треугольников), внутри кольцо зубов
+## и глотка; челюсти захлопываются над машиной (урон worm_damage) и выплёвывают её на worm_toss тайла —
+## в полёте машина наклонена в сторону броска; червь вздымается и уходит обратно, оставив яму.
+## Сомкнутые челюсти — заострённая морда. Тело — «позвонки»: крупные 10-гранные и узкие 8-гранные
+## диски вперемешку, каждый повёрнут вокруг оси на свой угол. Спасение — уйти с песка (через LOSE_S червь теряет след) или уехать: он медленнее
 ## ровера и ховера, и если fauna_give_up_s не может подобраться ближе — уходит в глубину и пропадает.
 
 enum State { IDLE, HUNT, TELEGRAPH, STRIKE, COOLDOWN }
 
-const SAND_COLOR := Color(0.55, 0.42, 0.56)      ## вал — в тон лилового песка, темнее
+const SAND_COLOR := Color(0.55, 0.42, 0.56)      ## пыль на песке — в тон лилового песка, темнее
+const GROUND_DUST := Color(0.62, 0.42, 0.34)     ## пыль на грунте равнин — терракотовая
 const BODY_COLOR := Color(0.7, 0.6, 0.52)
 const RING_COLOR := Color(0.47, 0.39, 0.34)
 const THROAT_COLOR := Color(0.16, 0.06, 0.07)
@@ -30,7 +35,12 @@ const COOLDOWN_S := 4.0
 const LOSE_S := 4.0
 const STRIKE_R := 1.6
 const JAW_OPEN := -1.55                  ## лепесток откинут наружу почти плашмя
-const SEGMENTS := 9
+const DISCS := 18                        ## тело — диски-«позвонки», крупные и узкие вперемешку
+const DISC_STEP := 0.31
+const BODY_LEN := DISCS * DISC_STEP      ## от хвоста до основания головы
+const JAW_LEN := 2.1                     ## длина челюсти: сомкнутые дают вытянутую заострённую морду
+const TOSS_TILT := 0.55                  ## рад — наклон машины в полёте после броска
+const LEAN := 0.12                       ## рад — бросок не строго вверх
 const RIDGE_EVERY_S := 0.25
 const RIDGE_HALF_W := 0.7
 const RIDGE_KEEP := 3.5                  ## дальше позади вал оседает
@@ -53,6 +63,7 @@ var _ring_mat: StandardMaterial3D
 var _burst: CPUParticles3D
 var _body: Node3D
 var _jaws: Array[Node3D] = []
+var _lean := Vector2.ZERO                ## наклон тела в этом броске (тангаж, крен)
 
 
 func _init() -> void:
@@ -66,10 +77,19 @@ func setup(at: Vector2) -> void:
 	_body.visible = false
 
 
+var met := false                         ## гнался за машиной (встреча была) — FaunaDirector выдержит паузу
+
+
 func on_sand(p: Vector2) -> bool:
-	var t := Grid.tile_of_world(p.x, p.y)
-	return query.is_loaded(t.x, t.y) and query.material(t.x, t.y) == ChunkData.Mat.SAND \
-			and query.water_tier(t.x, t.y) == TerrainQuery.NO_WATER
+	return habitat(query, Grid.tile_of_world(p.x, p.y))
+
+
+## Грунт червя: сухой песок или грунт равнин.
+static func habitat(q: TerrainQuery, t: Vector2i) -> bool:
+	if not q.is_loaded(t.x, t.y) or q.water_tier(t.x, t.y) != TerrainQuery.NO_WATER:
+		return false
+	var m := q.material(t.x, t.y)
+	return m == ChunkData.Mat.SAND or (m == ChunkData.Mat.GROUND and q.biome(t.x, t.y) == ChunkData.Biome.PLAINS)
 
 
 func step(dt: float) -> void:
@@ -79,6 +99,10 @@ func step(dt: float) -> void:
 		State.IDLE:
 			if on_sand(vp) and noise.hears_vehicle(pos):
 				start_hunt()
+			elif on_sand(vp):
+				var np := pos + (vp - pos).limit_length(rules.worm_idle_speed * dt)
+				if on_sand(np):
+					pos = np
 		State.HUNT:
 			if not on_sand(vp):
 				_lost += dt
@@ -137,6 +161,7 @@ func step(dt: float) -> void:
 		_settle(-1.0)            # ушёл в глубину — вал оседает целиком
 	_wake.emitting = underground
 	if underground:
+		_tint_dust()
 		_wake.position = Vector3(pos.x, ground_y(pos) + 0.1, pos.y)
 		_wake.rotation.y = atan2(-_heading.x, -_heading.y)
 
@@ -185,6 +210,7 @@ func start_hunt() -> void:
 	aggressive = true
 	_lost = 0.0
 	reset_interest()
+	met = true
 	_ridge_from = pos
 	EventBus.fauna_alerted.emit(&"worm", Vector3(pos.x, ground_y(pos), pos.y))
 
@@ -202,8 +228,8 @@ func _strike() -> void:
 	_bitten = false
 	_ring.visible = false
 	_body.visible = true
-	_body.position = Vector3(_strike_at.x, _ground - 6.0, _strike_at.y)
-	_body.rotation = Vector3.ZERO
+	_lean = Vector2.from_angle(rng.randf() * TAU) * LEAN
+	_pose(-4.0, 0.0)
 	_burst.position = Vector3(_strike_at.x, _ground + 0.1, _strike_at.y)
 	_burst.restart()
 	_burst.emitting = true
@@ -231,9 +257,7 @@ func _animate_strike(t: float) -> void:
 		var k := (t - HOLD_S) / (STRIKE_S - HOLD_S)
 		head_y = lerpf(TOP_Y, -6.0, k * k)
 		jaw = 0.0
-	_body.position.y = _ground + head_y - SEGMENTS * 0.62
-	var sway := clampf((t - BITE_S) / 0.5, 0.0, 1.0)
-	_body.rotation = Vector3(sin(_time * 2.3) * 0.12 * sway, 0.0, sin(_time * 1.7) * 0.16 * sway)
+	_pose(head_y, t)
 	for hinge in _jaws:
 		hinge.rotation.z = jaw
 
@@ -248,11 +272,25 @@ func _bite() -> void:
 		return
 	damaged.emit(rules.worm_damage, &"worm")
 	var dir := (s.pos - _strike_at).normalized() if d > 0.05 else Vector2.from_angle(rng.randf() * TAU)
-	vehicle.rock(Vehicle.ROCK_RAM, dir)
 	var target := _strike_at + dir * rules.worm_toss
 	var t := Grid.tile_of_world(target.x, target.y)
 	if query.is_loaded(t.x, t.y):
 		VehicleKinematics.launch(s, target, 2.4, vehicle.cls, query)
+		vehicle.tumble(dir, TOSS_TILT)
+	else:
+		vehicle.rock(Vehicle.ROCK_RAM, dir)
+
+
+## Поза тела: голова (основание челюстей) на высоте head_y над грунтом в точке броска; тело качается
+## вокруг неё, как смерч, — наклон броска плюс раскачка, лёгкое кручение и дрожь головы.
+func _pose(head_y: float, t: float) -> void:
+	var sway := 0.06 + 0.1 * clampf(t / RISE_S, 0.0, 1.0)
+	var rx := _lean.x + sin(_time * 2.3 + 0.7) * sway
+	var rz := _lean.y + sin(_time * 1.7) * sway * 1.2
+	var basis := Basis.from_euler(Vector3(rx, t * 0.5, rz))
+	var head := Vector3(_strike_at.x + sin(_time * 3.1) * 0.1, _ground + head_y, _strike_at.y + cos(_time * 2.7) * 0.1)
+	_body.basis = basis
+	_body.position = head - basis * Vector3(0, BODY_LEN, 0)
 
 
 static func _ease_out(k: float) -> float:
@@ -296,118 +334,113 @@ func _build_ring() -> void:
 		_ring.add_child(crack)
 
 
-## Тело — кольчатые сегменты толщиной с пасть; голова — три челюсти-лепестка (сектора купола),
-## внутри — глотка и кольцо зубов.
+## Тело — диски-«позвонки» (low-poly призмы), каждый повёрнут на свой угол; голова — три вытянутые
+## челюсти, внутри — глотка и кольцо зубов.
 func _build_body() -> void:
 	_body = Node3D.new()
 	add_child(_body)
 	var mat := Creature.material(BODY_COLOR)
 	var ring := Creature.material(RING_COLOR)
-	for i in SEGMENTS:
-		var y := i * 0.62
-		var seg := MeshInstance3D.new()
-		var c := CylinderMesh.new()
-		c.top_radius = R
-		c.bottom_radius = R * 1.04
-		c.height = 0.58
-		c.radial_segments = 14
-		c.rings = 0
-		seg.mesh = c
-		seg.material_override = mat
-		seg.position = Vector3(0, y + 0.29, 0)
-		_body.add_child(seg)
-		var band := MeshInstance3D.new()
-		var bc := CylinderMesh.new()
-		bc.top_radius = R * 1.07
-		bc.bottom_radius = R * 1.07
-		bc.height = 0.08
-		bc.radial_segments = 14
-		bc.rings = 0
-		band.mesh = bc
-		band.material_override = ring
-		band.position = Vector3(0, y + 0.6, 0)
-		_body.add_child(band)
-	var top := SEGMENTS * 0.62
-	var throat := MeshInstance3D.new()
-	var tc := CylinderMesh.new()
-	tc.top_radius = R * 0.9
-	tc.bottom_radius = R * 0.9
-	tc.height = 0.04
-	tc.radial_segments = 14
-	tc.rings = 0
-	throat.mesh = tc
-	throat.material_override = Creature.material(THROAT_COLOR)
-	throat.position = Vector3(0, top + 0.02, 0)
-	_body.add_child(throat)
+	for i in DISCS:
+		var big := i % 2 == 0
+		var disc := MeshKit.prism(_body, MeshKit.ngon(10 if big else 8, R * (1.0 if big else 0.84)),
+				0.0, 0.36 if big else 0.22, mat if big else ring)
+		disc.position.y = i * DISC_STEP + (0.0 if big else 0.07)
+		disc.rotation.y = i * 0.41
+	var throat := MeshKit.prism(_body, MeshKit.ngon(10, R * 0.9), 0.0, 0.04, Creature.material(THROAT_COLOR))
+	throat.position.y = BODY_LEN
 	var tooth := Creature.material(TOOTH_COLOR)
 	for i in 16:     # кольцо зубов по краю глотки, остриём внутрь и вверх
 		var a := TAU * i / 16.0
-		var t := MeshInstance3D.new()
-		var cone := CylinderMesh.new()
-		cone.top_radius = 0.0
-		cone.bottom_radius = 0.06
-		cone.height = 0.24
-		cone.radial_segments = 4
-		cone.rings = 0
-		t.mesh = cone
-		t.material_override = tooth
-		t.position = Vector3(cos(a) * R * 0.8, top + 0.1, sin(a) * R * 0.8)
-		t.rotation = Vector3(0, -a, 0.9)
-		_body.add_child(t)
-	var petal_mesh := _petal_mesh()
+		_tooth(_body, Vector3(cos(a) * R * 0.8, BODY_LEN + 0.1, sin(a) * R * 0.8), Vector3(0, -a, 0.9), 0.24, tooth)
+	var jaw_mesh := _jaw_mesh()
 	var jaw_mat := Creature.material(BODY_COLOR.darkened(0.08))
 	jaw_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
 	for i in 3:
 		var turn := Node3D.new()
-		turn.position = Vector3(0, top, 0)
+		turn.position = Vector3(0, BODY_LEN, 0)
 		turn.rotation.y = -TAU * i / 3.0
 		_body.add_child(turn)
 		var hinge := Node3D.new()
 		hinge.position = Vector3(R, 0, 0)
 		turn.add_child(hinge)
-		var petal := MeshInstance3D.new()
-		petal.mesh = petal_mesh
-		petal.material_override = jaw_mat
-		hinge.add_child(petal)
+		var jaw := MeshInstance3D.new()
+		jaw.mesh = jaw_mesh
+		jaw.material_override = jaw_mat
+		hinge.add_child(jaw)
 		for j in 3:      # зубы на внутренней стороне челюсти
-			var t := MeshInstance3D.new()
-			var cone := CylinderMesh.new()
-			cone.top_radius = 0.0
-			cone.bottom_radius = 0.05
-			cone.height = 0.2
-			cone.radial_segments = 4
-			cone.rings = 0
-			t.mesh = cone
-			t.material_override = tooth
-			t.position = Vector3(-0.18, 0.25 + j * 0.22, (j - 1) * 0.3)
-			t.rotation.z = PI * 0.5
-			hinge.add_child(t)
+			var u: float = [0.2, 0.42, 0.62][j]
+			var r := R * _jaw_radius(u)
+			_tooth(hinge, Vector3(r - R - 0.06, JAW_LEN * u, (j - 1) * 0.25 * r / R), Vector3(0, 0, PI * 0.5), 0.2, tooth)
 		_jaws.append(hinge)
 
 
-## Челюсть — сектор купола радиуса R в 120° (вокруг оси Y) от основания до макушки, в координатах
-## шарнира: шарнир — середина нижней кромки сектора, ось поворота — касательная к ней (локальная Z).
-static func _petal_mesh() -> ArrayMesh:
+func _tooth(parent: Node3D, at: Vector3, rot: Vector3, length: float, mat: Material) -> void:
+	var t := MeshInstance3D.new()
+	var cone := CylinderMesh.new()
+	cone.top_radius = 0.0
+	cone.bottom_radius = length * 0.25
+	cone.height = length
+	cone.radial_segments = 4
+	cone.rings = 0
+	t.mesh = cone
+	t.material_override = mat
+	t.position = at
+	t.rotation = rot
+	parent.add_child(t)
+
+
+## Профиль челюсти: доля радиуса R на доле длины u (0 — основание, 1 — кончик морды).
+const JAW_U := [0.0, 0.25, 0.5, 0.72, 0.88, 1.0]
+const JAW_R := [1.0, 0.97, 0.84, 0.62, 0.36, 0.0]
+
+
+static func _jaw_radius(u: float) -> float:
+	for k in JAW_U.size() - 1:
+		if u <= JAW_U[k + 1]:
+			return lerpf(JAW_R[k], JAW_R[k + 1], (u - JAW_U[k]) / (JAW_U[k + 1] - JAW_U[k]))
+	return 0.0
+
+
+## Челюсть — вытянутый сектор в 120° вокруг оси Y, сходящийся к кончику морды: low-poly, грани из
+## треугольников, края зазубрены (вершины кромки по очереди выступают за сектор и западают внутрь).
+## Координаты шарнира: шарнир — середина нижней кромки, ось поворота — касательная к ней (локальная Z).
+static func _jaw_mesh() -> ArrayMesh:
 	var st := SurfaceTool.new()
 	st.begin(Mesh.PRIMITIVE_TRIANGLES)
-	var nt := 6
-	var ne := 5
-	var pts: Array[Vector3] = []
-	for ie in ne + 1:
-		var e := PI * 0.5 * ie / ne
-		for it in nt + 1:
-			var t := lerpf(-PI / 3.0, PI / 3.0, float(it) / nt)
-			pts.append(Vector3(R * cos(e) * cos(t), R * 1.05 * sin(e), R * cos(e) * sin(t)) - Vector3(R, 0, 0))
-	for ie in ne:
-		for it in nt:
-			var a := ie * (nt + 1) + it
-			var b := a + 1
-			var c := a + nt + 1
-			var d := c + 1
-			for v in [pts[a], pts[c], pts[b], pts[b], pts[c], pts[d]]:
-				st.add_vertex(v)
-	st.generate_normals()
+	var cols := [-60.0, -20.0, 20.0, 60.0]
+	var shift := Vector3(R, 0, 0)
+	var grid: Array = []
+	for ri in JAW_U.size():
+		var row: Array[Vector3] = []
+		for ci in cols.size():
+			var deg: float = cols[ci]
+			if (ci == 0 or ci == cols.size() - 1) and ri > 0 and ri < JAW_U.size() - 1:
+				deg += signf(deg) * (10.0 if ri % 2 == 1 else -7.0)     # зазубрины по кромке
+			var a := deg_to_rad(deg)
+			var r: float = R * JAW_R[ri]
+			row.append(Vector3(r * cos(a), JAW_LEN * JAW_U[ri], r * sin(a)) - shift)
+		grid.append(row)
+	for ri in JAW_U.size() - 1:
+		var inside := Vector3(0, JAW_LEN * (JAW_U[ri] + JAW_U[ri + 1]) * 0.5, 0) - shift
+		for ci in cols.size() - 1:
+			var a: Vector3 = grid[ri][ci]
+			var b: Vector3 = grid[ri][ci + 1]
+			var c: Vector3 = grid[ri + 1][ci]
+			var d: Vector3 = grid[ri + 1][ci + 1]
+			MeshKit.tri_out(st, a, c, b, inside)
+			MeshKit.tri_out(st, b, c, d, inside)
 	return st.commit()
+
+
+## Пыль — в цвет грунта под червём: лиловая над песком, терракотовая над грунтом равнин.
+func _tint_dust() -> void:
+	var t := Grid.tile_of_world(pos.x, pos.y)
+	var sand := query.is_loaded(t.x, t.y) and query.material(t.x, t.y) == ChunkData.Mat.SAND
+	var wake := (_wake.mesh as QuadMesh).material as StandardMaterial3D
+	wake.albedo_color = SAND_COLOR.darkened(0.2) if sand else GROUND_DUST.darkened(0.15)
+	var burst := (_burst.mesh as QuadMesh).material as StandardMaterial3D
+	burst.albedo_color = Color(0.66, 0.52, 0.66) if sand else GROUND_DUST.lightened(0.1)
 
 
 func _dust(color: Color, amount: int, lifetime: float, direction: Vector3, spread: float,

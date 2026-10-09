@@ -18,7 +18,7 @@ rem   --no-threats       без угроз (погода, землетрясен
 rem   --no-fauna         без фауны
 rem   --threat=N         уровень угрозы не ниже N (1–6)
 rem   --event=K@S,...    событие K на S-й секунде: storm, fog, acid, dust, tornado, quake,
-rem                        hoppers, worm, shellback (червь — только если рядом песок)
+rem                        hoppers, worm, shellback (червь — если рядом песок или равнина)
 rem Сценарии без рук
 rem   --idle             без стартового экрана и автопилота: машина стоит
 rem   --select           показать трюм с выбором машины и при --idle или --shots
@@ -62,7 +62,7 @@ echo   --no-threats       без угроз (погода, землетрясе�
 echo   --no-fauna         без фауны
 echo   --threat=N         уровень угрозы не ниже N (1–6)
 echo   --event=K@S,...    событие K на S-й секунде: storm, fog, acid, dust, tornado, quake,
-echo                        hoppers, worm, shellback (червь — только если рядом песок)
+echo                        hoppers, worm, shellback (червь — если рядом песок или равнина)
 echo.
 echo  Сценарии без рук
 echo   --idle             без стартового экрана и автопилота: машина стоит
