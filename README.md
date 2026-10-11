@@ -3,6 +3,8 @@
 Изометрическая аркада на рекорд: высадись на живую чужую планету, набей трюм и выберись живым.
 Godot 4.7.2, GDScript, рендерер Compatibility (ПК и веб).
 
+**Играть в браузере:** https://nogitjusthub.github.io/explorer/ (обновить страницу после коммитов — `tools\scripts\publish_web.ps1`).
+
 - Дизайн: [docs/GDD.md](docs/GDD.md)
 - Архитектура: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
 
@@ -12,6 +14,12 @@ Godot 4.7.2, GDScript, рендерер Compatibility (ПК и веб).
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File tools\scripts\get_godot.ps1
+```
+
+В PowerShell 7 (`powershell` не находится) — так: `pwsh -ExecutionPolicy Bypass -File tools\scripts\get_godot.ps1`. После скачивания один раз импортировать проект (кэш классов в `.godot/` в git не попадает):
+
+```powershell
+tools\godot\Godot_v4.7.2-stable_win64_console.exe --headless --path . --import
 ```
 
 Запустить игру — `play.cmd`, открыть редактор — `editor.cmd` (в корне проекта; двойной клик в Проводнике или из любой папки терминала).
