@@ -36,8 +36,9 @@ func _process(dt: float) -> void:
 	_timer = 0.25
 	var s := vehicle.state
 	var tier := query.surface_tier(s.pos.x, s.pos.y)
-	_label.text = "FPS %d   задачи %.1f мс (макс %.1f)   в очереди %d\nseed %d   чанки %d (генерация %d)   F12 — снимок\npos %.1f, %.1f   ярус %.1f   тайл %s\nскорость %.1f / %.1f   подъём %d%s" % [
+	_label.text = "FPS %d   задачи %.1f мс (макс %.1f)   в очереди %d\nseed %d   чанки %d (генерация %d)%s\npos %.1f, %.1f   ярус %.1f   тайл %s\nскорость %.1f / %.1f   подъём %d%s" % [
 		Engine.get_frames_per_second(), scheduler.last_frame_usec / 1000.0, scheduler.max_frame_usec / 1000.0,
 		scheduler.pending(), run_seed, streamer.loaded_count(), streamer.generating_count(),
+		"" if OS.has_feature("web") else "   F12 — снимок",
 		s.pos.x, s.pos.y, tier, s.tile, s.vel.length(), vehicle.cls.max_speed, s.uphill_tiles,
 		"   ПАДЕНИЕ" if s.falling else ""]

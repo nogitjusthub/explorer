@@ -445,7 +445,7 @@ $g = ".\tools\godot\Godot_v4.7.2-stable_win64_console.exe"
 | Тесты | `powershell -ExecutionPolicy Bypass -File tools\scripts\test.ps1 [-Filter …]` |
 | Игра | `play.cmd [--seed=N]` (из любой папки; прямой запуск exe с `--path .` работает только из корня проекта) |
 | Бенчмарк (автопилот, ПК) | `… --path . -- --seed=7 --bench=40` (можно `--headless`) |
-| Отладочный снимок в игре | **F12** (геймпад — Back) → `build/debug/<дата_время>/`: `screenshot.png`, `map.png` (65×65 тайлов, машина — крест), `info.txt` (seed, коммит, команда воспроизведения, состояние машины, рёбра её тайла, сетка ярусов), `tiles.json` (дамп тайлов 17×17). В вебе — на `/shot` и `/log`. Без клавиатуры: `-- --snapshot-at=S` |
+| Отладочный снимок в игре | **F12** на ПК (геймпад — Back; в веб-версии отключён — F12 открывает консоль браузера) → `build/debug/<дата_время>/`: `screenshot.png`, `map.png` (65×65 тайлов, машина — крест), `info.txt` (seed, коммит, команда воспроизведения, состояние машины, рёбра её тайла, сетка ярусов), `tiles.json` (дамп тайлов 17×17). В вебе — на `/shot` и `/log`. Без клавиатуры: `-- --snapshot-at=S` |
 | Старт в точке / прямой курс | `play.cmd --seed=N --spawn=X,Z [--course=D --autopilot]` |
 | Класс техники | `play.cmd --vehicle=tank` (rover, tank, hover); снимок экрана выбора — `-- --idle --select --shots=1` |
 | Снимки экрана | `… --path . -- --seed=7 --shots=4 --shot-every=3` → `build/shots/` |

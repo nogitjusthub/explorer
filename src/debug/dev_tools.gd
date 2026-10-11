@@ -1,6 +1,6 @@
 class_name DevTools
 extends Node
-## Отладочные режимы запуска: бенчмарк, серия снимков, отладочный снимок (F12 и по таймеру).
+## Отладочные режимы запуска: бенчмарк, серия снимков, отладочный снимок (F12 на ПК и по таймеру).
 ##
 ## Параметры командной строки (после «--»; справка — play.cmd --help):
 ##   Мир и машина:
@@ -161,8 +161,10 @@ func _physics_process(_dt: float) -> void:
 	_throttle_sum += vehicle.state.throttle
 
 
+## Снимок по F12 — только на ПК: в браузере F12 открывает консоль, а снимок там всё равно некуда
+## сохранить (его принимает только локальный web_server.py — для этого есть --snapshot-at).
 func _unhandled_input(event: InputEvent) -> void:
-	if event.is_action_pressed(&"debug_snapshot"):
+	if event.is_action_pressed(&"debug_snapshot") and not OS.has_feature("web"):
 		snapshot()
 
 
