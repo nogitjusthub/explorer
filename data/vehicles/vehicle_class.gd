@@ -28,7 +28,8 @@ extends Resource
 @export var water_speed_mult: float = 0.7
 @export_group("Ground")
 @export var rough_speed_mult: float = 0.65   ## неровный грунт: предел скорости × это (ховер — 1)
-@export var mire_speed_mult: float = 0.4     ## зыбучий грунт
+@export var mire_speed_mult: float = 0.3     ## зыбучий грунт
+@export var mire_accel_mult: float = 0.3     ## зыбучий грунт вязкий: разгон × это; постоял — засосало, разгон ещё слабее
 @export var hovers: bool = false
 
 @export_group("Falls")

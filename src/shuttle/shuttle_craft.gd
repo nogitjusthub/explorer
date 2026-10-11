@@ -1,39 +1,43 @@
 class_name ShuttleCraft
 extends Node3D
-## Челнок на сцене (основной и аварийный) из примитивов: спуск с неба, ожидание, взлёт.
-## Основной висит над площадкой и светит лучом в зону; до посадки над центром площадки мигает
-## указатель — «ёлочка» из трёх стрелок вниз, огни бегут сверху вниз.
-## Аварийный садится на тайл. Анимации — в _process, интерполяция физики для узла выключена.
+## Челнок на сцене (основной и аварийный) из примитивов: спуск с неба, посадка на землю, взлёт.
+## До касания под местом посадки горит предупреждающий знак — круг с косыми полосами размером с корпус:
+## кто там окажется в момент касания, будет раздавлен. После посадки вокруг основного — зона погрузки
+## пунктиром; при эвакуации луч из люка втягивает машину. Корпус стоящего челнока — препятствие
+## (ShuttleController передаёт его кинематике). Анимации — в _process, интерполяция физики выключена.
 
 enum Kind { MAIN, EMERGENCY }
 enum Anim { NONE, DESCEND, ASCEND }
 
 const DROP_HEIGHT := 24.0
 const FLY_S := 3.0
-const MAIN_HOVER := 2.2            ## основной челнок висит над площадкой
+const MAIN_HULL_R := 1.2           ## тайлов — радиус корпуса основного: зона урона при посадке и препятствие
+const EMERGENCY_HULL_R := 0.75
+const HATCH_Y := 0.55              ## высота люка над землёй — откуда бьёт луч эвакуации
 const COLOR_MAIN := Color(0.78, 0.82, 0.9)
 const COLOR_EMERGENCY := Color(0.95, 0.35, 0.22)
 const COLOR_ENGINE := Color(1.0, 0.6, 0.2)
-const COLOR_BEAM := Color(0.4, 0.95, 1.0, 0.22)
+const COLOR_BEAM := Color(0.4, 0.95, 1.0, 0.45)
 const COLOR_RING := Color(0.45, 1.0, 0.95, 0.9)
-const COLOR_ARROW := Color(0.45, 1.0, 0.95, 0.9)
-const ARROW_DIM := 0.25                ## яркость (альфа) погашенной стрелки
-const ARROW_STEP_S := 0.22             ## огонь переходит на следующую стрелку
-const ARROW_BASE := 0.9                ## высота нижней стрелки над площадкой
-const ARROW_GAP := 0.6
+const COLOR_HAZARD := Color(1.0, 0.25, 0.12, 0.85)
+const ZONE_DASHES := 18
+const ZONE_SPIN := 0.25            ## рад/с — пунктир зоны погрузки медленно бежит по кругу
+const HAZARD_SHADER := preload("res://src/render/shaders/landing_hazard.gdshader")
+
 
 var kind: Kind
-var hover := 0.0
 var zone_r := 2.0
+var hull_r := MAIN_HULL_R
 
 var _model: Node3D
+var _flames: Array[Node3D] = []
 var _beam: MeshInstance3D
-var _ring: MeshInstance3D
-var _arrows: Node3D
-var _arrow_mats: Array[StandardMaterial3D] = []
-var _ring_mat: StandardMaterial3D
 var _beam_mat: StandardMaterial3D
-var _tractor := false                  ## эвакуация: луч втягивает машину — ярче и пульсирует
+var _zone: Node3D
+var _zone_mat: StandardMaterial3D
+var _hazard: MeshInstance3D
+var _hazard_mat: ShaderMaterial
+var _tractor_target: Node3D = null     ## эвакуация: луч тянется к машине
 var _anim := Anim.NONE
 var _t := 0.0
 var _dur := FLY_S
@@ -43,82 +47,81 @@ var _time := 0.0
 func _init(craft_kind: Kind, zone_radius: float = 2.0) -> void:
 	kind = craft_kind
 	zone_r = zone_radius
+	hull_r = MAIN_HULL_R if kind == Kind.MAIN else EMERGENCY_HULL_R
 	name = "MainShuttle" if kind == Kind.MAIN else "EmergencyShuttle"
-	hover = MAIN_HOVER if kind == Kind.MAIN else 0.0
 	physics_interpolation_mode = Node.PHYSICS_INTERPOLATION_MODE_OFF
 	_build()
 	visible = false
 
 
-## Площадка объявлена: маяк и кольцо зоны, самого челнока ещё нет.
+## Площадка объявлена: на месте посадки — предупреждающий знак, самого челнока ещё нет.
 func show_marker(ground: Vector3) -> void:
 	position = ground
 	visible = true
 	_model.visible = false
-	_beam.visible = false
-	_ring.visible = true
-	_arrows.visible = true
+	_hazard.visible = true
+	_zone.visible = false
 
 
-## Спуск к точке ground за seconds (касание — к концу спуска).
+## Спуск к точке ground за seconds: касание земли — к концу спуска. Знак горит до касания.
 func descend(ground: Vector3, seconds: float = FLY_S) -> void:
 	position = ground
 	visible = true
 	_model.visible = true
 	_model.position.y = DROP_HEIGHT
+	_hazard.visible = true
+	_set_flames(true)
 	_anim = Anim.DESCEND
 	_t = 0.0
 	_dur = maxf(seconds, 0.1)
 
 
-## Сдвиг по горизонтали во время спуска (аварийный следует за машиной).
-func retarget(ground: Vector3) -> void:
-	position = position.lerp(ground, 0.2)
-
-
-## Сел: у основного — луч в зону.
+## Сел на землю: двигатели стихают, пыль; знак гаснет, у основного — зона погрузки пунктиром.
 func touch_down() -> void:
 	_anim = Anim.NONE
-	_model.position.y = hover
-	_arrows.visible = false
-	_beam.visible = kind == Kind.MAIN
-	_ring.visible = kind == Kind.MAIN
+	_model.position.y = 0.0
+	_hazard.visible = false
+	_zone.visible = kind == Kind.MAIN
+	_set_flames(false)
+	dust(hull_r + 0.3)
 
 
-## Эвакуация: луч разгорается и втягивает машину (до взлёта).
-func tractor() -> void:
-	_tractor = true
+## Эвакуация: из люка бьёт луч и втягивает машину (target — её узел), до взлёта.
+func tractor(target: Node3D) -> void:
+	_tractor_target = target
 	_beam.visible = true
+	_update_beam()
 
 
 func ascend() -> void:
-	_tractor = false
-	_beam_mat.albedo_color.a = COLOR_BEAM.a
+	_tractor_target = null
 	_anim = Anim.ASCEND
 	_t = 0.0
 	_dur = FLY_S
 	_beam.visible = false
-	_ring.visible = false
-	_arrows.visible = false
+	_zone.visible = false
+	_hazard.visible = false
+	_set_flames(true)
+	dust(hull_r + 0.6)
 
 
-## Взлёт с площадки — пыль кольцом из-под челнока.
-func takeoff_dust() -> void:
-	var dust := CPUParticles3D.new()
-	dust.one_shot = true
-	dust.explosiveness = 0.8
-	dust.amount = 70
-	dust.lifetime = 1.6
-	dust.emission_shape = CPUParticles3D.EMISSION_SHAPE_RING
-	dust.emission_ring_axis = Vector3.UP
-	dust.emission_ring_radius = zone_r
-	dust.emission_ring_inner_radius = 0.5
-	dust.emission_ring_height = 0.1
-	dust.direction = Vector3.UP
-	dust.spread = 75.0
-	dust.initial_velocity_min = 1.5
-	dust.initial_velocity_max = 4.0
-	dust.gravity = Vector3(0, -3.0, 0)
+## Пыль кольцом из-под челнока (касание, взлёт).
+func dust(radius: float) -> void:
+	var p := CPUParticles3D.new()
+	p.one_shot = true
+	p.explosiveness = 0.8
+	p.amount = 70 if kind == Kind.MAIN else 36
+	p.lifetime = 1.6
+	p.emission_shape = CPUParticles3D.EMISSION_SHAPE_RING
+	p.emission_ring_axis = Vector3.UP
+	p.emission_ring_radius = radius
+	p.emission_ring_inner_radius = radius * 0.4
+	p.emission_ring_height = 0.1
+	p.direction = Vector3.UP
+	p.spread = 75.0
+	p.initial_velocity_min = 1.5
+	p.initial_velocity_max = 4.0
+	p.gravity = Vector3(0, -3.0, 0)
 	var q := QuadMesh.new()
 	q.size = Vector2(0.22, 0.22)
 	var m := StandardMaterial3D.new()
@@ -127,10 +130,11 @@ func takeoff_dust() -> void:
 	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	m.albedo_color = Color(0.7, 0.58, 0.5, 0.7)
 	q.material = m
-	dust.mesh = q
-	dust.position = Vector3(0, 0.1, 0)
-	add_child(dust)
-	dust.emitting = true
+	p.mesh = q
+	p.position = Vector3(0, 0.1, 0)
+	add_child(p)
+	p.emitting = true
+	p.finished.connect(p.queue_free)
 
 
 func is_flying() -> bool:
@@ -141,26 +145,49 @@ func _process(dt: float) -> void:
 	if not visible:
 		return
 	_time += dt
-	_ring_mat.albedo_color.a = 0.55 + 0.35 * sin(_time * 4.0)
-	if _tractor:
-		_beam_mat.albedo_color.a = 0.45 + 0.2 * sin(_time * 30.0)
-	if _arrows.visible:
-		_update_arrows()
+	if _hazard.visible:
+		# Знак мерцает тем чаще, чем ближе касание; полосы текут.
+		var k := clampf(_t / _dur, 0.0, 1.0) if _anim == Anim.DESCEND else 0.0
+		var rate := lerpf(3.0, 14.0, k * k)
+		_hazard_mat.set_shader_parameter(&"pulse", 0.7 + 0.3 * sin(_time * rate))
+		_hazard_mat.set_shader_parameter(&"flow", _time * 0.8)
+	if _zone.visible:
+		_zone.rotation.y += ZONE_SPIN * dt
+		_zone_mat.albedo_color.a = 0.65 + 0.3 * sin(_time * 4.0)
+	if _beam.visible:
+		_beam_mat.albedo_color.a = COLOR_BEAM.a + 0.2 * sin(_time * 30.0)
+		_update_beam()
 	match _anim:
 		Anim.DESCEND:
 			_t += dt
 			var k := clampf(_t / _dur, 0.0, 1.0)
-			_model.position.y = lerpf(DROP_HEIGHT, hover, 1.0 - pow(1.0 - k, 3.0))
+			_model.position.y = lerpf(DROP_HEIGHT, 0.0, 1.0 - pow(1.0 - k, 3.0))
 		Anim.ASCEND:
 			_t += dt
 			var k := clampf(_t / _dur, 0.0, 1.0)
-			_model.position.y = lerpf(hover, DROP_HEIGHT, k * k)
+			_model.position.y = lerpf(0.0, DROP_HEIGHT, k * k)
 			if k >= 1.0:
 				_anim = Anim.NONE
 				visible = false
-		_:
-			if kind == Kind.MAIN and _model.visible:
-				_model.position.y = hover + sin(_time * 1.5) * 0.06
+
+
+## Луч от люка к машине: усечённый конус, растянутый по длине.
+func _update_beam() -> void:
+	if _tractor_target == null or not is_instance_valid(_tractor_target):
+		_beam.visible = false
+		return
+	var a := global_position + Vector3(0, HATCH_Y, 0)
+	var b := _tractor_target.global_position + Vector3(0, 0.25, 0)
+	var d := b - a
+	if d.length() < 0.05:
+		return
+	var basis := Basis(Quaternion(Vector3.UP, d.normalized())) * Basis.from_scale(Vector3(1.0, d.length(), 1.0))
+	_beam.global_transform = Transform3D(basis, (a + b) * 0.5)
+
+
+func _set_flames(on: bool) -> void:
+	for f in _flames:
+		f.visible = on
 
 
 func _build() -> void:
@@ -170,83 +197,66 @@ func _build() -> void:
 	var body_color := COLOR_MAIN if main else COLOR_EMERGENCY
 	var s := 1.0 if main else 0.55
 	var body := _shaded(body_color)
+	var dark := _shaded(body_color.darkened(0.3))
+	# Стоит на гондолах двигателей и передней опоре.
 	_mesh(_model, _box(Vector3(1.3, 0.45, 2.1) * s), Vector3(0, 0.45 * s, 0), body)
 	_mesh(_model, _box(Vector3(2.4, 0.12, 0.8) * s), Vector3(0, 0.4 * s, 0.35 * s), body)
 	var glass := _shaded(Color(0.35, 0.8, 1.0))
 	_mesh(_model, _box(Vector3(0.7, 0.25, 0.5) * s), Vector3(0, 0.75 * s, -0.7 * s), glass)
+	_mesh(_model, _box(Vector3(0.08, 0.25, 0.08) * s), Vector3(0, 0.12 * s, -0.75 * s), dark)
+	_mesh(_model, _box(Vector3(0.3, 0.04, 0.2) * s), Vector3(0, 0.02 * s, -0.78 * s), dark)
 	var engine := _unshaded(COLOR_ENGINE)
-	for x in [-0.95, 0.95]:
+	for x: float in [-0.95, 0.95]:
 		var pod := CylinderMesh.new()
 		pod.top_radius = 0.2 * s
 		pod.bottom_radius = 0.24 * s
 		pod.height = 0.5 * s
 		pod.radial_segments = 8
 		pod.rings = 0
-		_mesh(_model, pod, Vector3(x * s, 0.25 * s, 0.4 * s), _shaded(body_color.darkened(0.3)))
+		_mesh(_model, pod, Vector3(x * s, 0.25 * s, 0.4 * s), dark)
 		var flame := CylinderMesh.new()
 		flame.top_radius = 0.16 * s
 		flame.bottom_radius = 0.05 * s
 		flame.height = 0.25 * s
 		flame.radial_segments = 6
 		flame.rings = 0
-		_mesh(_model, flame, Vector3(x * s, -0.1 * s, 0.4 * s), engine)
+		_flames.append(_mesh(_model, flame, Vector3(x * s, -0.1 * s, 0.4 * s), engine))
 
 	var beam := CylinderMesh.new()
-	beam.top_radius = 0.7
-	beam.bottom_radius = zone_r
-	beam.height = MAIN_HOVER
-	beam.radial_segments = 16
+	beam.top_radius = 0.45
+	beam.bottom_radius = 0.12
+	beam.height = 1.0
+	beam.radial_segments = 10
 	beam.rings = 0
 	beam.cap_top = false
 	beam.cap_bottom = false
 	_beam_mat = _unshaded(COLOR_BEAM)
-	_beam = _mesh(self, beam, Vector3(0, MAIN_HOVER * 0.5, 0), _beam_mat)
+	_beam = _mesh(self, beam, Vector3.ZERO, _beam_mat)
 	_beam.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-
-	var ring := TorusMesh.new()
-	ring.inner_radius = zone_r - 0.12
-	ring.outer_radius = zone_r
-	ring.rings = 24
-	ring.ring_segments = 4
-	_ring_mat = _unshaded(COLOR_RING)
-	_ring = _mesh(self, ring, Vector3(0, 0.05, 0), _ring_mat)
-	_ring.scale = Vector3(1, 0.3, 1)
-	_ring.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-
-	_arrows = Node3D.new()
-	_arrows.position = Vector3(0, ARROW_BASE, 0)
-	add_child(_arrows)
-	for i in 3:     # 0 — верхняя
-		var mat := _unshaded(COLOR_ARROW)
-		_arrow_mats.append(mat)
-		_chevron(_arrows, Vector3(0, (2 - i) * ARROW_GAP, 0), mat)
 	_beam.visible = false
-	_ring.visible = false
-	_arrows.visible = false
 
+	# Зона погрузки — пунктирное кольцо на земле.
+	_zone = Node3D.new()
+	_zone.position = Vector3(0, 0.05, 0)
+	add_child(_zone)
+	_zone_mat = _unshaded(COLOR_RING)
+	var arc := TAU * zone_r / ZONE_DASHES
+	for i in ZONE_DASHES:
+		var a := TAU * i / ZONE_DASHES
+		var dash := _mesh(_zone, _box(Vector3(0.1, 0.03, arc * 0.55)), Vector3(cos(a), 0, sin(a)) * zone_r, _zone_mat)
+		dash.rotation.y = -a
+		dash.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	_zone.visible = false
 
-## Стрелка «V» остриём вниз из двух брусков (в плоскости XY узла).
-static func _chevron(parent: Node3D, tip: Vector3, mat: Material) -> void:
-	const ARM := 0.75
-	for side in [-1.0, 1.0]:
-		var arm := MeshInstance3D.new()
-		arm.mesh = _box(Vector3(ARM, 0.15, 0.06))
-		arm.material_override = mat
-		arm.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-		var dir := Vector3(side, 1.0, 0.0).normalized()
-		arm.position = tip + dir * ARM * 0.45
-		arm.rotation.z = atan2(dir.y, dir.x)
-		parent.add_child(arm)
-
-
-## Стрелки всегда смотрят в камеру; огонь бежит сверху вниз — к центру круга.
-func _update_arrows() -> void:
-	var cam := get_viewport().get_camera_3d()
-	if cam != null:
-		_arrows.global_basis = cam.global_basis
-	var lit := int(_time / ARROW_STEP_S) % 3
-	for i in 3:
-		_arrow_mats[i].albedo_color.a = 0.9 if i == lit else ARROW_DIM
+	# Знак посадки: круг размером с корпус, косые полосы, мерцает.
+	_hazard_mat = ShaderMaterial.new()
+	_hazard_mat.shader = HAZARD_SHADER
+	_hazard_mat.set_shader_parameter(&"color", COLOR_HAZARD)
+	var plane := PlaneMesh.new()
+	plane.size = Vector2.ONE * hull_r * 2.0
+	_hazard = _mesh(self, plane, Vector3(0, 0.04, 0), _hazard_mat)
+	_hazard.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	_hazard.visible = false
 
 
 static func _box(size: Vector3) -> BoxMesh:

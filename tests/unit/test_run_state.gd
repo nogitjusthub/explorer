@@ -73,12 +73,15 @@ func test_ship_emergency_and_score() -> void:
 	assert_eq(rs.shipments, 1, "empty hold is not a shipment")
 	rs.offer_cargo(_kind(&"sample"))
 	rs.fuel = 10.0
-	# Аварийный: 50 × 0,5 − 500 = −475, +30% бака.
-	assert_eq(rs.emergency_ship(), -475)
-	assert_near(rs.fuel, 40.0, 1e-4)
+	rs.hp = 60
+	# Аварийный: 50 × 0,5 − 500 = −475; привёз 20 топлива и 10 запчастей (+10 HP).
+	assert_eq(rs.emergency_ship(20.0, 10), -475)
+	assert_near(rs.fuel, 30.0, 1e-4)
+	assert_eq(rs.hp, 70)
 	assert_eq(rs.score(), 0, "score never below zero")
-	# Второй вызов вдвое дороже.
-	assert_eq(rs.emergency_ship(), -1000)
+	# Второй вызов вдвое дороже; запчасти не чинят выше максимума.
+	assert_eq(rs.emergency_ship(0.0, 30), -1000)
+	assert_eq(rs.hp, 100)
 
 
 func test_evacuation_bonus_and_lost_cargo_on_death() -> void:

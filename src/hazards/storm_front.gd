@@ -5,8 +5,9 @@ extends Node3D
 ## (через weather_changed — свет и экранный слой частиц).
 ## Внутри — удар молнии каждые strike_interval_s: часть рядом с машиной (если она под фронтом),
 ## остальные — по фронту; точка выбирается с весом по высоте (вершины и деревья притягивают удары).
-## Телеграф — светящийся круг и треск, удар через strike_telegraph_s: урон, воронка, поваленное дерево,
-## из кристаллической породы выбиваются кристаллы. Тень рисуют шейдеры по глобальным параметрам
+## Телеграф — светящийся круг и треск, удар через strike_telegraph_s: урон, поваленное дерево, из
+## кристаллической породы выбиваются кристаллы; изредка (strike_crater_chance, в воду — никогда) —
+## воронка с каменным крошевом на дне. Тень рисуют шейдеры по глобальным параметрам
 ## storm_center / storm_radius.
 
 signal damaged(amount: int, source: StringName)
@@ -19,6 +20,8 @@ const COLOR_BOLT := Color(0.85, 0.92, 1.0)
 const COLOR_GLOW := Color(0.55, 0.7, 1.0, 0.35)
 const COLOR_CLOUD := Color(0.2, 0.21, 0.28)
 const BOLT_S := 0.22
+const CLOUD_MARGIN := 8.0                ## тучи висят высоко и на экране видны раньше края тени — фронт рождается дальше
+const FADE_S := 3.0                      ## тучи и тень проявляются в начале и тают в конце за столько
 const ELMO_SHADER := preload("res://src/render/shaders/st_elmo.gdshader")
 
 var rules: BalanceRules
@@ -44,6 +47,7 @@ var _clouds: MurkLayers
 var _sheet_timer := 2.0
 var _sheet := 0.0
 var coverage := 0.0                      ## насколько машина под тучами, 0…1
+var _fade := 0.0                         ## проявление туч и тени, 0…1
 
 
 func _init() -> void:
@@ -55,9 +59,8 @@ func _init() -> void:
 func begin() -> void:
 	var from := Vector2.from_angle(rng.randf() * TAU)
 	radius = rules.storm_radius
-	center = vehicle.state.pos + from * (radius + rules.murk_gap)
+	center = vehicle.state.pos + from * (radius + rules.murk_gap + CLOUD_MARGIN)
 	direction = (-from).rotated(rng.randf_range(-0.35, 0.35))
-	RenderingServer.global_shader_parameter_set(&"storm_dark", rules.storm_dark)
 	_clouds = MurkLayers.new()
 	add_child(_clouds)
 	var drift := direction * rules.storm_speed * 0.04
@@ -77,17 +80,18 @@ func step(dt: float) -> void:
 		radius = rules.storm_radius * clampf(1.0 - (_age - rules.storm_max_s) / rules.dissipate_s, 0.0, 1.0)
 		if radius <= 1.0:
 			_end()
+	_fade = clampf(_fade + dt / FADE_S * (-1.0 if ended else 1.0), 0.0, 1.0)
 	_update_shadow()
 	var to_vehicle := vehicle.state.pos - center
-	coverage = 0.0 if ended else 1.0 - smoothstep(radius - 8.0, radius, to_vehicle.length())
+	coverage = (1.0 - smoothstep(radius - 8.0, radius, to_vehicle.length())) * _fade
 	EventBus.weather_changed.emit(&"storm", coverage)
-	_clouds.update(Vector3(vehicle.state.pos.x, vehicle.state.y, vehicle.state.pos.y), 3.0, 0.0 if ended else 1.0)
+	_clouds.update(Vector3(vehicle.state.pos.x, vehicle.state.y, vehicle.state.pos.y), 3.0, _fade)
 	_step_sheet(dt)
 	var away := to_vehicle.dot(direction) < 0.0
 	if not ended:
 		EventBus.threat_telegraphed.emit(&"storm", Vector3(center.x, 0.0, center.y), 0.0, direction)
 	# Прошёл машину и удалился — кончился (новых ударов нет, ждём начатые).
-	if away and to_vehicle.length() > radius + rules.murk_gap:
+	if away and to_vehicle.length() > radius + rules.murk_gap + CLOUD_MARGIN:
 		_end()
 	if not ended:
 		_strike_timer -= dt
@@ -120,16 +124,13 @@ func step(dt: float) -> void:
 			(b["node"] as Node3D).queue_free()
 			(b["light"] as Node3D).queue_free()
 			_bolts.remove_at(i)
-	finished = ended and _pending.is_empty() and _bolts.is_empty()
+	finished = ended and _pending.is_empty() and _bolts.is_empty() and _fade <= 0.0
 
 
 func _end() -> void:
 	if ended:
 		return
-	ended = true
-	coverage = 0.0
-	EventBus.weather_changed.emit(&"storm", 0.0)
-	RenderingServer.global_shader_parameter_set(&"storm_radius", 0.0)
+	ended = true                         # тучи и тень тают за FADE_S (step), потом фронт убирается
 	EventBus.threat_ended.emit(&"storm")
 
 
@@ -159,6 +160,11 @@ func _pick_target() -> Vector2:
 	elif best_score == -INF:
 		return NO_TARGET               # фронт далеко от машины — удар никто не увидит
 	return best
+
+
+## Отладка (--event=strike): удар прямо в машину.
+func strike_vehicle() -> void:
+	_telegraph(vehicle.state.pos)
 
 
 ## Знак удара — «огни святого Эльма»: мерцающая голубая корона, искры и подсветка там, куда ударит.
@@ -224,10 +230,15 @@ func _strike(p: Vector2) -> void:
 	EventBus.screen_flash_requested.emit(clampf(1.0 - d / 14.0, 0.0, 1.0))
 	EventBus.camera_shake_requested.emit(clampf(1.0 - d / 8.0, 0.0, 1.0) * 0.8, 0.3)
 	if not vehicle.state.drowning:
+		var hit := true
 		if d <= rules.strike_core_r:
 			damaged.emit(rules.strike_damage_center, &"lightning")
 		elif d <= rules.strike_radius + VehicleKinematics.RADIUS:
 			damaged.emit(rules.strike_damage_edge, &"lightning")
+		else:
+			hit = false
+		if hit:
+			vehicle.invert_controls(rules.shock_invert_s)    # разряд по машине — управление наоборот
 	# Дерево под ударом падает, кристаллическая порода выбрасывает кристаллы.
 	for dz in range(-1, 2):
 		for dx in range(-1, 2):
@@ -237,6 +248,9 @@ func _strike(p: Vector2) -> void:
 	if query.material(t.x, t.y) == ChunkData.Mat.CRYSTAL:
 		for _i in 1 + rng.randi() % 2:
 			pickups.drop(&"crystal", p, 0.8)
+	# Воронка — изредка и только на суше: дно водоёма молния не трогает.
+	if query.water_tier(t.x, t.y) != TerrainQuery.NO_WATER or rng.randf() >= rules.strike_crater_chance:
+		return
 	Deformation.crater(terrain, p, rules.strike_radius, rules.strike_crater_depth)
 	# Каменное крошево на дне воронки — неровный грунт.
 	var debris: Array[Vector2i] = []
@@ -344,4 +358,5 @@ func _step_sheet(dt: float) -> void:
 
 func _update_shadow() -> void:
 	RenderingServer.global_shader_parameter_set(&"storm_center", Vector3(center.x, 0.0, center.y))
-	RenderingServer.global_shader_parameter_set(&"storm_radius", 0.0 if ended else radius)
+	RenderingServer.global_shader_parameter_set(&"storm_radius", radius if _fade > 0.0 else 0.0)
+	RenderingServer.global_shader_parameter_set(&"storm_dark", rules.storm_dark * _fade)

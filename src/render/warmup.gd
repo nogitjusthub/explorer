@@ -2,8 +2,8 @@ class_name Warmup
 extends Node3D
 ## Прогрев шейдеров эффектов (ARCHITECTURE §10): в Compatibility материал компилируется при первом
 ## показе, и первая гроза или туман дёргали кадр. На старте на несколько кадров рядом с машиной
-## показываются невидимые копии: слои облачного шума (оба шейдера), разряд, телеграф-круг, искры и
-## вспышка света — потом узел убирает себя.
+## показываются невидимые копии: слои облачного шума (оба шейдера), разряд, телеграф-круг, знак посадки
+## челнока, водоворот, пена Нессы, искры и вспышка света — потом узел убирает себя.
 
 const FRAMES := 4
 
@@ -43,6 +43,18 @@ func _ready() -> void:
 	em.set_shader_parameter("intensity", 0.0)
 	elmo.material_override = em
 	add_child(elmo)
+	# Знак посадки челнока, водоворот, пена Нессы — свои шейдеры, первый показ иначе дёргает кадр.
+	for path in ["res://src/render/shaders/landing_hazard.gdshader", "res://src/render/shaders/whirlpool.gdshader",
+			"res://src/render/shaders/foam_strip.gdshader"]:
+		var mi := MeshInstance3D.new()
+		var q := QuadMesh.new()
+		q.size = Vector2.ONE * 0.01
+		mi.mesh = q
+		var sm := ShaderMaterial.new()
+		sm.shader = load(path)
+		mi.material_override = sm
+		mi.position = Vector3(0, -0.5, 0)
+		add_child(mi)
 	var light := OmniLight3D.new()
 	light.light_energy = 0.01
 	light.omni_range = 2.0

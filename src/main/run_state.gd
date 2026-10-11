@@ -2,7 +2,8 @@ class_name RunState
 extends RefCounted
 ## Состояние одного забега (GDD §2, §6, §7): HP, топливо, трюм, счёт, время. Чистая логика без сцены.
 ## Счёт = Σ сдач основному челноку + Σ аварийных сдач + бонус при эвакуации; не ниже нуля.
-## При гибели и пустом баке трюм теряется.
+## При гибели трюм теряется. CAUSE_EMPTY_TANK — из прошлых версий (пустой бак больше не конец забега),
+## остаётся ради старых записей таблицы рекордов.
 
 signal hp_changed(hp: int, hp_max: int)
 signal fuel_changed(fuel: float, fuel_max: float)
@@ -166,15 +167,17 @@ func ship_cargo() -> int:
 	return value
 
 
-## Сдача аварийному челноку: груз за полцены, штраф 500 × 2^(n−1), +30% бака.
-## Возвращает изменение счёта (может быть отрицательным).
-func emergency_ship() -> int:
+## Сдача аварийному челноку: груз за полцены, штраф 500 × 2^(n−1); челнок привёз fuel_units
+## топлива и parts единиц запчастей (1 ед. — 1 HP). Возвращает изменение счёта (может быть отрицательным).
+func emergency_ship(fuel_units: float, parts: int) -> int:
 	emergency_calls += 1
 	var delta := roundi(cargo_value() * rules.emergency_cargo_mult) \
 			- rules.emergency_penalty_base * int(pow(2.0, emergency_calls - 1))
 	banked += delta
 	_clear_cargo()
-	add_fuel(cls.fuel_max * rules.emergency_fuel_frac)
+	add_fuel(fuel_units)
+	if parts > 0:
+		heal(parts)
 	score_changed.emit(score())
 	return delta
 

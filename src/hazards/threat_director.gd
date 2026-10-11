@@ -3,7 +3,8 @@ extends Node
 ## Угрозы забега (GDD §5, §7.1). Уровень угрозы T растёт со временем и пройденным путём.
 ## Непогода циклична: ясно → событие → ясно, паузы короче с ростом T. Событие — гроза или плохая
 ## видимость (WeatherFront: туман, кислотный туман или пылевая буря — жребий). Землетрясения и смерчи —
-## по своим таймерам с T ≥ 3; в пылевой буре смерч ещё и может родиться при входе в неё. После сдачи
+## по своим таймерам с T ≥ 3; в пылевой буре смерч ещё и может родиться при входе в неё. Водоворот —
+## с T ≥ 2, пока машина над глубокой водой: по курсу, на глубине 2×2 тайла. После сдачи
 ## груза основному челноку — затишье: новые угрозы не начинаются, текущие идут до конца.
 ## Угрозы — дочерние узлы, GameFlow вызывает step() в своём физическом кадре; урон — сигналом damaged.
 
@@ -22,17 +23,20 @@ var min_level := 1                         ## отладка: не ниже эт
 var forced: Array[Dictionary] = []         ## отладка: [{kind, at}] — событие на заданной секунде
 
 var level := 1
-var stats := {"storm": 0, "quake": 0, "strikes": 0, "fog": 0, "acid": 0, "dust": 0, "tornado": 0}   ## для отчёта бенчмарка
+var stats := {"storm": 0, "quake": 0, "strikes": 0, "fog": 0, "acid": 0, "dust": 0, "tornado": 0, "whirlpool": 0}   ## для отчёта бенчмарка
 var _rng: RandomNumberGenerator
 var _time := 0.0
 var _distance0 := 0.0
 var _clear_left := 0.0
 var _quake_left := 0.0
 var _tornado_left := 0.0
+var _whirl_left := 0.0
+var _whirl_check := 0.0
 var _calm_left := 0.0
 var _weather: Node = null                  ## StormFront или WeatherFront
 var _quake: Quake = null
 var _tornado: Tornado = null
+var _whirlpool: Whirlpool = null
 
 
 func _ready() -> void:
@@ -49,6 +53,7 @@ func begin() -> void:
 	_clear_left = rules.first_event_s
 	_quake_left = rules.quake_interval_t3_s
 	_tornado_left = rules.tornado_interval_t3_s
+	_whirl_left = rules.whirlpool_interval_s * 0.5
 	_calm_left = 0.0
 
 
@@ -144,6 +149,20 @@ func step(dt: float) -> void:
 			_tornado.queue_free()
 			_tornado = null
 
+	if level >= rules.whirlpool_min_level and _whirlpool == null:
+		_whirl_left -= dt
+		_whirl_check -= dt
+		if _whirl_left <= 0.0 and _whirl_check <= 0.0 and not in_calm():
+			_whirl_check = 2.0
+			if _over_deep_water() and _rng.randf() < rules.whirlpool_chance:
+				if _spawn_whirlpool(4.0, 9.0):
+					_whirl_left = rules.whirlpool_interval_s * lerpf(0.75, 1.25, _rng.randf())
+	if _whirlpool != null:
+		_whirlpool.step(dt)
+		if _whirlpool.finished:
+			_whirlpool.queue_free()
+			_whirlpool = null
+
 
 ## Запуск угрозы. false — не началась (уже идёт такая же или ей нет места).
 func _start(kind: StringName) -> bool:
@@ -194,7 +213,42 @@ func _start(kind: StringName) -> bool:
 		&"tornado":
 			var front := _weather as WeatherFront
 			return _spawn_tornado(front.wind if front != null else Vector2.ZERO)
+		&"whirlpool":
+			# Отладка (--event=whirlpool): вплотную к машине, чтобы сразу потянуло.
+			if not _spawn_whirlpool(2.0, 4.0):
+				print("threats: no deep water for a whirlpool near the vehicle")
+				return false
+			return true
+		&"strike":
+			# Отладка: удар молнии прямо в машину (гроза начинается, если её нет).
+			if _weather != null and not _weather is StormFront:
+				return false
+			if _weather == null:
+				_start(&"storm")
+			(_weather as StormFront).strike_vehicle()
+			return true
 	return false
+
+
+## Водоворот по курсу машины в r_min…r_max тайлах на глубокой воде 2×2. Один за раз.
+func _spawn_whirlpool(r_min: float, r_max: float) -> bool:
+	if _whirlpool != null:
+		return false
+	var at := Whirlpool.find_spot(query, vehicle.state.pos, vehicle.state.vel, r_min, r_max, _rng)
+	if at == Vector2.INF:
+		return false
+	var w := Whirlpool.new()
+	_setup(w)
+	add_child(w)
+	w.begin(at)
+	_whirlpool = w
+	stats["whirlpool"] += 1
+	return true
+
+
+## Машина над глубокой водой (2+ яруса) — водоворот имеет смысл только там.
+func _over_deep_water() -> bool:
+	return Whirlpool.deep(query, vehicle.state.tile)
 
 
 ## Смерч: с наветренной стороны из-за края экрана, в буре его сносит ветром. Один за раз.

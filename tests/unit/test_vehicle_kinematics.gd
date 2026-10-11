@@ -59,6 +59,28 @@ func test_accelerates_to_max_speed_on_flat() -> void:
 	assert_near(s.vel.length(), rover.max_speed, 0.01)
 
 
+func test_empty_tank_crawls() -> void:
+	# GDD §7.3: с пустым баком машина ползёт — тайл за 2–3 с.
+	var f := TerrainFixture.new()
+	var rover := _rover()
+	var s := _state(f, rover, Vector2(5.5, 10.5), 0.0)
+	s.speed_cap = 0.4
+	_drive(s, Vector2.RIGHT, rover, f, 120)
+	assert_near(s.vel.length(), 0.4, 0.01)
+	assert_true(s.pos.x > 6.0, "still moves")
+
+
+func test_landed_shuttle_hull_blocks() -> void:
+	# Корпус севшего челнока — препятствие: машина упирается и не въезжает внутрь круга.
+	var f := TerrainFixture.new()
+	var rover := _rover()
+	var s := _state(f, rover, Vector2(5.5, 10.5), 0.0)
+	s.obstacles = [Vector3(10.5, 10.5, 1.2)] as Array[Vector3]
+	_drive(s, Vector2.RIGHT, rover, f, 180)
+	assert_true(s.pos.distance_to(Vector2(10.5, 10.5)) >= 1.2 + VehicleKinematics.RADIUS - 0.01, "stopped at the hull")
+	assert_true(s.vel.x < 0.5, "speed into the hull is gone")
+
+
 func test_wall_up_blocks_everyone() -> void:
 	var f := TerrainFixture.new(4)
 	f.set_block(14, 0, 20, 30, 5)   # уступ в 1 ярус к востоку от x = 14

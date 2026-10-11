@@ -34,4 +34,5 @@ stat_armor = 3
 stat_handling = 4
 stat_cargo = 3
 rough_speed_mult = 0.65
-mire_speed_mult = 0.4
+mire_speed_mult = 0.3
+mire_accel_mult = 0.3

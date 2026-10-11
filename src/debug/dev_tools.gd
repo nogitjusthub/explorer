@@ -17,8 +17,10 @@ extends Node
 ##     --no-threats       без угроз (погода, землетрясения, смерчи)
 ##     --no-fauna         без фауны
 ##     --threat=N         уровень угрозы не ниже N (1–6)
-##     --event=K@S,...    событие K на S-й секунде: storm, fog, acid, dust, tornado, quake,
-##                          hoppers, worm, shellback (червь — если рядом песок или равнина)
+##     --event=K@S,...    событие K на S-й секунде: storm, strike, fog, acid, dust, tornado,
+##                          quake, whirlpool, hoppers, worm, shellback, shark, ray, nessie
+##                          (strike — молния в машину; червь — если рядом песок или равнина;
+##                          водные — если рядом зыбун, мелкая или глубокая вода)
 ##   Сценарии без рук:
 ##     --idle             без стартового экрана и автопилота: машина стоит
 ##     --select           показать трюм с выбором машины и при --idle или --shots
@@ -259,11 +261,14 @@ func _print_bench() -> void:
 		pickups_collected, run.hp, run.fuel, run.cargo_slots_used(), run.cargo_value(), run.score()])
 	if threats != null:
 		var st := threats.stats
-		_report("bench: threats — level %d, storms %d (strikes %d), quakes %d, fog %d, acid %d, dust %d (tornadoes %d)" % [
-			threats.level, st["storm"], st["strikes"], st["quake"], st["fog"], st["acid"], st["dust"], st["tornado"]])
+		_report("bench: threats — level %d, storms %d (strikes %d), quakes %d, fog %d, acid %d, dust %d (tornadoes %d), whirlpools %d" % [
+			threats.level, st["storm"], st["strikes"], st["quake"], st["fog"], st["acid"], st["dust"], st["tornado"],
+			st["whirlpool"]])
 	if fauna != null:
-		_report("bench: fauna — packs %d, worms %d, shellbacks %d, hits on the vehicle %d" % [
-			fauna.stats["packs"], fauna.stats["worms"], fauna.stats["shellbacks"], fauna.stats["hits"]])
+		var fs := fauna.stats
+		_report("bench: fauna — packs %d, worms %d, shellbacks %d, mire sharks %d, stargazers %d, nessies %d, hits on the vehicle %d" % [
+			fs["packs"], fs["worms"], fs["shellbacks"], fs["sharks"], fs["rays"], fs["nessies"], fs["hits"]])
+		_report("bench: fauna alive now — %d nodes under the director" % fauna.get_child_count())
 	_report("bench: render — draw calls %d, primitives %d, objects in frame %d, video memory %.0f MB" % [
 		Performance.get_monitor(Performance.RENDER_TOTAL_DRAW_CALLS_IN_FRAME),
 		Performance.get_monitor(Performance.RENDER_TOTAL_PRIMITIVES_IN_FRAME),

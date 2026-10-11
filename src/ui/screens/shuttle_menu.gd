@@ -1,7 +1,8 @@
 class_name ShuttleMenu
 extends CanvasLayer
 ## Меню основного челнока (GDD §2.3): открывается, когда машина остановилась в зоне. Поверх игры,
-## без паузы. Два пункта столбиком: «Сдать груз» и «Вернуться на орбиту» (конец забега).
+## без паузы. Два пункта столбиком: «Сдать груз» (челнок сразу улетает, забег продолжается) и
+## «Вернуться на орбиту» (конец забега).
 ## W / S — выбор, F / Enter — подтвердить, тап по пункту — выбрать и подтвердить. Закрывается по Esc,
 ## при выезде из зоны (ShuttleController) или по A / D — тогда машина сразу трогается.
 
@@ -106,7 +107,7 @@ func _draw_menu() -> void:
 	var hint := ""
 	match _selected:
 		Item.SHIP:
-			hint = "+%d очков, забег продолжается" % cargo_value if cargo_value > 0 else "трюм пуст"
+			hint = "+%d очков, челнок улетит" % cargo_value if cargo_value > 0 else "трюм пуст"
 		Item.EVACUATE:
 			hint = "груз %d + бонус %d, конец забега" % [cargo_value, bonus]
 	UiKit.text(_canvas, Vector2(PANEL.position.x, PANEL.end.y - 6), hint, 8, COLOR_DIM,

@@ -4,7 +4,7 @@ extends RefCounted
 ## пассивная фауна в радиусе уровень × noise_range слышит машину и переходит в атаку. События —
 ## посадка основного и аварийного челнока — шумят в своём радиусе заданное время и стягивают фауну.
 
-var noise_range := 20.0
+var noise_range := 12.0
 var full_frac := 0.8
 
 var vehicle_pos := Vector2.ZERO

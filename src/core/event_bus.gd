@@ -13,6 +13,7 @@ signal cargo_changed(slots_used: int, slots_max: int, value: int)
 signal score_changed(total: int)
 signal vehicle_damaged(amount: int, source: StringName, at: Vector3)
 signal vehicle_fell(h: int, dmg: int)
+signal controls_inverted(seconds: float)   ## разряд по машине: столько секунд управление наоборот
 signal vehicle_died(cause: StringName)
 signal pickup_collected(kind: StringName, value: int)
 signal cargo_shipped(value: int, emergency: bool)

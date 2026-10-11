@@ -9,6 +9,9 @@ extends RefCounted
 ## Ховер — судно на воздушной подушке (Griffon): крупная чёрная юбка, палуба с надстройкой — прямой нос со
 ## скосами 60° по бокам, два вентилятора в кожухах.
 ##
+## Для анимации хода (VehicleRide): ходовая (колёса, гусеницы) — прямо в root, корпус со всем
+## остальным — в подрессоренном узле body, антенна — на шарнире antenna у своего основания.
+##
 ## Силуэт сквозь стены: крупные окрашенные части — stencil XRAY (силуэт рисуется там, где в stencil
 ## не 1), остальные непрозрачные детали пишут в stencil ту же 1 — иначе силуэт корпуса ложился бы
 ## поверх них, и они казались бы прозрачными.
@@ -32,11 +35,13 @@ const BOW_DEG := 60.0                      ## скосы носа ховера �
 class Model:
 	extends RefCounted
 	var root: Node3D
+	var body: Node3D                        ## корпус на подвеске (тряска хода); дочерний root, в покое — без смещения
+	var antenna: Node3D                     ## шарнир у основания антенны (качается хлыстом), дочерний body
 	var materials: Array[StandardMaterial3D] = []
 	var spinners: Array[Node3D] = []        ## вращаются вокруг своей оси Z (вентиляторы)
 	var hover_height := 0.0                 ## модель парит над поверхностью (ховер)
 	var beacon: StandardMaterial3D          ## огонёк на конце антенны (мигает, пока летит аварийный челнок)
-	var beacon_pos := Vector3.ZERO          ## его точка в координатах модели
+	var beacon_pos := Vector3.ZERO          ## его точка в координатах antenna
 
 
 ## Без силуэта сквозь препятствия (экраны вне игры: трюм, портреты) — stencil не нужен.
@@ -51,6 +56,9 @@ static func build(id: StringName) -> Model:
 	var m := Model.new()
 	m.root = Node3D.new()
 	m.root.name = "Model"
+	m.body = Node3D.new()
+	m.body.name = "Body"
+	m.root.add_child(m.body)
 	match id:
 		&"tank":
 			_tank(m)
@@ -67,24 +75,24 @@ static func _rover(m: Model) -> void:
 	var tire := _solid(m, RUBBER)
 	var hub := _solid(m, METAL)
 	var lamp := _lamp(m)
-	var r := m.root
+	var b := m.body
 	# Квадратный корпус на шести колёсах почти вплотную, купол-кабина.
 	for x in [-0.25, 0.25]:
 		for z in [-0.28, 0.0, 0.28]:
-			_cyl(r, 0.13, 0.12, Vector3(x, 0.13, z), tire, Vector3(0, 0, PI * 0.5), 10)
-			_cyl(r, 0.05, 0.126, Vector3(x, 0.13, z), hub, Vector3(0, 0, PI * 0.5), 8)
-	_box(r, Vector3(0.34, 0.08, 0.62), Vector3(0, 0.17, 0.0), under)
-	_box(r, Vector3(0.44, 0.2, 0.64), Vector3(0, 0.29, 0.0), paint)
+			_cyl(m.root, 0.13, 0.12, Vector3(x, 0.13, z), tire, Vector3(0, 0, PI * 0.5), 10)
+			_cyl(m.root, 0.05, 0.126, Vector3(x, 0.13, z), hub, Vector3(0, 0, PI * 0.5), 8)
+	_box(b, Vector3(0.34, 0.08, 0.62), Vector3(0, 0.17, 0.0), under)
+	_box(b, Vector3(0.44, 0.2, 0.64), Vector3(0, 0.29, 0.0), paint)
 	_dome(m, Vector3(0, 0.39, -0.08))
 	for x in [-0.12, 0.12]:
-		_box(r, Vector3(0.06, 0.04, 0.02), Vector3(x, 0.3, -0.325), lamp)
+		_box(b, Vector3(0.06, 0.04, 0.02), Vector3(x, 0.3, -0.325), lamp)
 	# Бампер: перекладина между передними колёсами, две стойки, крепления к корпусу.
 	var bar := _solid(m, UNDER, 0.4)
 	const BZ := -0.4
-	_rod(r, Vector3(-0.18, 0.2, BZ), Vector3(0.18, 0.2, BZ), bar)
+	_rod(b, Vector3(-0.18, 0.2, BZ), Vector3(0.18, 0.2, BZ), bar)
 	for x in [-0.06, 0.06]:
-		_rod(r, Vector3(x, 0.15, BZ), Vector3(x, 0.29, BZ), bar)
-		_rod(r, Vector3(x, 0.26, BZ), Vector3(x, 0.26, -0.32), bar)
+		_rod(b, Vector3(x, 0.15, BZ), Vector3(x, 0.29, BZ), bar)
+		_rod(b, Vector3(x, 0.26, BZ), Vector3(x, 0.26, -0.32), bar)
 	_antenna(m, Vector3(0.15, 0.39, 0.22))
 
 
@@ -93,13 +101,13 @@ static func _tank(m: Model) -> void:
 	var track := _solid(m, RUBBER)
 	var wheel := _solid(m, METAL)
 	var lamp := _lamp(m)
-	var r := m.root
+	var r := m.body
 	# Купол-кабина спереди — самая высокая точка, кузов сзади ниже купола: перед читается сразу.
 	for x in [-0.245, 0.245]:
-		_side_prism(r, _octagon(0.18, 0.84, 0.06), x, 0.15, track)   # гусеница: углы срезаны под 45°
+		_side_prism(m.root, _octagon(0.18, 0.84, 0.06), x, 0.15, track)   # гусеница: углы срезаны под 45°
 		var side := signf(x)
 		for z in [-0.33, -0.11, 0.11, 0.33]:          # катки равномерно, крайние — у концов гусеницы
-			_cyl(r, 0.065, 0.03, Vector3(x + side * 0.08, 0.085, z), wheel, Vector3(0, 0, PI * 0.5), 8)
+			_cyl(m.root, 0.065, 0.03, Vector3(x + side * 0.08, 0.085, z), wheel, Vector3(0, 0, PI * 0.5), 8)
 	_box(r, Vector3(0.62, 0.03, 0.8), Vector3(0, 0.195, 0.0), paint)       # полки над гусеницами
 	_box(r, Vector3(0.4, 0.19, 0.82), Vector3(0, 0.275, 0.0), paint)       # корпус
 	_dome(m, Vector3(0, 0.37, -0.2))
@@ -133,7 +141,7 @@ static func _hover(m: Model) -> void:
 	var under := _solid(m, UNDER)
 	var fan := _solid(m, BODY)
 	var blade := _solid(m, TRIM)
-	var r := m.root
+	var r := m.body                       # юбка — часть корпуса: ховер колышется и кренится целиком
 	# Юбка — сплюснутая капсула во весь габарит; палуба, надстройка с куполом, вентиляторы на корме.
 	var cushion := CapsuleMesh.new()
 	cushion.radius = 0.34
@@ -182,16 +190,20 @@ static func _dome(m: Model, pos: Vector3) -> void:
 	dome.is_hemisphere = true
 	dome.radial_segments = 12
 	dome.rings = 4
-	_mesh(m.root, dome, pos, glass)
+	_mesh(m.body, dome, pos, glass)
 
 
-## Антенна: тонкий штырь с огоньком на конце (основание — pos).
+## Антенна: тонкий штырь с огоньком на конце; шарнир m.antenna — в основании pos (на корпусе).
 static func _antenna(m: Model, pos: Vector3) -> void:
+	m.antenna = Node3D.new()
+	m.antenna.name = "Antenna"
+	m.antenna.position = pos
+	m.body.add_child(m.antenna)
 	var rod := _solid(m, TRIM)
-	_cyl(m.root, ROD_R, 0.24, pos + Vector3(0, 0.12, 0), rod)
+	_cyl(m.antenna, ROD_R, 0.24, Vector3(0, 0.12, 0), rod)
 	m.beacon = _lamp(m, BEACON_DIM)
-	m.beacon_pos = pos + Vector3(0, 0.25, 0)
-	_box(m.root, Vector3(0.035, 0.035, 0.035), m.beacon_pos, m.beacon)
+	m.beacon_pos = Vector3(0, 0.25, 0)
+	_box(m.antenna, Vector3(0.035, 0.035, 0.035), m.beacon_pos, m.beacon)
 
 
 ## Труба от a до b (толщиной в антенну).

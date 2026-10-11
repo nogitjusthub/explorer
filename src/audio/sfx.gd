@@ -133,6 +133,49 @@ static func squeal(seconds: float) -> AudioStreamWAV:
 	return _wav(data)
 
 
+## Электрошок по машине: гудение сети с треском разрядов, к концу стихает.
+static func buzz(seconds: float) -> AudioStreamWAV:
+	var n := int(seconds * RATE)
+	var data := PackedFloat32Array()
+	data.resize(n)
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 707
+	var phase := 0.0
+	var lp := 0.0
+	for i in n:
+		var t := float(i) / RATE
+		var k := t / seconds
+		phase += TAU * 110.0 / RATE
+		var saw := fmod(phase / TAU, 1.0) * 2.0 - 1.0
+		var hum := saw * 0.35 * (0.6 + 0.4 * sin(t * 37.0))
+		var click := rng.randf_range(-1.0, 1.0) if rng.randf() < 0.01 * (1.0 - k) + 0.002 else 0.0
+		lp = lerpf(lp, click, 0.5)
+		data[i] = (hum + lp * 1.4) * minf(t / 0.01, 1.0) * (1.0 - k * k)
+	return _wav(data)
+
+
+## Рёв тормозных двигателей капсулы десанта: широкий шумовой рёв с треском, быстро нарастает и к концу
+## обрывается.
+static func thrust(seconds: float) -> AudioStreamWAV:
+	var n := int(seconds * RATE)
+	var data := PackedFloat32Array()
+	data.resize(n)
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 808
+	var lp1 := 0.0
+	var lp2 := 0.0
+	for i in n:
+		var t := float(i) / RATE
+		var k := t / seconds
+		var noise := rng.randf_range(-1.0, 1.0)
+		lp1 = lerpf(lp1, noise, 0.2)
+		lp2 = lerpf(lp2, lp1, 0.25)
+		var crackle := (noise - lp1) * (0.3 + 0.3 * sin(t * 61.0))
+		var env := minf(t / 0.06, 1.0) * (1.0 - smoothstep(0.85, 1.0, k))
+		data[i] = (lp2 * 3.0 + crackle) * env
+	return _wav(data)
+
+
 ## Удар по корпусу: глухой низкий «бум» со щелчком.
 static func hit(seconds: float) -> AudioStreamWAV:
 	var n := int(seconds * RATE)

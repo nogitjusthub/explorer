@@ -1,8 +1,9 @@
 class_name FaunaDirector
 extends Node3D
-## Фауна забега (GDD §5.4, §7.1). Существа появляются в кольце fauna_spawn_min…max вокруг машины —
-## сколько и кто, решает уровень угрозы (T1 — скакуны, T2 — + черви на песке, T3 — + панцирники),
-## и исчезают дальше fauna_despawn, если не гонятся. Слышат шум машины и посадок (NoiseField);
+## Фауна забега (GDD §5.4, §5.6, §7.1). Существа появляются в кольце fauna_spawn_min…max вокруг машины —
+## сколько и кто, решает уровень угрозы (T1 — скакуны, T2 — + черви на песке, илозубы в зыбуне,
+## Несса в больших озёрах, T3 — + панцирники), и исчезают дальше fauna_despawn, если не гонятся.
+## Троеглазки лежат в мелкой воде по чанкам (как гнёзда) и уходят вместе с чанком. Слышат шум машины и посадок (NoiseField);
 ## гнёзда (по чанкам) выпускают стаю, когда машина рядом. Поля путей видов (FlowField) строятся
 ## задачами JobScheduler вокруг машины, пока кто-то гонится. Урон машине — сигналом damaged.
 
@@ -12,6 +13,7 @@ const FIELD_EVERY_S := 0.8
 const SPAWN_EVERY_S := 2.0
 const SPAWN_TRIES := 10
 const FORCED_DIST := 14.0
+const SHARK_SPAWN_TRIES := 40             ## пятна зыбуна маленькие — проб больше (проба дешёвая)
 
 var rules: BalanceRules
 var vehicle: Vehicle
@@ -22,18 +24,20 @@ var scheduler: JobScheduler
 var run_seed: int
 var enabled := true
 var level := 1
-var forced: Array[Dictionary] = []        ## отладка: [{kind, at}] — hoppers, worm, shellback
+var forced: Array[Dictionary] = []        ## отладка: [{kind, at}] — hoppers, worm, shellback, shark, ray, nessie
 var noise := NoiseField.new()
-var stats := {"packs": 0, "worms": 0, "shellbacks": 0, "hits": 0}
+var stats := {"packs": 0, "worms": 0, "shellbacks": 0, "sharks": 0, "rays": 0, "nessies": 0, "hits": 0}
 
 var _rng: RandomNumberGenerator
 var _creatures: Array[Creature] = []
 var _nests: Dictionary[Vector2i, Nest] = {}
+var _rays: Dictionary[Vector2i, Array] = {}   ## чанк → его троеглазки
 var _fields: Dictionary = {}              ## FlowField.Mode → готовое поле
 var _field_busy: Dictionary = {}          ## FlowField.Mode → идёт построение
 var _field_timer: Dictionary = {}
 var _spawn_timer := 1.0
 var _worm_wait := -1.0                    ## до следующего червя, с; < 0 — ещё не задано (begin)
+var _nessie_wait := -1.0                  ## до следующей Нессы, с
 var _time := 0.0
 var _shuttle_state := &""
 var _emergency_state := &""
@@ -69,9 +73,12 @@ func scare(at: Vector2, radius: float) -> void:
 		elif c is Shellback:
 			(c as Shellback).state = Shellback.State.IDLE
 			c.aggressive = false
+		elif c is MireShark:
+			(c as MireShark).scare()
 
 
 func on_chunk_built(coord: Vector2i) -> void:
+	_place_rays(coord)
 	var o := Grid.chunk_origin(coord)
 	for t in generator.nests_in_rect(o.x, o.y, o.x + Grid.CHUNK - 1, o.y + Grid.CHUNK - 1):
 		if _nests.has(t):
@@ -83,6 +90,10 @@ func on_chunk_built(coord: Vector2i) -> void:
 
 
 func on_chunk_removed(coord: Vector2i) -> void:
+	for c: Creature in _rays.get(coord, []):
+		_creatures.erase(c)
+		c.queue_free()
+	_rays.erase(coord)
 	for t: Vector2i in _nests.keys():
 		if Grid.chunk_of_tile(t.x, t.y) == coord:
 			_nests[t].queue_free()
@@ -105,6 +116,9 @@ func step(dt: float) -> void:
 	if _worm_wait < 0.0:
 		_worm_wait = rules.worm_first_s
 	_worm_wait = maxf(_worm_wait - dt, 0.0)
+	if _nessie_wait < 0.0:
+		_nessie_wait = rules.nessie_first_s
+	_nessie_wait = maxf(_nessie_wait - dt, 0.0)
 	_spawn_timer -= dt
 	if _spawn_timer <= 0.0:
 		_spawn_timer = SPAWN_EVERY_S
@@ -113,9 +127,13 @@ func step(dt: float) -> void:
 		c.step(dt)
 	for i in range(_creatures.size() - 1, -1, -1):
 		var c := _creatures[i]
+		if c is Stargazer:
+			continue                      # троеглазки уходят вместе с чанком
 		if c.finished or (not c.aggressive and c.pos.distance_to(s.pos) > rules.fauna_despawn):
 			if c is Worm and (c as Worm).met:
 				_worm_wait = rules.worm_gap_s
+			if c is LakeMonster and (c as LakeMonster).met:
+				_nessie_wait = rules.nessie_gap_s
 			c.queue_free()
 			_creatures.remove_at(i)
 
@@ -163,11 +181,15 @@ func _wanted(kind: StringName) -> int:
 			return 1 if level >= rules.worm_min_level else 0
 		&"shellbacks":
 			return (1 + (1 if level >= 5 else 0)) if level >= rules.shellback_min_level else 0
+		&"sharks":
+			return (1 + (1 if level >= 4 else 0)) if level >= rules.shark_min_level else 0
+		&"nessies":
+			return 1 if level >= rules.nessie_min_level else 0
 	return 0
 
 
 func _spawn() -> void:
-	var counts := {"packs": 0, "worms": 0, "shellbacks": 0}
+	var counts := {"packs": 0, "worms": 0, "shellbacks": 0, "sharks": 0, "nessies": 0}
 	for c in _creatures:
 		if c is HopperPack:
 			counts["packs"] += 1
@@ -175,6 +197,10 @@ func _spawn() -> void:
 			counts["worms"] += 1
 		elif c is Shellback:
 			counts["shellbacks"] += 1
+		elif c is MireShark:
+			counts["sharks"] += 1
+		elif c is LakeMonster:
+			counts["nessies"] += 1
 	if counts["packs"] < _wanted(&"packs"):
 		var at: Variant = _ring_point(func(t: Vector2i) -> bool: return _dry(t))
 		if at != null:
@@ -190,13 +216,60 @@ func _spawn() -> void:
 		var at: Variant = _ring_point(func(t: Vector2i) -> bool: return _dry(t))
 		if at != null:
 			_spawn_shellback(at)
+	# Илозуб — в зыбуне или воде рядом с ним, ближе остальных: ему не уйти со своего грунта.
+	if counts["sharks"] < _wanted(&"sharks"):
+		var at: Variant = _ring_point(func(t: Vector2i) -> bool: return MireShark.habitat(query, t),
+				rules.shark_spawn_min, rules.shark_spawn_max, SHARK_SPAWN_TRIES)
+		if at != null:
+			_spawn_shark(at)
+	# Несса — редкая: когда машина у большого озера, в его глубокой воде.
+	if counts["nessies"] < _wanted(&"nessies") and _nessie_wait <= 0.0 and _near_big_lake() \
+			and _rng.randf() < rules.nessie_chance:
+		var at: Variant = _ring_point(func(t: Vector2i) -> bool: return LakeMonster.habitat(query, t) \
+				and LakeMonster.big_lake(query, t, rules.nessie_lake_tiles), 10.0, 18.0)
+		if at != null:
+			_spawn_nessie(at)
+
+
+## Машина в воде или на берегу (до 3 тайлов) большого озера.
+func _near_big_lake() -> bool:
+	var c := vehicle.state.tile
+	for dz in range(-3, 4):
+		for dx in range(-3, 4):
+			var t := c + Vector2i(dx, dz)
+			if LakeMonster.habitat(query, t):
+				return LakeMonster.big_lake(query, t, rules.nessie_lake_tiles)
+	return false
+
+
+## Троеглазки чанка: на тайлах мелкой воды с шансом ray_chance по хэшу тайла, не больше ray_per_chunk.
+func _place_rays(coord: Vector2i) -> void:
+	if _rays.has(coord):
+		return
+	var d: ChunkData = terrain.chunks.get(coord)
+	if d == null:
+		return
+	var placed: Array = []
+	var o := Grid.chunk_origin(coord)
+	for tz in range(o.y, o.y + Grid.CHUNK):
+		for tx in range(o.x, o.x + Grid.CHUNK):
+			if d.water_level[d.local_index(tx, tz)] == 0:
+				continue
+			if DetRng.unit(run_seed, tx, tz, 961) >= rules.ray_chance or not Stargazer.habitat(query, Vector2i(tx, tz)):
+				continue
+			placed.append(_spawn_ray(Vector2(tx + 0.5, tz + 0.5)))
+			if placed.size() >= rules.ray_per_chunk:
+				break
+		if placed.size() >= rules.ray_per_chunk:
+			break
+	_rays[coord] = placed
 
 
 ## Точка в кольце вокруг машины на загруженном тайле, годном для вида, или null.
-func _ring_point(ok: Callable, r_min: float = -1.0, r_max: float = -1.0) -> Variant:
+func _ring_point(ok: Callable, r_min: float = -1.0, r_max: float = -1.0, tries: int = SPAWN_TRIES) -> Variant:
 	var lo := rules.fauna_spawn_min if r_min < 0.0 else r_min
 	var hi := rules.fauna_spawn_max if r_max < 0.0 else r_max
-	for _i in SPAWN_TRIES:
+	for _i in tries:
 		var p := vehicle.state.pos + Vector2.from_angle(_rng.randf() * TAU) * _rng.randf_range(lo, hi)
 		var t := Grid.tile_of_world(p.x, p.y)
 		if query.is_loaded(t.x, t.y) and ok.call(t):
@@ -235,6 +308,32 @@ func _spawn_shellback(at: Vector2) -> Shellback:
 	return sb
 
 
+func _spawn_shark(at: Vector2) -> MireShark:
+	var sh := MireShark.new()
+	_adopt(sh)
+	sh.setup(at)
+	stats["sharks"] += 1
+	return sh
+
+
+func _spawn_nessie(at: Vector2) -> LakeMonster:
+	var n := LakeMonster.new()
+	_adopt(n)
+	n.setup(at)
+	stats["nessies"] += 1
+	return n
+
+
+## Троеглазка лежит до выгрузки чанка; свой генератор — по тайлу (решения детерминированы).
+func _spawn_ray(at: Vector2) -> Stargazer:
+	var r := Stargazer.new()
+	_adopt(r)
+	r.rng = DetRng.rng_for(run_seed, floori(at.x), floori(at.y), 962)
+	r.setup(at)
+	stats["rays"] += 1
+	return r
+
+
 func _adopt(c: Creature) -> void:
 	c.rules = rules
 	c.vehicle = vehicle
@@ -259,7 +358,7 @@ func _on_shuttle(state: StringName, _seconds: float, pad: Vector3) -> void:
 		var p := Vector2(pad.x, pad.z)
 		noise.add(p, rules.shuttle_noise_r, rules.shuttle_noise_s)
 		var at: Variant = _ring_point(func(t: Vector2i) -> bool: return _dry(t), 20.0, 30.0)
-		if at != null:
+		if at != null and _rng.randf() < rules.shuttle_pack_chance:
 			_spawn_pack(at, rules.pack_max).wake(p)
 	_shuttle_state = state
 
@@ -289,3 +388,44 @@ func _force(kind: StringName) -> void:
 				var sb := _spawn_shellback(at)
 				sb.state = Shellback.State.APPROACH
 				sb.aggressive = true
+		&"shark":
+			var at: Variant = _scan_point(func(t: Vector2i) -> bool: return MireShark.habitat(query, t), 3.0, 15.0)
+			if at != null:
+				_spawn_shark(at).start_hunt()
+			else:
+				print("fauna: no quicksand near the vehicle")
+		&"ray":
+			var at: Variant = _scan_point(func(t: Vector2i) -> bool: return Stargazer.habitat(query, t), 2.0, 8.0)
+			if at != null:
+				var t := Grid.tile_of_world(at.x, at.y)
+				var coord := Grid.chunk_of_tile(t.x, t.y)
+				var list: Array = _rays.get(coord, [])
+				list.append(_spawn_ray(at))
+				_rays[coord] = list
+			else:
+				print("fauna: no shallow water near the vehicle")
+		&"nessie":
+			var at: Variant = _scan_point(func(t: Vector2i) -> bool: return LakeMonster.habitat(query, t), 6.0, 18.0)
+			if at != null:
+				_spawn_nessie(at).start_hunt()
+			else:
+				print("fauna: no deep water near the vehicle")
+
+
+## Отладка: ближайший к r_min тайл вокруг машины в кольце r_min…r_max, годный для вида (полный перебор,
+## не жребий — водные виды живут на редких тайлах), или null.
+func _scan_point(ok: Callable, r_min: float, r_max: float) -> Variant:
+	var c := vehicle.state.pos
+	var reach := ceili(r_max)
+	var best: Variant = null
+	var best_d := INF
+	for dz in range(-reach, reach + 1):
+		for dx in range(-reach, reach + 1):
+			var t := Grid.tile_of_world(c.x, c.y) + Vector2i(dx, dz)
+			var p := Vector2(t.x + 0.5, t.y + 0.5)
+			var d := p.distance_to(c)
+			if d < r_min or d > r_max or d >= best_d or not query.is_loaded(t.x, t.y) or not ok.call(t):
+				continue
+			best = p
+			best_d = d
+	return best

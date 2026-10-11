@@ -10,6 +10,7 @@ const AMBIENT_ENERGY := 0.5
 const EVAC_SCENE_S := 3.4         ## эвакуация: машину втягивает в челнок, он уходит вверх
 const LANDING_TRIES := 40
 const SPAWN_HEADING := -PI * 0.75
+const SPAWN_PAD_OFFSET := 2.0     ## без десанта машина стоит на краю площадки — в зоне погрузки, не под челноком
 
 var run_seed: int
 var terrain: TerrainData
@@ -130,6 +131,7 @@ func _build_world(args: Dictionary) -> void:
 	if Balance.vehicle(vehicle_id) == null:
 		vehicle_id = &"rover"
 	vehicle = Vehicle.new(Balance.vehicle(vehicle_id), query)
+	vehicle.crawl_speed = rules.empty_crawl_speed
 	add_child(vehicle)
 	vehicle.place(spawn, SPAWN_HEADING)
 	vehicle.damaged.connect(_on_vehicle_damaged)
@@ -157,7 +159,7 @@ func _build_world(args: Dictionary) -> void:
 	add_child(shuttles)
 	shuttles.evacuate_requested.connect(func() -> void: run.evacuate())
 	shuttles.refueled.connect(_restart_engine)
-	shuttles.tank_expired.connect(func() -> void: run.end(RunState.CAUSE_EMPTY_TANK))
+	shuttles.crushed.connect(_on_crushed)
 
 	threats = ThreatDirector.new()
 	threats.rules = rules
@@ -230,7 +232,8 @@ func _build_world(args: Dictionary) -> void:
 
 
 
-## Точка десанта: центр ближайшей к началу координат площадки челнока (ровно и сухо).
+## Точка старта: край ближайшей к началу координат площадки челнока (ровно и сухо) — там машина стоит
+## без десанта; десант ищет место посадки капсулы вокруг неё.
 func _spawn_point(args: Dictionary) -> Vector2:
 	if args.has("spawn"):
 		var xz := (args["spawn"] as String).split(",")
@@ -240,7 +243,7 @@ func _spawn_point(args: Dictionary) -> Vector2:
 			for bx in range(-r, r + 1):
 				var pad := generator.pad_of_block(Vector2i(bx, bz))
 				if pad.z != TerrainGenerator.NO_PAD:
-					return Vector2(pad.x + 0.5, pad.y + 0.5)
+					return Vector2(pad.x + 0.5 + SPAWN_PAD_OFFSET, pad.y + 0.5)
 	return Vector2(0.5, 0.5)
 
 
@@ -272,8 +275,7 @@ func _on_weather_changed(kind: StringName, intensity: float) -> void:
 	_env.ambient_light_energy = AMBIENT_ENERGY * (1.0 - 0.35 * storm)
 
 
-## Точка высадки (GDD §2.1): рядом с площадкой старта, на сухом ровном тайле без стенок и деревьев —
-## там капсула выбьет воронку. Детерминированно по seed; не нашлось — центр площадки.
+## Точка высадки (GDD §2.1): рядом с площадкой старта, на сухом ровном тайле без стенок и деревьев. Детерминированно по seed; не нашлось — центр площадки.
 func _landing_point(pad: Vector2) -> Vector2:
 	var rng := DetRng.rng_for(run_seed, 0, 0, 950)
 	for _i in LANDING_TRIES:
@@ -306,6 +308,7 @@ func _begin() -> void:
 		Settings.save_settings()
 	rig.turn_enabled = true
 	hud.visible = true
+	run.announce()                     # HUD сразу с полным баком и бронёй — и во время десанта
 	if not _plays_drop():
 		_start_run()
 		return
@@ -320,14 +323,13 @@ func _begin() -> void:
 	pod.opened.connect(_start_run)
 
 
-## Удар капсулы: воронка, пыль, тряска, раскат; фауна рядом разбегается; машина — на дне воронки.
+## Касание капсулы: мягкая посадка на тормозных двигателях — пыль, лёгкая тряска, глухой удар; фауна
+## рядом разбегается (шум двигателей).
 func _on_drop_landed() -> void:
-	Deformation.crater(terrain, _spawn, 2.0, 1)
 	vehicle.place(_spawn, SPAWN_HEADING)
 	vehicle.visible = true
 	fauna.scare(_spawn, 15.0)
-	EventBus.camera_shake_requested.emit(1.5, 0.8)
-	EventBus.screen_flash_requested.emit(0.35)
+	EventBus.camera_shake_requested.emit(0.6, 0.4)
 	EventBus.drop_landed.emit(Vector3(_spawn.x, vehicle.state.y, _spawn.y))
 
 
@@ -356,8 +358,10 @@ func _physics_process(dt: float) -> void:
 	run.tick(dt)
 	pickups.run_time = run.time
 	_collect_pickups()
-	if vehicle.engine_running and run.burn_fuel(dt, vehicle.state.throttle):
+	if not vehicle.out_of_fuel and run.burn_fuel(dt, vehicle.state.throttle):
 		_on_fuel_empty()
+	if run.fuel > 0.0 and run.fuel < rules.low_fuel_frac * vehicle.cls.fuel_max:
+		EventBus.threat_telegraphed.emit(&"low_fuel", Vector3.ZERO, 0.0, Vector2.ZERO)   # пейджер: «МАЛО ТОПЛИВА»
 	shuttles.step(dt)
 	threats.step(dt)
 	fauna.level = threats.level
@@ -423,23 +427,29 @@ func _on_vehicle_died(cause: StringName) -> void:
 		run.end(cause)
 
 
-## Пустой бак: двигатель глохнет, 10 с на решение — аварийный челнок или конец забега (GDD §2.3).
+## Пустой бак (GDD §7.3): машина ползёт на минимальной скорости — до канистры, до площадки челнока
+## или до суши, откуда можно вызвать аварийный. Забег не обрывается.
 func _on_fuel_empty() -> void:
 	EventBus.fuel_empty.emit()
 	if sandbox:
 		run.add_fuel(vehicle.cls.fuel_max)
 		return
-	vehicle.engine_running = false
-	shuttles.on_fuel_empty()
+	vehicle.out_of_fuel = true
 
 
-## Топливо снова есть (канистра, аварийный челнок): двигатель заводится.
+## Топливо снова есть (канистра, аварийный челнок): машина едет как обычно.
 func _restart_engine() -> void:
-	if vehicle.engine_running or run.fuel <= 0.0:
+	if run.fuel > 0.0:
+		vehicle.out_of_fuel = false
+
+
+## Челнок сел на машину (GDD §2.3): корпус сплющен, конец забега.
+func _on_crushed() -> void:
+	if phase != Phase.RUN:
 		return
-	vehicle.engine_running = true
-	vehicle.engine.play()
-	shuttles.on_refueled()
+	vehicle.crush()
+	run.invulnerable = 0.0
+	run.damage(run.hp, &"shuttle")
 
 
 func _on_run_ended(cause: StringName) -> void:
@@ -460,8 +470,11 @@ func _on_run_ended(cause: StringName) -> void:
 	_help.pause_game = false
 	shuttles.active = false
 	vehicle.control_enabled = false
-	if cause != RunState.CAUSE_EVACUATED and cause != &"drowned" and cause != RunState.CAUSE_EMPTY_TANK:
-		vehicle.wreck()
+	if cause == &"whirlpool":
+		hud.banner("МАШИНА УТОНУЛА", Hud.COLOR_DAMAGE)     # затянуло под воду — корпус цел
+	elif cause != RunState.CAUSE_EVACUATED and cause != &"drowned":
+		if not vehicle.wrecked:
+			vehicle.wreck()
 		hud.banner("МАШИНА РАЗБИТА", Hud.COLOR_DAMAGE)
 	_over_timer = EVAC_SCENE_S if cause == RunState.CAUSE_EVACUATED else rules.death_delay_s
 

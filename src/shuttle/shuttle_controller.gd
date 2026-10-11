@@ -1,16 +1,20 @@
 class_name ShuttleController
 extends Node
-## Челноки на сцене (GDD §2.3): расписание основного, площадка и меню, аварийный вызов по радио,
-## решение при пустом баке. Логика — в ShuttleScheduler и EmergencyCall, здесь — связь с машиной,
-## RunState, визуалом и HUD. GameFlow вызывает step() в своём физическом кадре.
+## Челноки на сцене (GDD §2.3): расписание основного, площадка и меню, аварийный вызов по радио.
+## Логика — в ShuttleScheduler и EmergencyCall, здесь — связь с машиной, RunState, визуалом и HUD.
+## Челноки садятся на землю: до касания на месте посадки горит предупреждающий знак, кто окажется под
+## корпусом в момент касания — раздавлен (crushed); стоящий корпус — препятствие для машины.
+## Основной улетает сразу после сдачи груза, иначе — по концу окна. Аварийный вызывается через меню
+## (что привезти: топливо или запчасти); с воды вызвать нельзя — ему негде сесть рядом.
+## GameFlow вызывает step() в своём физическом кадре.
 
-signal evacuate_requested          ## выбрано «Завершить забег»
+signal evacuate_requested          ## выбрано «Вернуться на орбиту»
 signal refueled                    ## аварийный челнок привёз топливо
-signal tank_expired                ## пустой бак: время на решение вышло
+signal crushed                     ## челнок сел на машину
 
-const CONFIRM_S := 3.0
-const LIFT_S := 1.0                      ## эвакуация: машину втягивает в челнок             ## второе нажатие F в течение этого времени подтверждает вызов
-const RETARGET_S := 0.25
+const LIFT_S := 1.0                ## эвакуация: луч втягивает машину в челнок
+const RETRY_S := 0.25              ## аварийному некуда сесть — снова ищем место через столько
+const WATER_DEPTH := 0.05          ## ярусов воды под машиной (или под подушкой ховера) — «на воде»
 const COLOR_GOOD := Color(0.46, 0.9, 0.4)
 const COLOR_WARN := Color(1.0, 0.6, 0.25)
 
@@ -28,14 +32,11 @@ var emergency: EmergencyCall
 var _main_craft: ShuttleCraft
 var _em_craft: ShuttleCraft
 var _menu: ShuttleMenu
+var _call_menu: EmergencyMenu
 var _menu_armed := true            ## меню откроется снова, только если машина тронулась или выехала
 var _main_descending := false
-var _em_descending := false
-var _em_target := Vector3.ZERO
 var _em_tile := EmergencyCall.NO_TILE
-var _retarget_t := 0.0
-var _decision_left := -1.0
-var _confirm_left := 0.0
+var _retry_t := 0.0
 
 
 func _ready() -> void:
@@ -57,11 +58,11 @@ func reset() -> void:
 	_main_craft.visible = false
 	_em_craft.visible = false
 	_main_descending = false
-	_em_descending = false
-	_decision_left = -1.0
-	_confirm_left = 0.0
+	_em_tile = EmergencyCall.NO_TILE
 	if _menu != null:
 		_close_menu()
+	if _call_menu != null:
+		_close_call_menu()
 
 
 func _find_pad(pos: Vector2, distance: float) -> Vector3i:
@@ -78,91 +79,127 @@ func step(dt: float) -> void:
 	_update_menu()
 	_step_emergency(dt)
 	vehicle.beacon_calling = emergency.state == EmergencyCall.State.INBOUND
-	if _decision_left >= 0.0 and _menu == null:
-		_decision_left -= dt
-		if _decision_left <= 0.0:
-			_decision_left = -1.0
-			tank_expired.emit()
-	_confirm_left = maxf(_confirm_left - dt, 0.0)
+	vehicle.state.obstacles = _obstacles()
 	_broadcast()
 
 
-## Пустой бак: если аварийный уже летит — ждём его, иначе 10 с на решение.
-func on_fuel_empty() -> void:
-	if emergency.state == EmergencyCall.State.INBOUND:
-		hud.banner("ТОПЛИВО КОНЧИЛОСЬ", Hud.COLOR_FUEL_LOW)
-		return
-	_decision_left = rules.empty_tank_decision_s
-
-
-## Топливо появилось (канистра): решение больше не нужно.
-func on_refueled() -> void:
-	_decision_left = -1.0
+## Машина в воде (вброд или ховер над водой): аварийному негде сесть рядом.
+func in_water() -> bool:
+	var p := vehicle.state.pos
+	return query.water_depth(p.x, p.y) > WATER_DEPTH
 
 
 func _unhandled_input(event: InputEvent) -> void:
-	if active and event.is_action_pressed(&"radio"):
+	if active and menu_enabled and event.is_action_pressed(&"radio") and _menu == null and _call_menu == null:
 		get_viewport().set_input_as_handled()
 		_on_radio()
 
 
-## F: при пустом баке — сразу вызов; иначе первое нажатие спрашивает подтверждение (штраф велик).
+## F — меню вызова аварийного челнока (если он ещё не летит и машина не в воде).
 func _on_radio() -> void:
 	if emergency.is_busy():
 		hud.popup("Аварийный челнок уже в пути", COLOR_WARN)
 		return
-	if _decision_left >= 0.0 or _confirm_left > 0.0:
-		emergency.call_in()
-		_decision_left = -1.0
-		_confirm_left = 0.0
-		_em_descending = false
+	if in_water():
+		hud.popup("Вызов челнока на воде не возможен", COLOR_WARN)
+		return
+	_call_menu = EmergencyMenu.new()
+	_call_menu.supply = rules.emergency_supply
+	_call_menu.step = rules.emergency_supply_step
+	_call_menu.penalty = run.next_emergency_penalty()
+	_call_menu.fuel = EmergencyCall.default_fuel(rules.emergency_supply, rules.emergency_supply_step,
+			1.0 - run.fuel / vehicle.cls.fuel_max, 1.0 - float(run.hp) / vehicle.cls.hp_max)
+	_call_menu.confirmed.connect(_on_call_confirmed)
+	_call_menu.closed.connect(_close_call_menu)
+	add_child(_call_menu)
+	vehicle.control_enabled = false
+
+
+func _on_call_confirmed(fuel: int, parts: int) -> void:
+	_close_call_menu()
+	if emergency.call_in(fuel, parts):
+		_em_tile = EmergencyCall.NO_TILE
+		_retry_t = 0.0
 		hud.popup("Аварийный челнок вызван", COLOR_WARN)
-	else:
-		_confirm_left = CONFIRM_S
 
 
+func _close_call_menu() -> void:
+	_call_menu.queue_free()
+	_call_menu = null
+	vehicle.control_enabled = active and _menu == null
+
+
+## Аварийный: к началу спуска выбирается место посадки (дальше не меняется — под ним знак);
+## нет места — челнок ждёт в небе и ищет снова. Касание — обмен, через STAY_S — взлёт.
 func _step_emergency(dt: float) -> void:
-	if emergency.state == EmergencyCall.State.INBOUND and emergency.time_left <= ShuttleCraft.FLY_S:
-		_retarget_t -= dt
-		if _retarget_t <= 0.0 or not _em_descending:
-			_retarget_t = RETARGET_S
-			_em_target = _emergency_ground()
-		if not _em_descending:
-			_em_descending = true
-			_em_craft.descend(_em_target, emergency.time_left)
-		else:
-			_em_craft.retarget(_em_target)
+	var can_land := true
+	if emergency.state == EmergencyCall.State.INBOUND and emergency.time_left <= EmergencyCall.DESCEND_S:
+		if _em_tile == EmergencyCall.NO_TILE:
+			_retry_t -= dt
+			if _retry_t <= 0.0:
+				_retry_t = RETRY_S
+				_em_tile = EmergencyCall.landing_tile(query, vehicle.state.pos, rules.emergency_land_min,
+						rules.emergency_land_max)
+				if _em_tile != EmergencyCall.NO_TILE:
+					_em_craft.descend(_tile_ground(_em_tile), emergency.time_left)
+		can_land = _em_tile != EmergencyCall.NO_TILE
 	var was_landed := emergency.state == EmergencyCall.State.LANDED
-	if emergency.tick(dt):
-		_exchange()
+	if emergency.tick(dt, can_land):
+		_on_emergency_touchdown()
 	if was_landed and emergency.state == EmergencyCall.State.IDLE:
 		_em_craft.ascend()
-		_em_descending = false
+		_em_tile = EmergencyCall.NO_TILE
 
 
-## Обмен с аварийным челноком: груз за полцены минус штраф, +30% бака.
-func _exchange() -> void:
-	_em_craft.position = _em_target
+## Касание аварийного: машина под корпусом раздавлена; иначе — обмен: груз за полцены минус штраф,
+## заказанные топливо и запчасти.
+func _on_emergency_touchdown() -> void:
+	var at := _tile_ground(_em_tile)
 	_em_craft.touch_down()
-	if _em_tile != EmergencyCall.NO_TILE and query.has_standing_tree(_em_tile.x, _em_tile.y):
-		query.fell_tree(_em_tile.x, _em_tile.y)
+	_touchdown_hits(at, ShuttleCraft.EMERGENCY_HULL_R)
 	if run.is_over():
 		return
-	var delta := run.emergency_ship()
+	var delta := run.emergency_ship(emergency.fuel_units, emergency.parts)
 	EventBus.cargo_shipped.emit(delta, true)
 	hud.banner("АВАРИЙНЫЙ ЧЕЛНОК  %+d" % delta, COLOR_WARN)
-	hud.popup("+%d%% топлива" % roundi(rules.emergency_fuel_frac * 100.0), Hud.COLOR_FUEL)
-	_decision_left = -1.0
+	if emergency.fuel_units > 0:
+		hud.popup("+%d топлива" % emergency.fuel_units, Hud.COLOR_FUEL)
+	if emergency.parts > 0:
+		hud.popup("+%d HP  запчасти" % emergency.parts, Hud.COLOR_HP)
 	refueled.emit()
 
 
-## Куда садится аварийный: тайл рядом с машиной или зависание над ней.
-func _emergency_ground() -> Vector3:
-	var s := vehicle.state
-	_em_tile = EmergencyCall.landing_tile(query, s.pos)
-	if _em_tile == EmergencyCall.NO_TILE:
-		return Vector3(s.pos.x, s.y + 1.4, s.pos.y)
-	return Vector3(_em_tile.x + 0.5, query.surface_y(_em_tile.x + 0.5, _em_tile.y + 0.5), _em_tile.y + 0.5)
+## Касание земли корпусом радиуса hull_r в точке at: деревья под ним валятся, машина под ним
+## раздавлена, тряска.
+func _touchdown_hits(at: Vector3, hull_r: float) -> void:
+	var c := Vector2(at.x, at.z)
+	var t0 := Grid.tile_of_world(c.x, c.y)
+	var reach := ceili(hull_r) + 1
+	for dz in range(-reach, reach + 1):
+		for dx in range(-reach, reach + 1):
+			var t := t0 + Vector2i(dx, dz)
+			if query.has_standing_tree(t.x, t.y) \
+					and query.tree_position(t.x, t.y).distance_to(c) < hull_r + VehicleKinematics.TREE_RADIUS:
+				query.fell_tree(t.x, t.y)
+	var d := vehicle.state.pos.distance_to(c)
+	EventBus.camera_shake_requested.emit(clampf(1.0 - d / 12.0, 0.0, 1.0) * 0.8, 0.4)
+	if d < hull_r + VehicleKinematics.RADIUS and not vehicle.state.drowning:
+		crushed.emit()
+
+
+## Корпуса севших челноков — препятствия для машины (x, z, радиус).
+func _obstacles() -> Array[Vector3]:
+	var out: Array[Vector3] = []
+	if scheduler.state == ShuttleScheduler.State.LANDED:
+		var c := scheduler.zone_center()
+		out.append(Vector3(c.x, c.y, ShuttleCraft.MAIN_HULL_R))
+	if emergency.state == EmergencyCall.State.LANDED and _em_tile != EmergencyCall.NO_TILE:
+		out.append(Vector3(_em_tile.x + 0.5, _em_tile.y + 0.5, ShuttleCraft.EMERGENCY_HULL_R))
+	return out
+
+
+func _tile_ground(t: Vector2i) -> Vector3:
+	return Vector3(t.x + 0.5, query.surface_y(t.x + 0.5, t.y + 0.5), t.y + 0.5)
 
 
 func _pad_ground() -> Vector3:
@@ -177,6 +214,7 @@ func _on_announced(_pad: Vector3i) -> void:
 
 func _on_landed(_pad: Vector3i) -> void:
 	_main_craft.touch_down()
+	_touchdown_hits(_pad_ground(), ShuttleCraft.MAIN_HULL_R)
 	hud.popup("Челнок на площадке", ShuttleCraft.COLOR_RING)
 
 
@@ -197,7 +235,8 @@ func _update_menu() -> void:
 	if not in_zone or speed > rules.shuttle_stop_speed * 3.0:
 		_menu_armed = true
 	if _menu == null:
-		if active and menu_enabled and in_zone and _menu_armed and speed < rules.shuttle_stop_speed:
+		if active and menu_enabled and in_zone and _menu_armed and speed < rules.shuttle_stop_speed \
+				and _call_menu == null and not run.is_over():
 			_open_menu()
 		return
 	if not in_zone:            # вынесло из зоны (толчок, смерч, подброс) — меню закрывается само
@@ -224,31 +263,34 @@ func _open_menu() -> void:
 func _close_menu() -> void:
 	_menu.queue_free()
 	_menu = null
-	vehicle.control_enabled = active
+	vehicle.control_enabled = active and _call_menu == null
 
 
+## Груз сдан — челнок сразу улетает.
 func _on_ship() -> void:
 	var value := run.ship_cargo()
 	EventBus.cargo_shipped.emit(value, false)
 	hud.banner("ГРУЗ СДАН  +%d" % value, COLOR_GOOD)
+	_close_menu()
+	scheduler.depart()
 
 
 func _on_evacuate() -> void:
 	_close_menu()
 	vehicle.control_enabled = false
-	vehicle.lift(_pad_ground().y + ShuttleCraft.MAIN_HOVER + 0.2, LIFT_S)
-	_main_craft.tractor()
+	vehicle.lift(_pad_ground() + Vector3(0, ShuttleCraft.HATCH_Y, 0), LIFT_S)
+	_main_craft.tractor(vehicle)
 	get_tree().create_timer(LIFT_S + 0.2).timeout.connect(_evac_takeoff)
 	evacuate_requested.emit()
 
 
 func _evac_takeoff() -> void:
-	_main_craft.takeoff_dust()
 	_main_craft.ascend()
 	EventBus.camera_shake_requested.emit(0.6, 1.0)
 
 
-## Состояние челноков для HUD и радара.
+## Состояние челноков для HUD и радара. Аварийный: inbound — летит, no_place — ждёт в небе места,
+## landed — сел; без вызова: menu — открыто меню вызова, water — машина в воде (вызвать нельзя), idle.
 func _broadcast() -> void:
 	var pad := _pad_ground() if scheduler.has_pad() else Vector3.INF
 	var state := &"waiting"
@@ -258,13 +300,16 @@ func _broadcast() -> void:
 		state = &"announced"
 	EventBus.shuttle_state_changed.emit(state, scheduler.time_left, pad)
 	var penalty := run.next_emergency_penalty()
-	if emergency.state == EmergencyCall.State.INBOUND:
-		EventBus.emergency_state_changed.emit(&"inbound", emergency.time_left, penalty)
-	elif emergency.state == EmergencyCall.State.LANDED:
-		EventBus.emergency_state_changed.emit(&"landed", 0.0, penalty)
-	elif _decision_left >= 0.0:
-		EventBus.emergency_state_changed.emit(&"decide", _decision_left, penalty)
-	elif _confirm_left > 0.0:
-		EventBus.emergency_state_changed.emit(&"confirm", _confirm_left, penalty)
-	else:
-		EventBus.emergency_state_changed.emit(&"idle", 0.0, penalty)
+	var em := &"idle"
+	match emergency.state:
+		EmergencyCall.State.INBOUND:
+			var waiting := emergency.time_left <= EmergencyCall.DESCEND_S and _em_tile == EmergencyCall.NO_TILE
+			em = &"no_place" if waiting else &"inbound"
+		EmergencyCall.State.LANDED:
+			em = &"landed"
+		_:
+			if _call_menu != null:
+				em = &"menu"
+			elif in_water():
+				em = &"water"
+	EventBus.emergency_state_changed.emit(em, emergency.time_left if em == &"inbound" else 0.0, penalty)

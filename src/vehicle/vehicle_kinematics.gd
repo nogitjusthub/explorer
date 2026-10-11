@@ -20,6 +20,11 @@ extends RefCounted
 ## - Внешние силы (ветер пылевой бури, тяга смерча) копятся в сносе push_vel, который затухает сам;
 ##   снос складывается со скоростью машины, стенки его гасят. Делить силу на массу — дело источника.
 ## - Разгон с места может быть сильнее обычного (launch_accel, танк): к LAUNCH_FADE·Vmax сходит к accel.
+## - Зыбучий грунт вязкий: разгон × mire_accel_mult класса. Машина, что стоит на нём, прилипает —
+##   за MIRE_STICK_S её засасывает (s.mire_stuck → 1): трогается совсем медленно и туго поворачивает,
+##   вырывается за MIRE_UNSTICK_S езды. Ховеру (mire_accel_mult = 1) всё равно.
+## - Пустой бак: предел скорости s.speed_cap (ползком). Корпуса севших челноков (s.obstacles) —
+##   круглые препятствия: машина упирается и скользит вдоль, как у дерева, которое не валится.
 ## - Машина на подушке (ховер) держится на зеркале воды: рёбра и склоны для неё считаются по
 ##   высоте «не ниже воды»; её заносит — боковая скорость гаснет не сразу (cls.drift).
 
@@ -38,6 +43,10 @@ const DEEP_MARGIN := 0.1            ## ярусов сверх допустим�
 const SURFACE_DRAG := 45.0          ## тайл/с²: въезд в воду, на неровный или зыбучий грунт гасит лишнюю скорость почти мгновенно
 const PUSH_DAMP := 2.0              ## 1/с — затухание сноса: при силе a снос выходит на a / PUSH_DAMP
 const LAUNCH_FADE := 0.6            ## доля Vmax, к которой разгон с места сходит к обычному
+const MIRE_STICK_S := 1.0           ## секунд стоянки на зыбучем грунте — машину засосало полностью…
+const MIRE_UNSTICK_S := 1.5         ## …и столько езды по нему, чтобы вырваться
+const MIRE_STUCK_SPEED := 0.3       ## тайл/с: медленнее — машина стоит, её засасывает
+const MIRE_STUCK_LOSS := 1.2        ## засосало: разгон слабее ещё на (1 − mire_accel_mult) × это
 
 
 ## Что произошло за шаг — для урона, звука и событий.
@@ -67,13 +76,16 @@ static func step(s: VehicleState, inp: Vector2, cls: VehicleClass, q: TerrainQue
 		return r
 
 	var speed := s.vel.length()
+	var tile_flags := q.flags(s.tile.x, s.tile.y)
+	_update_mire_stuck(s, cls, tile_flags, speed, dt)
 	var throttle := clampf(inp.length(), 0.0, 1.0)
 	s.throttle = throttle if throttle > MIN_THROTTLE else 0.0
 	var target_speed := 0.0
 	if s.throttle > 0.0:
 		var target_heading := inp.angle()
 		var diff := wrapf(target_heading - s.heading, -PI, PI)
-		var max_turn := deg_to_rad(cls.turn_rate_deg) * dt
+		# Засосало зыбучим грунтом — и поворачивает туго.
+		var max_turn := deg_to_rad(cls.turn_rate_deg) * dt * (1.0 - 0.5 * s.mire_stuck * (1.0 - cls.mire_accel_mult))
 		s.heading = wrapf(s.heading + clampf(diff, -max_turn, max_turn), -PI, PI)
 		var remaining := absf(wrapf(target_heading - s.heading, -PI, PI))
 		var align := maxf(cos(remaining), 0.0)
@@ -86,9 +98,10 @@ static func step(s: VehicleState, inp: Vector2, cls: VehicleClass, q: TerrainQue
 	# Предел скорости: подъём подряд, вода, неровный и зыбучий грунт.
 	var limit := cls.max_speed * maxf(cls.uphill_floor, 1.0 - cls.uphill_loss_per_tile * s.uphill_tiles)
 	var wading := not cls.hovers and q.water_depth(s.pos.x, s.pos.y) > 0.05
-	var ground := ground_speed_mult(cls, q.flags(s.tile.x, s.tile.y))
+	var ground := ground_speed_mult(cls, tile_flags)
 	# Зыбучая кромка, частью под водой: действует сильнейшее из двух замедлений, а не оба сразу.
 	limit *= minf(cls.water_speed_mult if wading else 1.0, ground)
+	limit = minf(limit, s.speed_cap)
 	target_speed = minf(target_speed, limit)
 
 	var fwd := s.forward()
@@ -104,6 +117,7 @@ static func step(s: VehicleState, inp: Vector2, cls: VehicleClass, q: TerrainQue
 			accel = lerpf(cls.launch_accel, cls.accel, clampf(speed / (LAUNCH_FADE * cls.max_speed), 0.0, 1.0))
 		if _slope(cls, q, s.pos, fwd) < -0.05:
 			accel *= 1.0 + cls.downhill_accel_bonus
+		accel *= mire_grip(cls, tile_flags, s.mire_stuck)
 		speed = minf(speed + accel * dt, target_speed)
 	else:
 		var decel := SURFACE_DRAG if (wading or ground < 1.0) and speed > limit else cls.brake_decel
@@ -127,6 +141,7 @@ static func step(s: VehicleState, inp: Vector2, cls: VehicleClass, q: TerrainQue
 		var slope := _slope(cls, q, s.pos, fwd)
 		s.uphill_tiles = s.uphill_tiles + 1 if slope > UPHILL_SLOPE else 0
 	_collide_trees(s, cls, q, r)
+	_collide_obstacles(s)
 	s.y = ground_y(s, cls, q)
 	if _too_deep(s, cls, q):
 		var w := q.water_tier(floori(s.pos.x), floori(s.pos.y))
@@ -157,6 +172,25 @@ static func ground_speed_mult(cls: VehicleClass, tile_flags: int) -> float:
 	if (tile_flags & ChunkData.FLAG_ROUGH) != 0:
 		return cls.rough_speed_mult
 	return 1.0
+
+
+## Множитель разгона на грунте тайла: зыбучий вязкий (mire_accel_mult класса), а засосало (stuck → 1) —
+## разгон ещё слабее. Ровер, засосанный полностью, — 0,3 × 0,16 ≈ 0,05 от обычного.
+static func mire_grip(cls: VehicleClass, tile_flags: int, stuck: float) -> float:
+	if (tile_flags & ChunkData.FLAG_MIRE) == 0:
+		return 1.0
+	return cls.mire_accel_mult * maxf(1.0 - stuck * (1.0 - cls.mire_accel_mult) * MIRE_STUCK_LOSS, 0.0)
+
+
+## Прилипание к зыбучему грунту: стоит — засасывает за MIRE_STICK_S, едет — вырывается за
+## MIRE_UNSTICK_S; сошла с зыбучего — отпускает вдвое быстрее.
+static func _update_mire_stuck(s: VehicleState, cls: VehicleClass, tile_flags: int, speed: float, dt: float) -> void:
+	if (tile_flags & ChunkData.FLAG_MIRE) == 0 or cls.mire_accel_mult >= 1.0:
+		s.mire_stuck = maxf(s.mire_stuck - 2.0 * dt / MIRE_UNSTICK_S, 0.0)
+	elif speed < MIRE_STUCK_SPEED:
+		s.mire_stuck = minf(s.mire_stuck + dt / MIRE_STICK_S, 1.0)
+	else:
+		s.mire_stuck = maxf(s.mire_stuck - dt / MIRE_UNSTICK_S, 0.0)
 
 
 ## Урон от падения со стенки высотой h ярусов (GDD §3.2).
@@ -341,6 +375,22 @@ static func _fall_step(s: VehicleState, cls: VehicleClass, q: TerrainQuery, dt: 
 	if q.has_standing_tree(s.tile.x, s.tile.y):
 		q.fell_tree(s.tile.x, s.tile.y)   # упавшая машина валит дерево без урона
 		r.felled_tree = true
+
+
+## Корпуса челноков: выталкиваем из круга и гасим скорость в его сторону.
+static func _collide_obstacles(s: VehicleState) -> void:
+	for o in s.obstacles:
+		var c := Vector2(o.x, o.y)
+		var min_d := o.z + RADIUS
+		var delta := s.pos - c
+		var dist := delta.length()
+		if dist >= min_d:
+			continue
+		var n := delta / dist if dist > 0.001 else -s.forward()
+		s.pos = c + n * min_d
+		var vn := s.vel.dot(n)
+		if vn < 0.0:
+			s.vel -= n * vn
 
 
 static func _collide_trees(s: VehicleState, cls: VehicleClass, q: TerrainQuery, r: StepResult) -> void:

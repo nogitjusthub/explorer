@@ -1,8 +1,8 @@
 class_name Hud
 extends CanvasLayer
 ## HUD (GDD §8): слева вверху — HP, топливо, трюм; по центру вверху — счёт; под ним — всплывающие
-## сообщения о находках и уроне; справа вверху — радар; внизу по центру — таймер основного челнока,
-## а во время аварийного вызова и при пустом баке — его отсчёт; по центру экрана — крупные объявления.
+## сообщения о находках и уроне; справа вверху — радар и пейджер; внизу по центру — таймер основного
+## челнока, над ним — аварийный вызов и при пустом баке «НЕТ ТОПЛИВА»; по центру экрана — крупные объявления.
 ## Логики нет: значения приходят сигналами EventBus, объявления — вызовом banner().
 
 const FUEL_WARN := 0.2                 ## доля бака, ниже которой полоса топлива мигает
@@ -41,7 +41,6 @@ var _shuttle_state := &""
 var _shuttle_left := 0.0
 var _em_state := &"idle"
 var _em_left := 0.0
-var _em_penalty := 0
 var _flash := 0.0
 var _canvas: Control
 var _font: Font
@@ -104,10 +103,9 @@ func _on_shuttle_state(state: StringName, seconds: float, _pad: Vector3) -> void
 	_shuttle_left = seconds
 
 
-func _on_emergency_state(state: StringName, seconds: float, penalty: int) -> void:
+func _on_emergency_state(state: StringName, seconds: float, _penalty: int) -> void:
 	_em_state = state
 	_em_left = seconds
-	_em_penalty = penalty
 
 
 func _on_hp_changed(cur: int, mx: int) -> void:
@@ -202,25 +200,11 @@ func _draw_hud() -> void:
 		_text(Vector2(0, size.y * 0.5 - 30), _banner, 16, c, HORIZONTAL_ALIGNMENT_CENTER, size.x)
 
 
-## Низ-центр: отсчёт аварийного вызова или решения при пустом баке, иначе таймер основного челнока.
+## Низ-центр: внизу — таймер основного челнока; над ним — аварийный челнок (летит, ищет место) и при
+## пустом баке мигающие две строки: «НЕТ ТОПЛИВА» и вызов аварийного [F] (или что с воды вызвать нельзя).
 func _draw_bottom(size: Vector2) -> void:
 	var y := size.y - 8.0
 	var blink := fmod(_time, 0.6) < 0.4
-	match _em_state:
-		&"decide":
-			_text(Vector2(0, y - 12), "ТОПЛИВО КОНЧИЛОСЬ  %d" % ceili(_em_left), 16,
-					COLOR_FUEL_LOW if blink else COLOR_TEXT, HORIZONTAL_ALIGNMENT_CENTER, size.x)
-			_text(Vector2(0, y), "F — аварийный челнок (−%d очков), иначе конец забега" % _em_penalty, 8,
-					COLOR_TEXT, HORIZONTAL_ALIGNMENT_CENTER, size.x)
-			return
-		&"confirm":
-			_text(Vector2(0, y), "Вызвать аварийный челнок? −%d очков, груз за полцену.  F — да" % _em_penalty, 8,
-					COLOR_WARN, HORIZONTAL_ALIGNMENT_CENTER, size.x)
-			return
-		&"inbound":
-			_text(Vector2(0, y), "АВАРИЙНЫЙ ЧЕЛНОК  %s" % _clock(_em_left), 8, COLOR_WARN,
-					HORIZONTAL_ALIGNMENT_CENTER, size.x)
-			return
 	match _shuttle_state:
 		&"waiting":
 			_text(Vector2(0, y), "ЧЕЛНОК  %s" % _clock(_shuttle_left), 8, COLOR_TEXT, HORIZONTAL_ALIGNMENT_CENTER, size.x)
@@ -231,6 +215,28 @@ func _draw_bottom(size: Vector2) -> void:
 			var col := COLOR_PAD if _shuttle_left > 5.0 or blink else COLOR_FUEL_LOW
 			_text(Vector2(0, y), "ЧЕЛНОК НА ПЛОЩАДКЕ  %s  — остановитесь в круге" % _clock(_shuttle_left), 8, col,
 					HORIZONTAL_ALIGNMENT_CENTER, size.x)
+	y -= 12.0
+	var call_line := ""
+	var call_color := COLOR_WARN
+	match _em_state:
+		&"inbound":
+			call_line = "АВАРИЙНЫЙ ЧЕЛНОК  %s" % _clock(_em_left)
+		&"no_place":
+			call_line = "АВАРИЙНЫЙ ЧЕЛНОК — ищет, где сесть"
+		&"water":
+			call_line = "Вызов челнока на воде не возможен" if _fuel <= 0.0 else ""
+		&"idle":
+			call_line = "Вызов аварийного челнока [F]" if _fuel <= 0.0 else ""
+	if _fuel <= 0.0:
+		# Пустой бак: обе строки мигают.
+		var a := 1.0 if blink else 0.35
+		call_color = Color(COLOR_TEXT, a)
+		if not call_line.is_empty():
+			_text(Vector2(0, y), call_line, 8, call_color, HORIZONTAL_ALIGNMENT_CENTER, size.x)
+			y -= 8.0
+		_text(Vector2(0, y - 4.0), "НЕТ ТОПЛИВА", 16, Color(COLOR_FUEL_LOW, a), HORIZONTAL_ALIGNMENT_CENTER, size.x)
+	elif not call_line.is_empty():
+		_text(Vector2(0, y), call_line, 8, call_color, HORIZONTAL_ALIGNMENT_CENTER, size.x)
 
 
 static func _clock(seconds: float) -> String:

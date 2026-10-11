@@ -33,8 +33,8 @@ func test_announce_land_hold_depart() -> void:
 	s.tick(30.0, Vector2.ZERO, false)
 	assert_eq(s.state, ShuttleScheduler.State.LANDED)
 	assert_near(s.time_left, rules.shuttle_window_s, 0.6)
-	assert_true(s.in_zone(Vector2(11.5, 20.5)), "zone radius 2 around the pad center")
-	assert_false(s.in_zone(Vector2(13.5, 20.5)))
+	assert_true(s.in_zone(Vector2(13.0, 20.5)), "zone radius 3 around the pad center")
+	assert_false(s.in_zone(Vector2(14.0, 20.5)))
 	s.tick(100.0, Vector2(10.5, 20.5), true)
 	assert_eq(s.state, ShuttleScheduler.State.LANDED, "window holds while the menu is open")
 	s.tick(rules.shuttle_window_s, Vector2.ZERO, false)
@@ -43,6 +43,22 @@ func test_announce_land_hold_depart() -> void:
 	assert_eq(s.time_left, 120.0, "next interval counts from departure")
 	assert_false(s.has_pad())
 	assert_eq(events, ["announced", "landed", "departed"] as Array[String])
+
+
+func test_departs_right_after_shipping() -> void:
+	# Груз сдан — челнок улетает сразу, не дожидаясь конца окна; следующий интервал — от вылета.
+	var s := ShuttleScheduler.new(BalanceRules.new(), _fixed_pad(Vector3i(10, 20, 5)))
+	var departed := [false]
+	s.departed.connect(func() -> void: departed[0] = true)
+	s.tick(91.0, Vector2.ZERO, false)
+	assert_eq(s.state, ShuttleScheduler.State.LANDED)
+	s.depart()
+	assert_true(departed[0])
+	assert_eq(s.state, ShuttleScheduler.State.WAITING)
+	assert_eq(s.time_left, 120.0)
+	departed[0] = false
+	s.depart()
+	assert_false(departed[0], "only a landed shuttle can depart")
 
 
 func test_landing_skipped_without_pad() -> void:
@@ -65,17 +81,38 @@ func test_find_pad_near_target_distance() -> void:
 
 func test_emergency_call_flow() -> void:
 	var e := EmergencyCall.new(BalanceRules.new())
-	assert_true(e.call_in())
-	assert_false(e.call_in(), "one emergency shuttle at a time")
+	assert_true(e.call_in(20, 10))
+	assert_eq(e.fuel_units, 20)
+	assert_eq(e.parts, 10)
+	assert_false(e.call_in(30, 0), "one emergency shuttle at a time")
 	assert_false(e.tick(9.9))
 	assert_true(e.tick(0.2), "lands after 10 s")
 	assert_true(e.is_busy())
 	e.tick(EmergencyCall.STAY_S + 0.1)
 	assert_false(e.is_busy())
-	assert_true(e.call_in(), "can be called again")
+	assert_true(e.call_in(30, 0), "can be called again")
 
 
-func test_emergency_landing_tile_is_dry_and_flat_edges() -> void:
+func test_emergency_waits_in_the_sky_without_a_landing_place() -> void:
+	var e := EmergencyCall.new(BalanceRules.new())
+	e.call_in(30, 0)
+	e.tick(8.0)
+	for _i in 20:
+		assert_false(e.tick(1.0, false), "no place — no landing")
+	assert_near(e.time_left, EmergencyCall.DESCEND_S, 1e-4, "holds at the start of the descent")
+	assert_false(e.tick(2.9))
+	assert_true(e.tick(0.2), "lands once a place is found")
+
+
+func test_emergency_default_order_follows_need() -> void:
+	# Всего 30 ед. шагом 5: чего не хватает больше (в долях), того везут больше.
+	assert_eq(EmergencyCall.default_fuel(30, 5, 0.9, 0.0), 30, "only fuel is missing")
+	assert_eq(EmergencyCall.default_fuel(30, 5, 0.0, 0.5), 0, "only armor is missing")
+	assert_eq(EmergencyCall.default_fuel(30, 5, 0.0, 0.0), 15, "nothing missing — half and half")
+	assert_eq(EmergencyCall.default_fuel(30, 5, 0.6, 0.3), 20)
+
+
+func test_emergency_landing_tile_is_dry_flat_and_not_too_close() -> void:
 	var terrain := TerrainData.new()
 	var gen := TerrainGenerator.new(4, TerrainParams.new())
 	for cz in range(-1, 2):
@@ -85,13 +122,15 @@ func test_emergency_landing_tile_is_dry_and_flat_edges() -> void:
 	var found := 0
 	for i in 40:
 		var pos := Vector2(-20 + i * 1.3 + 0.5, 8.5 - i * 0.7)
-		var t := EmergencyCall.landing_tile(q, pos)
+		var t := EmergencyCall.landing_tile(q, pos, 2.0, 4.5)
 		if t == EmergencyCall.NO_TILE:
 			continue
 		found += 1
-		assert_true(t != Grid.tile_of_world(pos.x, pos.y), "not under the vehicle")
-		assert_true(pos.distance_to(Vector2(t.x + 0.5, t.y + 0.5)) <= 3.5)
+		var d := pos.distance_to(Vector2(t.x + 0.5, t.y + 0.5))
+		assert_true(d >= 2.0 and d <= 4.5, "2…4.5 tiles from the vehicle: %.2f" % d)
 		assert_eq(q.water_tier(t.x, t.y), TerrainQuery.NO_WATER)
+		for c in 4:
+			assert_eq(q.corner(t.x, t.y, c), q.corner(t.x, t.y, 0), "flat tile")
 		for dir in 4:
 			assert_eq(q.edge_rise(t.x, t.y, dir), 0)
 			assert_eq(q.edge_drop(t.x, t.y, dir), 0)

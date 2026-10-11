@@ -71,6 +71,14 @@ func tick(dt: float, vehicle_pos: Vector2, hold: bool) -> void:
 			departed.emit()
 
 
+## Улететь сейчас, не дожидаясь конца окна (груз сдан).
+func depart() -> void:
+	if state != State.LANDED:
+		return
+	_next()
+	departed.emit()
+
+
 func _next() -> void:
 	k += 1
 	state = State.WAITING

@@ -7,6 +7,9 @@ extends Resource
 @export var death_delay_s: float = 1.5          ## пауза между гибелью и экраном итога
 @export var radar_range: float = 40.0
 @export var pickup_radius: float = 0.6          ## тайлов: на таком расстоянии машина подбирает находку
+@export var shock_invert_s: float = 3.0         ## разряд по машине (молния, электрошок) — столько секунд управление наоборот
+@export var low_fuel_frac: float = 0.2          ## меньше этой доли бака — пейджер «МАЛО ТОПЛИВА»
+@export var empty_crawl_speed: float = 0.4      ## тайл/с — с пустым баком машина ползёт (тайл за 2,5 с)
 
 @export_group("Score")
 @export var bonus_hp_mult: int = 3
@@ -34,7 +37,7 @@ extends Resource
 @export var shuttle_dist_max: float = 70.0
 @export var shuttle_announce_s: float = 30.0    ## площадка видна на радаре за столько до посадки
 @export var shuttle_window_s: float = 20.0
-@export var shuttle_zone_r: float = 2.0
+@export var shuttle_zone_r: float = 3.0         ## зона погрузки вокруг севшего челнока (корпус — MAIN_HULL_R)
 @export var shuttle_stop_speed: float = 0.5     ## тайл/с: машина «остановилась» в зоне
 
 @export_group("Threats")
@@ -64,6 +67,7 @@ extends Resource
 @export var strike_damage_center: int = 25
 @export var strike_damage_edge: int = 10
 @export var strike_crater_depth: int = 1
+@export var strike_crater_chance: float = 0.15   ## воронку выбивает не каждый удар; в воду — никогда
 
 @export_group("Murk")
 ## Плохая видимость — огромная масса, ползущая по карте: проехать насквозь трудно, проще уйти, пока
@@ -121,14 +125,15 @@ extends Resource
 @export var quake_toss_damage: int = 10
 
 @export_group("Fauna")
-@export var noise_range: float = 20.0            ## пассивная фауна слышит машину в радиусе шум × это
+@export var noise_range: float = 12.0            ## пассивная фауна слышит машину в радиусе шум × это
 @export var noise_full_frac: float = 0.8         ## шум 1,0 от этой доли Vmax
 @export var fauna_spawn_min: float = 40.0        ## появляется в кольце 40…52 тайла от машины
 @export var fauna_spawn_max: float = 52.0
 @export var fauna_despawn: float = 80.0          ## дальше — исчезает
-@export var shuttle_noise_r: float = 30.0        ## посадка основного челнока стягивает фауну
+@export var shuttle_noise_r: float = 15.0        ## посадка основного челнока стягивает фауну
 @export var shuttle_noise_s: float = 20.0
-@export var emergency_noise_r: float = 15.0
+@export var emergency_noise_r: float = 8.0
+@export var shuttle_pack_chance: float = 0.5     ## к севшему основному челноку выходит стая — не всегда
 @export var emergency_noise_s: float = 10.0
 @export var fauna_give_up_s: float = 6.0        ## не подобраться к машине столько — фауна сдаётся (червь уходит)
 ## Скорости погони — между Vmax танка (4) и ровера (6,5): ровер и ховер уходят от фауны, танк — нет.
@@ -136,8 +141,8 @@ extends Resource
 @export var hopper_wander_speed: float = 1.4
 @export var hopper_bite: int = 6
 @export var hopper_bite_cd_s: float = 1.2         ## кусает одна, передняя особь стаи
-@export var hopper_chase_s: float = 15.0
-@export var hopper_chase_dist: float = 30.0
+@export var hopper_chase_s: float = 10.0
+@export var hopper_chase_dist: float = 20.0
 @export var pack_min: int = 3
 @export var pack_max: int = 4
 @export var worm_min_level: int = 2
@@ -160,9 +165,51 @@ extends Resource
 @export var nest_wake_r: float = 10.0            ## ближе к гнезду — из него выходит стая
 @export var nest_cooldown_s: float = 60.0
 
+@export_group("Water fauna")
+## Водная и береговая фауна (GDD §5.6). Шокер-троеглазка — по чанкам, в мелкой воде; илозуб — в зыбучем
+## грунте и воде рядом с ним; Несса — редкая, в больших озёрах.
+@export var ray_chance: float = 0.03             ## шанс троеглазки на тайле мелкой воды…
+@export var ray_per_chunk: int = 3               ## …но не больше стольких на чанк
+@export var ray_shock_r: float = 1.0             ## машина в воде ближе — мгновенный разряд
+@export var ray_damage: int = 10
+@export var ray_cooldown_min_s: float = 5.0
+@export var ray_cooldown_max_s: float = 10.0
+@export var shark_min_level: int = 2
+@export var shark_speed: float = 2.5             ## подход медленный — танк легко уедет
+@export var shark_lunge_dist: float = 2.5        ## прыжок из зыбуна на столько тайлов…
+@export var shark_lunge_speed: float = 9.0       ## …с такой скоростью
+@export var shark_telegraph_s: float = 0.6       ## выныривает и разевает пасть перед прыжком
+@export var shark_damage: int = 15
+@export var shark_spawn_min: float = 12.0        ## появляется в зыбуне в 12…25 тайлах от машины
+@export var shark_spawn_max: float = 25.0
+@export var nessie_min_level: int = 2
+@export var nessie_first_s: float = 120.0        ## редкая: первая — не раньше этого времени забега…
+@export var nessie_gap_s: float = 180.0          ## …следующая — не раньше этого после встречи
+@export var nessie_chance: float = 0.2           ## на проверке раз в 2 с, когда машина у большого озера
+@export var nessie_speed: float = 4.0            ## под водой (V-след): ховер уходит
+@export var nessie_reach: float = 3.5            ## шея бьёт на столько тайлов от основания (достаёт берег за мелководьем)
+@export var nessie_damage: int = 30
+@export var nessie_toss: float = 2.5             ## ховер подбрасывает на столько тайлов
+@export var nessie_lake_tiles: int = 30          ## «большое озеро»: столько глубоких тайлов в радиусе 6
+
+@export_group("Whirlpool")
+## Водоворот (GDD §5.6) — 2×2 тайла на глубокой воде, туда заходит только ховер.
+@export var whirlpool_min_level: int = 2
+@export var whirlpool_interval_s: float = 60.0   ## не чаще (±25%)
+@export var whirlpool_chance: float = 0.35       ## на проверке раз в 2 с, пока машина над глубокой водой
+@export var whirlpool_life_min_s: float = 20.0
+@export var whirlpool_life_max_s: float = 30.0
+@export var whirlpool_form_s: float = 2.0        ## телеграф: круги и пена, тяги ещё нет
+@export var whirlpool_pull_r: float = 3.5        ## тянет к центру только по воде:
+@export var whirlpool_pull_accel: float = 4.0    ## a(r) = pull / масса × (1 − r / pull_r)
+@export var whirlpool_core_r: float = 0.8        ## в ядре топит: машина уходит в воду…
+@export var whirlpool_core_dps: float = 10.0     ## …и теряет столько HP в секунду, пока не вырвется
+
 @export_group("Emergency")
 @export var emergency_delay_s: float = 10.0
-@export var emergency_fuel_frac: float = 0.3
+@export var emergency_supply: int = 30          ## привозит столько единиц: топливо и запчасти (1 ед. — 1 HP) в любой пропорции
+@export var emergency_supply_step: int = 5      ## шаг ползунка в меню вызова
+@export var emergency_land_min: float = 2.0     ## садится не ближе этого к машине (корпус не накроет её)…
+@export var emergency_land_max: float = 4.5     ## …и не дальше этого
 @export var emergency_cargo_mult: float = 0.5
 @export var emergency_penalty_base: int = 500   ## × 2^(n−1)
-@export var empty_tank_decision_s: float = 10.0

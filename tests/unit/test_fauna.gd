@@ -14,9 +14,10 @@ func _field(f: TerrainFixture, mode: FlowField.Mode, target: Vector2i) -> FlowFi
 func test_noise_scales_with_speed_and_events() -> void:
 	var n := NoiseField.new()
 	n.update_vehicle(Vector2.ZERO, 6.5 * 0.8, 6.5)
-	assert_true(n.hears_vehicle(Vector2(19.0, 0.0)), "full speed is heard at 20 tiles")
+	assert_true(n.hears_vehicle(Vector2(11.0, 0.0)), "full speed is heard at 12 tiles")
+	assert_false(n.hears_vehicle(Vector2(13.0, 0.0)), "and no farther")
 	n.update_vehicle(Vector2.ZERO, 6.5 * 0.4, 6.5)
-	assert_false(n.hears_vehicle(Vector2(12.0, 0.0)), "half noise — half range")
+	assert_false(n.hears_vehicle(Vector2(7.0, 0.0)), "half noise — half range")
 	n.add(Vector2(50.0, 0.0), 30.0, 20.0)
 	assert_eq(n.heard_source(Vector2(70.0, 0.0)), Vector2(50.0, 0.0))
 	n.tick(21.0)

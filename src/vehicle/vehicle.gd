@@ -19,6 +19,7 @@ const ROCK_TREE := 0.8
 const ROCK_WALL := 1.8
 const ROCK_LANDING := 1.0
 const ROCK_RAM := 2.8
+const COLOR_SPARK := Color(0.65, 0.85, 1.0)
 
 var cls: VehicleClass
 var query: TerrainQuery
@@ -26,22 +27,26 @@ var state := VehicleState.new()
 var camera: Camera3D
 var autopilot: Autopilot
 var control_enabled := true
-var engine_running := true      ## false — двигатель заглох (пустой бак): газа нет, машина катится до остановки
+var out_of_fuel := false        ## бак пуст: машина ползёт не быстрее crawl_speed (GDD §7.3)
+var crawl_speed := 0.4          ## тайл/с — предел скорости с пустым баком (задаёт GameFlow из правил)
 var wrecked := false
 var total_distance := 0.0
 var engine: EngineSound
 var beacon_calling := false     ## летит аварийный челнок: огонёк антенны ярко мигает и подсвечивает всё вокруг
+var inverted_left := 0.0        ## секунд: после разряда (молния, электрошок) направления ввода наоборот
 
 var _tilt := Basis.IDENTITY
 var _model: VehicleModels.Model
 var _beacon_light: OmniLight3D
+var _sparks: CPUParticles3D        ## искры по корпусу, пока управление наоборот
 var _rock := Vector2.ZERO          ## наклон модели от ударов: x — тангаж (нос вверх +), y — крен (правый борт вверх +)
 var _rock_vel := Vector2.ZERO
 var _tumble := Vector2.ZERO        ## наклон в полёте после броска — равновесие пружины, пока машина в воздухе
+var _ride := VehicleRide.new()     ## анимация хода: тряска корпуса, колыхание ховера, антенна-хлыст
 var _time := 0.0
 var _lift_t := -1.0
-var _lift_from := 0.0
-var _lift_to := 0.0
+var _lift_from := Vector3.ZERO
+var _lift_to := Vector3.ZERO
 var _lift_s := 1.0
 
 
@@ -55,6 +60,8 @@ func _ready() -> void:
 	engine = EngineSound.new()
 	add_child(engine)
 	_rebuild_model()
+	_sparks = _make_sparks()
+	add_child(_sparks)
 
 
 ## Смена класса (экран выбора): модель, тон двигателя, высота над водой.
@@ -69,6 +76,7 @@ func _rebuild_model() -> void:
 		_model.root.queue_free()
 	_model = VehicleModels.build(cls.id)
 	add_child(_model.root)
+	_ride = VehicleRide.new()
 	_beacon_light = OmniLight3D.new()
 	_beacon_light.light_color = VehicleModels.BEACON
 	_beacon_light.light_energy = 1.5
@@ -76,19 +84,18 @@ func _rebuild_model() -> void:
 	_beacon_light.shadow_enabled = false
 	_beacon_light.position = _model.beacon_pos + Vector3(0, 0.05, 0)
 	_beacon_light.visible = false
-	_model.root.add_child(_beacon_light)
+	_model.antenna.add_child(_beacon_light)      # качается вместе с антенной
 	engine.pitch_mult = cls.engine_pitch
 
 
-## Вентиляторы и покачивание ховера — в физическом кадре, вместе с интерполяцией машины.
+## Вентиляторы, раскачка от ударов и анимация хода (VehicleRide) — в физическом кадре, вместе с
+## интерполяцией машины.
 func _animate(dt: float) -> void:
 	_time += dt
 	for rotor in _model.spinners:
 		rotor.rotation.z += FAN_SPEED * (0.4 + 0.6 * state.throttle) * dt * (0.0 if wrecked else 1.0)
-	if _model.hover_height > 0.0:
-		var bob := 0.0 if wrecked else sin(_time * 3.0) * 0.012
-		_model.root.position.y = _model.hover_height + bob
 	_animate_rock(dt)
+	_ride.update(dt, _model, state, cls, query.flags(state.tile.x, state.tile.y), not wrecked, _rock)
 	_animate_beacon()
 
 
@@ -153,21 +160,65 @@ func tumble(push: Vector2, angle: float) -> void:
 	rock(ROCK_RAM, push)
 
 
-## Эвакуация: машину плавно втягивает вверх (в челнок), потом она скрывается.
-func lift(to_y: float, seconds: float) -> void:
+## Разряд по машине (молния, электрошок, GDD §5.6): на seconds направления ввода меняются на
+## противоположные — по корпусу бегут искры, на HUD значок помех.
+func invert_controls(seconds: float) -> void:
+	if wrecked or seconds <= 0.0:
+		return
+	inverted_left = maxf(inverted_left, seconds)
+	_sparks.emitting = true
+	EventBus.controls_inverted.emit(inverted_left)
+
+
+## Голубые искры вокруг корпуса (в координатах машины — едут вместе с ней).
+static func _make_sparks() -> CPUParticles3D:
+	var p := CPUParticles3D.new()
+	p.amount = 18
+	p.lifetime = 0.25
+	p.emitting = false
+	p.emission_shape = CPUParticles3D.EMISSION_SHAPE_SPHERE
+	p.emission_sphere_radius = 0.38
+	p.position = Vector3(0, 0.3, 0)
+	p.direction = Vector3.UP
+	p.spread = 180.0
+	p.initial_velocity_min = 0.3
+	p.initial_velocity_max = 1.2
+	p.gravity = Vector3.ZERO
+	var q := QuadMesh.new()
+	q.size = Vector2(0.06, 0.06)
+	var m := StandardMaterial3D.new()
+	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	m.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
+	m.albedo_color = COLOR_SPARK
+	q.material = m
+	p.mesh = q
+	return p
+
+
+## Эвакуация: луч челнока плавно втягивает машину в точку to (в мире), потом она скрывается.
+func lift(to: Vector3, seconds: float) -> void:
 	_lift_t = 0.0
-	_lift_from = state.y
-	_lift_to = to_y
+	_lift_from = Vector3(state.pos.x, state.y, state.pos.y)
+	_lift_to = to
 	_lift_s = seconds
 	control_enabled = false
+
+
+## Челнок сел на машину: корпус сплющен, машина разбита.
+func crush() -> void:
+	_model.root.scale = Vector3(1.15, 0.3, 1.15)
+	wreck()
 
 
 func _physics_process(dt: float) -> void:
 	if _lift_t >= 0.0:
 		_lift_t += dt
 		var k := minf(_lift_t / _lift_s, 1.0)
-		state.y = lerpf(_lift_from, _lift_to, k * k * (3.0 - 2.0 * k))
+		var p := _lift_from.lerp(_lift_to, k * k * (3.0 - 2.0 * k))
+		state.pos = Vector2(p.x, p.z)
+		state.y = p.y
 		_model.root.rotation.y += dt * 2.5 * k
+		_ride.update(dt, _model, state, cls, 0, false, _rock)   # в луче тряска стихает, антенна успокаивается
 		_apply_transform()
 		if k >= 1.0:
 			visible = false
@@ -175,9 +226,18 @@ func _physics_process(dt: float) -> void:
 			_lift_t = -1.0
 		return
 	var inp := Vector2.ZERO
-	if control_enabled and engine_running and not wrecked:
-		inp = autopilot.direction(state, dt) if autopilot != null else VehicleInput.world_direction(camera)
+	if inverted_left > 0.0:
+		inverted_left = maxf(inverted_left - dt, 0.0)
+		_sparks.emitting = inverted_left > 0.0 and not wrecked
+	if control_enabled and not wrecked:
+		if autopilot != null:
+			inp = autopilot.direction(state, dt)
+		else:
+			inp = VehicleInput.world_direction(camera)
+			if inverted_left > 0.0:
+				inp = -inp
 	var before := state.pos
+	state.speed_cap = crawl_speed if out_of_fuel else INF
 	var r := VehicleKinematics.step(state, inp, cls, query, dt)
 	total_distance += before.distance_to(state.pos)
 	if r.landed:
@@ -199,7 +259,7 @@ func _physics_process(dt: float) -> void:
 		_tilt = _tilt.slerp(_ground_basis(), minf(1.0, 12.0 * dt))
 	_apply_transform()
 	_animate(dt)
-	if engine_running and not wrecked:
+	if not wrecked:
 		engine.update(state.vel.length() / cls.max_speed, state.throttle, dt)
 	elif engine.playing:
 		engine.volume_db = move_toward(engine.volume_db, -60.0, 40.0 * dt)

@@ -14,6 +14,7 @@ const BODY_COLOR := Color(0.86, 0.95, 0.72)
 const LEG_COLOR := Color(0.55, 0.62, 0.45)
 const EYE_COLOR := Color(1.0, 0.25, 0.2)
 const ALERT_S := 0.6
+const SEE_R := 8.0                       ## тайлов: в погоне машину ближе этого стая видит и без шума
 const STANDOFF := 0.8                    ## стая встаёт на таком расстоянии от центра машины
 const REACH := 1.05                      ## отсюда передний достаёт машину броском
 const RETREAT_S := 6.0
@@ -127,7 +128,7 @@ func _chase(dt: float) -> void:
 	_chase_t += dt
 	var vp := vehicle.state.pos
 	var d := pos.distance_to(vp)
-	var hunting := noise.hears_vehicle(pos) or d < 12.0
+	var hunting := noise.hears_vehicle(pos) or d < SEE_R
 	if _stun <= 0.0:
 		var goal: Vector2
 		if not hunting and source != null:

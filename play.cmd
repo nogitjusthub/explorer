@@ -17,8 +17,10 @@ rem Угрозы
 rem   --no-threats       без угроз (погода, землетрясения, смерчи)
 rem   --no-fauna         без фауны
 rem   --threat=N         уровень угрозы не ниже N (1–6)
-rem   --event=K@S,...    событие K на S-й секунде: storm, fog, acid, dust, tornado, quake,
-rem                        hoppers, worm, shellback (червь — если рядом песок или равнина)
+rem   --event=K@S,...    событие K на S-й секунде: storm, strike, fog, acid, dust, tornado,
+rem                        quake, whirlpool, hoppers, worm, shellback, shark, ray, nessie
+rem                        (strike — молния в машину; червь — если рядом песок или равнина;
+rem                        водные — если рядом зыбун, мелкая или глубокая вода)
 rem Сценарии без рук
 rem   --idle             без стартового экрана и автопилота: машина стоит
 rem   --select           показать трюм с выбором машины и при --idle или --shots
@@ -61,8 +63,10 @@ echo  Угрозы
 echo   --no-threats       без угроз (погода, землетрясения, смерчи)
 echo   --no-fauna         без фауны
 echo   --threat=N         уровень угрозы не ниже N (1–6)
-echo   --event=K@S,...    событие K на S-й секунде: storm, fog, acid, dust, tornado, quake,
-echo                        hoppers, worm, shellback (червь — если рядом песок или равнина)
+echo   --event=K@S,...    событие K на S-й секунде: storm, strike, fog, acid, dust, tornado,
+echo                        quake, whirlpool, hoppers, worm, shellback, shark, ray, nessie
+echo                        (strike — молния в машину; червь — если рядом песок или равнина;
+echo                        водные — если рядом зыбун, мелкая или глубокая вода)
 echo.
 echo  Сценарии без рук
 echo   --idle             без стартового экрана и автопилота: машина стоит
@@ -87,6 +91,7 @@ echo   play.cmd --event=hoppers@3                        стая скакуно
 echo   play.cmd --spawn=-43,-8 --seed=7 --event=worm@2   песчаный червь (старт на песке)
 echo   play.cmd --spawn=100,60 --event=quake@5           землетрясение (у площадки старта разлома не бывает)
 echo   play.cmd --idle --shuttle-in=6 --shuttle-dist=0   челнок на площадке старта через 6 с
+echo   play.cmd --idle --fuel=0.1 --event=strike@3       пустой бак и молния в машину
 echo.
 echo В игре: W/A/S/D — движение, F — аварийный челнок, Q/E — поворот камеры, Esc — пауза, F1 — справка, F3 — отладка, F12 — снимок в build\debug
 chcp %_oldcp% >nul

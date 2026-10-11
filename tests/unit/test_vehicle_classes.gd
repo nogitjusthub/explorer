@@ -241,8 +241,32 @@ func test_external_push_drifts_and_walls_stop_it() -> void:
 	assert_true(s.push_vel.length() < 0.05, "drift fades without force")
 
 
+func test_mire_sticks_after_a_stop() -> void:
+	# GDD §5.6: постоял на зыбучем грунте — прилип: трогается куда медленнее, чем по нему же с хода;
+	# танк прилипает слабее ровера, ховеру всё равно.
+	var f := TerrainFixture.new(4)
+	for tz in range(0, 30):
+		for tx in range(0, 30):
+			f.set_flags(tx, tz, ChunkData.FLAG_MIRE)
+	var speeds := {}
+	for id: StringName in [&"rover", &"tank", &"hover"]:
+		var cls := _cls(id)
+		var s := _state(f, cls, Vector2(8.5, 10.5), 0.0)
+		for _i in 120:                                   # 2 с стоит
+			VehicleKinematics.step(s, Vector2.ZERO, cls, f.query, DT)
+		if id != &"hover":
+			assert_near(s.mire_stuck, 1.0, 1e-4, "%s is stuck after standing" % id)
+		for _i in 60:                                    # 1 с полного газа
+			VehicleKinematics.step(s, Vector2.RIGHT, cls, f.query, DT)
+		speeds[id] = s.vel.length()
+	assert_true(speeds[&"rover"] < 0.35, "rover barely moves after 1 s: %.2f" % speeds[&"rover"])
+	assert_true(speeds[&"tank"] > speeds[&"rover"], "tank sticks less than rover")
+	assert_near(speeds[&"hover"], minf(_cls(&"hover").max_speed, _cls(&"hover").accel * 1.0), 0.3, "hover is not stuck")
+	assert_eq(VehicleKinematics.mire_grip(_cls(&"rover"), 0, 1.0), 1.0, "no mire — full grip")
+
+
 func test_rough_and_mire_ground_slow_wheels_not_hover() -> void:
-	# GDD §3.5a, §5.6: неровный — ровер и танк ×0,65; зыбучий — ровер ×0,4, танк ×0,7; ховер — без замедления.
+	# GDD §3.5a, §5.6: неровный — ровер и танк ×0,65; зыбучий — ровер ×0,3, танк ×0,65; ховер — без замедления.
 	for flag in [ChunkData.FLAG_ROUGH, ChunkData.FLAG_MIRE]:
 		var f := TerrainFixture.new(4)
 		for tz in range(0, 30):

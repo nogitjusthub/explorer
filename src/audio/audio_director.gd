@@ -1,7 +1,7 @@
 class_name AudioDirector
 extends Node
 ## Звуки событий (GDD §9): молния — треск телеграфа и гром, землетрясение — нарастающий гул и раскат
-## при толчке, урон — удар по корпусу. Громкость падает с расстоянием до машины. Слушает EventBus;
+## при толчке, урон — удар по корпусу, разряд по машине — гудение помех. Громкость падает с расстоянием до машины. Слушает EventBus;
 ## двигатель машины звучит сам (EngineSound).
 
 const VOICES := 6
@@ -19,6 +19,7 @@ var _rumble_build: AudioStreamWAV
 var _rumble_hit: AudioStreamWAV
 var _quake_heard := false              ## гул телеграфа текущего землетрясения уже запущен
 var _squeal: AudioStreamWAV
+var _buzz: AudioStreamWAV
 
 
 func _ready() -> void:
@@ -30,6 +31,7 @@ func _ready() -> void:
 	_rumble_hit = Sfx.rumble(2.4, false)
 	Sfx.wind_loop(2.0)        # гул смерча — в кэш заранее, иначе первый смерч дёрнет кадр
 	_squeal = Sfx.squeal(0.6)
+	_buzz = Sfx.buzz(1.2)
 	for _i in VOICES:
 		var p := AudioStreamPlayer.new()
 		add_child(p)
@@ -41,6 +43,7 @@ func _ready() -> void:
 	EventBus.fauna_alerted.connect(_on_fauna_alerted)
 	EventBus.drop_landed.connect(_on_drop_landed)
 	EventBus.vehicle_damaged.connect(func(_amount: int, _source: StringName, _at: Vector3) -> void: _play(_hit, -4.0))
+	EventBus.controls_inverted.connect(func(_seconds: float) -> void: _play(_buzz, -8.0))
 
 
 func _on_telegraphed(kind: StringName, at: Vector3, _seconds: float, _dir: Vector2) -> void:
@@ -51,13 +54,14 @@ func _on_telegraphed(kind: StringName, at: Vector3, _seconds: float, _dir: Vecto
 		_play(_rumble_build, -2.0)
 
 
-## Удар капсулы десанта — раскат.
+## Посадка капсулы десанта — глухой удар опор о грунт и короткий гул.
 func _on_drop_landed(_at: Vector3) -> void:
-	_play(_rumble_hit, 4.0, 0.8)
-	_play(_thunder, -2.0, 0.6)
+	_play(_hit, 4.0, 0.55)
+	_play(_rumble_hit, -6.0, 1.1)
 
 
-## Фауна: визг стаи скакунов, гул червя под песком и раскат его броска.
+## Фауна: визг стаи скакунов, гул червя под песком и раскат его броска, бульканье и шлепок прыжка
+## илозуба, гул и удар Нессы, треск разряда троеглазки.
 func _on_fauna_alerted(kind: StringName, at: Vector3) -> void:
 	match kind:
 		&"hopper":
@@ -66,6 +70,16 @@ func _on_fauna_alerted(kind: StringName, at: Vector3) -> void:
 			_play_at(_rumble_build, at, -4.0, 0.7)
 		&"worm_strike":
 			_play_at(_rumble_hit, at, 2.0, 0.75)
+		&"shark":
+			_play_at(_rumble_build, at, -10.0, 1.5)  # илозуб учуял машину — бульканье в зыбуне
+		&"shark_leap":
+			_play_at(_hit, at, -6.0, 1.7)            # выпрыгнул — шлепок
+		&"nessie":
+			_play_at(_rumble_build, at, -4.0, 0.6)   # Несса выныривает — низкий гул
+		&"nessie_strike":
+			_play_at(_rumble_hit, at, 0.0, 1.2)      # шея падает — удар и всплеск
+		&"ray_shock":
+			_play_at(_crackle, at, -4.0, 2.2)      # разряд троеглазки — короткий треск
 
 
 func _on_threat_ended(kind: StringName) -> void:
