@@ -32,7 +32,8 @@ extends Node
 ##     --autopilot        машина едет сама, гибель — возрождение
 ##     --course=D         автопилот строго по курсу D градусов, без объезда
 ##     --bench=S          бенчмарк S секунд с автопилотом, отчёт и выход
-##     --log-slow         печатать кадры дольше 20 мс
+##     --log-slow         печатать кадры дольше 20 мс: сколько заняли игра, генерация, отрисовка
+##                          (в вебе — ?log-slow в адресе, строки в консоли браузера F12)
 ##     --shots=N          N скриншотов в build\shots, интервал --shot-every=S (3 с)
 ##     --snapshot-at=S    отладочный снимок (как по F12) через S секунд
 ## В веб-сборке те же параметры берутся из адреса страницы: ?seed=7&bench=30. Результаты бенчмарка
@@ -66,6 +67,8 @@ var _throttle_sum := 0.0
 var _physics_frames := 0
 var _chunks_built := 0
 var _slow_frames := 0
+var _physics_seen := 0                 ## Engine.get_physics_frames() в прошлом кадре — сколько шагов физики было
+var script_usec := 0                   ## шаги игры (GameFlow) с прошлого кадра, мкс — копит main
 var _objects_at_start := 0
 var _presses: Array[Dictionary] = []    ## {action, at}
 var _clicks: Array[Dictionary] = []     ## {pos (пиксели рендера), at}
@@ -79,6 +82,7 @@ func _init(parsed_args: Dictionary) -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS     # снимки, нажатия и F12 работают и на паузе
 	if args.has("bench"):
 		_bench_time = float(args["bench"])
+
 	if args.has("snapshot-at"):
 		_snapshot_at = float(args["snapshot-at"])
 	if args.has("shots"):
@@ -94,6 +98,12 @@ func _init(parsed_args: Dictionary) -> void:
 		var xy := parts[0].split(":")
 		if parts.size() == 2 and xy.size() == 2:
 			_clicks.append({"pos": Vector2(float(xy[0]), float(xy[1])), "at": float(parts[1])})
+
+
+func _ready() -> void:
+	if args.has("log-slow"):
+		# Время отрисовки кадра (ЦП и ГП) — чтобы отличить тормоза игры от тормозов рендера и браузера.
+		RenderingServer.viewport_set_measure_render_time(get_viewport().get_viewport_rid(), true)
 
 
 ## Нужен ли автопилот (явно или ради бенчмарка и снимков; --idle — без него).
@@ -172,7 +182,9 @@ func _process(dt: float) -> void:
 		if dt > 0.02:
 			_slow_frames += 1
 			if args.has("log-slow"):
-				print("slow frame %.1f ms at %.2f s" % [dt * 1000.0, _elapsed])
+				_log_slow(dt)
+	_physics_seen = Engine.get_physics_frames()
+	script_usec = 0
 	for action in _release:
 		var up := InputEventAction.new()
 		up.action = action
@@ -282,6 +294,24 @@ func _print_bench() -> void:
 func _report(line: String) -> void:
 	print(line)
 	if OS.has_feature("web"):
+		_web_post("/log", line, false)
+
+
+## Медленный кадр и на что ушло время: скрипты кадра (process), физика (сколько шагов), задачи генерации,
+## отрисовка, объекты и память. Если всё это мало, а кадр долгий — тормозит не игра, а движок или
+## браузер (сборка мусора, звук, драйвер). В вебе при бенчмарке строка уходит и на локальный сервер.
+func _log_slow(dt: float) -> void:
+	var vp := get_viewport().get_viewport_rid()
+	var line := "slow frame %.1f ms at %.2f s — game steps %.1f ms ×%d, jobs %.1f ms, render cpu %.1f / gpu %.1f ms, draws %d, objects %d" % [
+		dt * 1000.0, _elapsed,
+		script_usec / 1000.0, Engine.get_physics_frames() - _physics_seen,
+		scheduler.last_frame_usec / 1000.0 if scheduler != null else 0.0,
+		RenderingServer.viewport_get_measured_render_time_cpu(vp),
+		RenderingServer.viewport_get_measured_render_time_gpu(vp),
+		Performance.get_monitor(Performance.RENDER_TOTAL_DRAW_CALLS_IN_FRAME),
+		Performance.get_monitor(Performance.OBJECT_COUNT)]
+	print(line)
+	if OS.has_feature("web") and _bench_time > 0.0:
 		_web_post("/log", line, false)
 
 

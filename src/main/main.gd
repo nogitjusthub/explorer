@@ -350,6 +350,12 @@ func _start_run() -> void:
 
 
 func _physics_process(dt: float) -> void:
+	var t0 := Time.get_ticks_usec()
+	_step(dt)
+	dev.script_usec += Time.get_ticks_usec() - t0     # для --log-slow: сколько занял шаг игры
+
+
+func _step(dt: float) -> void:
 	streamer.update_focus(vehicle.state.pos, vehicle.state.vel)
 	var p := vehicle.state.pos
 	RenderingServer.global_shader_parameter_set(&"vis_center", Vector3(p.x, vehicle.state.y, p.y))
