@@ -8,3 +8,6 @@ export_credentials.cfg
 # Portable engine and build output
 tools/godot/
 build/
+
+# Референсы с чужими изображениями — только локально
+design_references/
