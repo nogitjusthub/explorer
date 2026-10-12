@@ -43,6 +43,7 @@ var _spawn := Vector2.ZERO
 var _over_timer := 0.0
 var _refused_key := -1             ## находка, на которую уже показали «трюм полон»
 var _hangar: HangarScreen
+var _warmup: Warmup
 var _world_pending := false        ## мир вокруг старта ещё грузится в фоне (пока игрок в трюме)
 var _begin_waiting := false        ## игрок уже нажал «Высадка» — ждём мир за затемнением
 var _job_budget := 0
@@ -212,15 +213,20 @@ func _build_world(args: Dictionary) -> void:
 	_help = HelpScreen.new()
 	add_child(_help)
 
-	var warmup := Warmup.new()
-	warmup.at = Vector3(spawn.x, 0.0 if _world_pending else vehicle.state.y, spawn.y)
-	warmup.rules = rules
-	warmup.vehicle = vehicle
-	warmup.query = query
-	warmup.terrain = terrain
-	warmup.pickups = pickups
-	warmup.noise = fauna.noise
-	add_child(warmup)
+	# Прогрев шейдеров — раз за сессию (ShaderCache держит их и после «Заново»).
+	if not ShaderCache.warmed:
+		_warmup = Warmup.new()
+		_warmup.at = Vector3(spawn.x, 0.0 if _world_pending else vehicle.state.y, spawn.y)
+		_warmup.wait_world = _world_pending      # взгляд на настоящий мир — когда он догрузится за трюмом
+		_warmup.rules = rules
+		_warmup.vehicle = vehicle
+		_warmup.query = query
+		_warmup.terrain = terrain
+		_warmup.pickups = pickups
+		_warmup.noise = fauna.noise
+		_warmup.materials = streamer.materials
+		_warmup.streamer = streamer
+		add_child(_warmup)
 
 	var weather_fx := WeatherOverlay.new()
 	weather_fx.camera = rig.camera
@@ -322,9 +328,14 @@ func _plays_drop() -> bool:
 	return not dev.skips_start() and not _no_drop
 
 
+## Мир за трюмом ещё не готов: догружается или прогреваются шейдеры.
+func _preparing() -> bool:
+	return _world_pending or (_warmup != null and is_instance_valid(_warmup) and not _warmup.done)
+
+
 func _begin() -> void:
-	if _world_pending:
-		# «Высадка» раньше, чем догрузился мир: трюм держит затемнение с надписью, пока мир не готов.
+	if _hangar != null and _preparing():
+		# «Высадка» раньше, чем мир готов: трюм держит затемнение с надписью, пока не догрузится.
 		_begin_waiting = true
 		if _hangar != null and is_instance_valid(_hangar):
 			_hangar.waiting = true
@@ -410,16 +421,18 @@ func _on_world_ready() -> void:
 		_spawn = _landing_point(_spawn)
 	vehicle.place(_spawn, SPAWN_HEADING)
 	vehicle.set_physics_process(true)
-	if _begin_waiting:
-		_begin_waiting = false
-		if _hangar != null and is_instance_valid(_hangar):
-			_hangar.waiting = false
-		_begin()
+	if _warmup != null and is_instance_valid(_warmup):
+		_warmup.look_at_world(Vector3(_spawn.x, vehicle.state.y, _spawn.y))
 
 
 func _process(dt: float) -> void:
 	if _world_pending and streamer.ready_around(_spawn):
 		_on_world_ready()
+	if _begin_waiting and not _preparing():
+		_begin_waiting = false
+		if _hangar != null and is_instance_valid(_hangar):
+			_hangar.waiting = false
+		_begin()
 	if phase == Phase.OVER:
 		_over_timer -= dt
 		if _over_timer <= 0.0:

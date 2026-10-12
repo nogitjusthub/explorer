@@ -13,52 +13,65 @@ var vehicle: Vehicle
 
 var _players: Array[AudioStreamPlayer] = []
 var _next := 0
-var _crackle: AudioStreamWAV
-var _thunder: AudioStreamWAV
-var _hit: AudioStreamWAV
-var _rumble_build: AudioStreamWAV
-var _rumble_hit: AudioStreamWAV
 var _quake_heard := false              ## гул телеграфа текущего землетрясения уже запущен
-var _screech: AudioStreamWAV
-var _buzz: AudioStreamWAV
+var _sounds: Dictionary[StringName, AudioStreamWAV] = {}
+var _makers: Dictionary[StringName, Callable] = {}
 
 
 func _ready() -> void:
 	name = "AudioDirector"
-	_crackle = Sfx.crackle(1.2)
-	_thunder = Sfx.thunder(2.2)
-	_hit = Sfx.hit(0.3)
-	_rumble_build = Sfx.rumble(2.5, true)
-	_rumble_hit = Sfx.rumble(2.4, false)
-	Sfx.wind_loop(2.0)        # гул смерча — в кэш заранее, иначе первый смерч дёрнет кадр
-	_screech = Sfx.screech(0.75)
-	_buzz = Sfx.buzz(1.2)
+	# Звуки синтезируются по одному за кадр, пока игрок в трюме, — не на старте: в браузере все сразу —
+	# это почти секунда чёрного экрана. Понадобился раньше — синтезируется сразу (_sfx).
+	_makers = {
+		&"crackle": func() -> AudioStreamWAV: return Sfx.crackle(1.2),
+		&"thunder": func() -> AudioStreamWAV: return Sfx.thunder(2.2),
+		&"hit": func() -> AudioStreamWAV: return Sfx.hit(0.3),
+		&"rumble_build": func() -> AudioStreamWAV: return Sfx.rumble(2.5, true),
+		&"rumble_hit": func() -> AudioStreamWAV: return Sfx.rumble(2.4, false),
+		&"wind": func() -> AudioStreamWAV: return Sfx.wind_loop(2.0),    # гул смерча — в кэш Sfx заранее
+		&"screech": func() -> AudioStreamWAV: return Sfx.screech(0.75),
+		&"buzz": func() -> AudioStreamWAV: return Sfx.buzz(1.2),
+	}
 	for _i in VOICES:
 		var p := AudioStreamPlayer.new()
 		add_child(p)
 		_players.append(p)
 	EventBus.threat_telegraphed.connect(_on_telegraphed)
 	EventBus.lightning_struck.connect(_on_lightning)
-	EventBus.sheet_lightning.connect(func(at: Vector3) -> void: _delayed(_thunder, at, -10.0, 0.7))
+	EventBus.sheet_lightning.connect(func(at: Vector3) -> void: _delayed(_sfx(&"thunder"), at, -10.0, 0.7))
 	EventBus.threat_ended.connect(_on_threat_ended)
 	EventBus.fauna_alerted.connect(_on_fauna_alerted)
 	EventBus.drop_landed.connect(_on_drop_landed)
-	EventBus.vehicle_damaged.connect(func(_amount: int, _source: StringName, _at: Vector3) -> void: _play(_hit, -4.0))
-	EventBus.controls_inverted.connect(func(_seconds: float) -> void: _play(_buzz, -8.0))
+	EventBus.vehicle_damaged.connect(func(_amount: int, _source: StringName, _at: Vector3) -> void: _play(_sfx(&"hit"), -4.0))
+	EventBus.controls_inverted.connect(func(_seconds: float) -> void: _play(_sfx(&"buzz"), -8.0))
+
+
+func _process(_dt: float) -> void:
+	for key in _makers:
+		if not _sounds.has(key):
+			_sounds[key] = _makers[key].call()
+			return
+	set_process(false)
+
+
+func _sfx(key: StringName) -> AudioStreamWAV:
+	if not _sounds.has(key):
+		_sounds[key] = _makers[key].call()
+	return _sounds[key]
 
 
 func _on_telegraphed(kind: StringName, at: Vector3, _seconds: float, _dir: Vector2) -> void:
 	if kind == &"lightning":
-		_play_at(_crackle, at, -8.0)
+		_play_at(_sfx(&"crackle"), at, -8.0)
 	elif kind == &"quake" and not _quake_heard:
 		_quake_heard = true
-		_play(_rumble_build, -2.0)
+		_play(_sfx(&"rumble_build"), -2.0)
 
 
 ## Посадка капсулы десанта — глухой удар опор о грунт и короткий гул.
 func _on_drop_landed(_at: Vector3) -> void:
-	_play(_hit, 4.0, 0.55)
-	_play(_rumble_hit, -6.0, 1.1)
+	_play(_sfx(&"hit"), 4.0, 0.55)
+	_play(_sfx(&"rumble_hit"), -6.0, 1.1)
 
 
 ## Фауна: крик стаи скакунов, гул червя под песком и раскат его броска, бульканье и шлепок прыжка
@@ -66,32 +79,32 @@ func _on_drop_landed(_at: Vector3) -> void:
 func _on_fauna_alerted(kind: StringName, at: Vector3) -> void:
 	match kind:
 		&"hopper":
-			_play_at(_screech, at, -6.0, 0.9 + 0.2 * fmod(absf(at.x * 0.13), 1.0), FAUNA_HEAR_TILES)
+			_play_at(_sfx(&"screech"), at, -6.0, 0.9 + 0.2 * fmod(absf(at.x * 0.13), 1.0), FAUNA_HEAR_TILES)
 		&"worm":
-			_play_at(_rumble_build, at, -4.0, 0.7, FAUNA_HEAR_TILES)
+			_play_at(_sfx(&"rumble_build"), at, -4.0, 0.7, FAUNA_HEAR_TILES)
 		&"worm_strike":
-			_play_at(_rumble_hit, at, 2.0, 0.75, FAUNA_HEAR_TILES)
+			_play_at(_sfx(&"rumble_hit"), at, 2.0, 0.75, FAUNA_HEAR_TILES)
 		&"shark":
-			_play_at(_rumble_build, at, -10.0, 1.5, FAUNA_HEAR_TILES)  # илозуб учуял машину — бульканье в зыбуне
+			_play_at(_sfx(&"rumble_build"), at, -10.0, 1.5, FAUNA_HEAR_TILES)  # илозуб учуял машину — бульканье в зыбуне
 		&"shark_leap":
-			_play_at(_hit, at, -6.0, 1.7, FAUNA_HEAR_TILES)            # выпрыгнул — шлепок
+			_play_at(_sfx(&"hit"), at, -6.0, 1.7, FAUNA_HEAR_TILES)            # выпрыгнул — шлепок
 		&"nessie":
-			_play_at(_rumble_build, at, -4.0, 0.6, FAUNA_HEAR_TILES)   # Несса выныривает — низкий гул
+			_play_at(_sfx(&"rumble_build"), at, -4.0, 0.6, FAUNA_HEAR_TILES)   # Несса выныривает — низкий гул
 		&"nessie_strike":
-			_play_at(_rumble_hit, at, 0.0, 1.2, FAUNA_HEAR_TILES)      # шея падает — удар и всплеск
+			_play_at(_sfx(&"rumble_hit"), at, 0.0, 1.2, FAUNA_HEAR_TILES)      # шея падает — удар и всплеск
 		&"ray_shock":
-			_play_at(_crackle, at, -4.0, 2.2, FAUNA_HEAR_TILES)        # разряд троеглазки — короткий треск
+			_play_at(_sfx(&"crackle"), at, -4.0, 2.2, FAUNA_HEAR_TILES)        # разряд троеглазки — короткий треск
 
 
 func _on_threat_ended(kind: StringName) -> void:
 	if kind == &"quake":
 		_quake_heard = false
-		_play(_rumble_hit, 2.0)
+		_play(_sfx(&"rumble_hit"), 2.0)
 
 
 ## Гром запаздывает: чем дальше удар, тем позже (звук «медленнее» вспышки).
 func _on_lightning(at: Vector3) -> void:
-	_delayed(_thunder, at, 0.0, 0.85 + 0.3 * fmod(at.x * 0.37 + at.z * 0.61, 1.0))
+	_delayed(_sfx(&"thunder"), at, 0.0, 0.85 + 0.3 * fmod(at.x * 0.37 + at.z * 0.61, 1.0))
 
 
 func _delayed(stream: AudioStream, at: Vector3, volume_db: float, pitch: float) -> void:

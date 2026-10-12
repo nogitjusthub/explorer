@@ -19,6 +19,7 @@ config/features=PackedStringArray("4.7", "GL Compatibility")
 EventBus="*res://src/core/event_bus.gd"
 Balance="*res://src/core/balance.gd"
 Settings="*res://src/core/settings.gd"
+ShaderCache="*res://src/render/shader_cache.gd"
 
 [display]
 

@@ -36,6 +36,13 @@ func _init(t: TerrainData, q: TerrainQuery, seed_value: int, balance: BalanceRul
 		_meshes[id] = _make_mesh(Balance.pickup(id), shader, outline)
 
 
+## Меши всех видов находок (прогрев шейдеров).
+func meshes() -> Array[Mesh]:
+	var out: Array[Mesh] = []
+	out.assign(_meshes.values())
+	return out
+
+
 ## Чанк собран (впервые или пересобран после правки рельефа): находки и их высоты.
 func on_chunk_built(coord: Vector2i) -> void:
 	if not _by_chunk.has(coord):

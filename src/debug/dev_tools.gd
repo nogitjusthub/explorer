@@ -34,6 +34,8 @@ extends Node
 ##     --bench=S          бенчмарк S секунд с автопилотом, отчёт и выход
 ##     --log-slow         печатать кадры дольше 20 мс: сколько заняли игра, генерация, отрисовка
 ##                          (в вебе — ?log-slow в адресе, строки в консоли браузера F12)
+##     --shader-audit     печатать материалы с новым ключом шейдера, появившиеся после прогрева
+##                          (их шейдер прогрев не покрыл — первое появление дёрнет кадр в браузере)
 ##     --shots=N          N скриншотов в build\shots, интервал --shot-every=S (3 с)
 ##     --snapshot-at=S    отладочный снимок (как по F12) через S секунд
 ## В веб-сборке те же параметры берутся из адреса страницы: ?seed=7&bench=30. Результаты бенчмарка
@@ -70,6 +72,9 @@ var _slow_frames := 0
 var _physics_seen := 0                 ## Engine.get_physics_frames() в прошлом кадре — сколько шагов физики было
 var script_usec := 0                   ## шаги игры (GameFlow) с прошлого кадра, мкс — копит main
 var _builds := 0                       ## сборок чанков (в т. ч. пересборок) с прошлого кадра — для --log-slow
+var _audit_new: Array[Node] = []       ## --shader-audit: узлы, добавленные с прошлого кадра
+var _audit_keys := {}                  ## ключи шейдеров, уже виденные в игровом мире
+var _audit_listed := false
 var _objects_at_start := 0
 var _presses: Array[Dictionary] = []    ## {action, at}
 var _clicks: Array[Dictionary] = []     ## {pos (пиксели рендера), at}
@@ -107,6 +112,11 @@ func _ready() -> void:
 	if args.has("log-slow"):
 		# Время отрисовки кадра (ЦП и ГП) — чтобы отличить тормоза игры от тормозов рендера и браузера.
 		RenderingServer.viewport_set_measure_render_time(get_viewport().get_viewport_rid(), true)
+	if args.has("shader-audit"):
+		get_tree().node_added.connect(func(n: Node) -> void:
+			if n is GeometryInstance3D:
+				_audit_new.append(n))
+		_audit_collect(get_tree().root)      # уже построенное (мир, машина) — до конца прогрева, молча
 
 
 ## Нужен ли автопилот (явно или ради бенчмарка и снимков; --idle — без него).
@@ -164,6 +174,36 @@ func _physics_process(_dt: float) -> void:
 	_throttle_sum += vehicle.state.throttle
 
 
+## --shader-audit: ключи шейдеров узлов, добавленных в игровой мир. До конца прогрева (и в нём самом) —
+## запоминаем молча; после — новый ключ печатаем с путём узла: его шейдер прогрев не покрыл.
+func _audit() -> void:
+	var world := get_viewport().world_3d
+	for n in _audit_new:
+		if not is_instance_valid(n) or not n.is_inside_tree() or (n as Node3D).get_world_3d() != world:
+			continue
+		var instanced := n is MultiMeshInstance3D or n is CPUParticles3D
+		for m in ShaderCache.materials_of(n):
+			var key := ShaderCache.key_of(m, instanced)
+			if _audit_keys.has(key):
+				continue
+			_audit_keys[key] = true
+			if ShaderCache.warmed:
+				print("shader-audit: not warmed at %.1f s: %s\n    %s" % [_elapsed, n.get_path(), key])
+	_audit_new.clear()
+	if ShaderCache.warmed and not _audit_listed:
+		_audit_listed = true
+		var keys: Array = _audit_keys.keys()
+		keys.sort()
+		print("shader-audit: %d shader keys after warmup:\n    %s" % [keys.size(), "\n    ".join(keys)])
+
+
+func _audit_collect(n: Node) -> void:
+	if n is GeometryInstance3D:
+		_audit_new.append(n)
+	for c in n.get_children():
+		_audit_collect(c)
+
+
 ## Снимок по F12 — только на ПК: в браузере F12 открывает консоль, а снимок там всё равно некуда
 ## сохранить (его принимает только локальный web_server.py — для этого есть --snapshot-at).
 func _unhandled_input(event: InputEvent) -> void:
@@ -191,6 +231,8 @@ func _process(dt: float) -> void:
 	_physics_seen = Engine.get_physics_frames()
 	script_usec = 0
 	_builds = 0
+	if not _audit_new.is_empty():
+		_audit()
 	for action in _release:
 		var up := InputEventAction.new()
 		up.action = action
