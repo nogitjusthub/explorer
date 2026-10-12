@@ -31,7 +31,7 @@ func _init() -> void:
 	trunk.height = 0.65
 	trunk.radial_segments = 5
 	trunk.rings = 0
-	trunk.material = _tree_material(tree_shader, Color(0.36, 0.24, 0.34), 0.0)
+	trunk.material = _tree_material(tree_shader, Color(0.36, 0.24, 0.34), 0.0, 1)          # кора
 	trunk_mesh = trunk
 
 	var coral := SphereMesh.new()       # кораллоподобная крона
@@ -39,7 +39,7 @@ func _init() -> void:
 	coral.height = 0.45
 	coral.radial_segments = 6
 	coral.rings = 3
-	coral.material = _tree_material(tree_shader, Color(0.26, 0.5, 0.48), 0.06)      # приглушённая бирюза
+	coral.material = _tree_material(tree_shader, Color(0.26, 0.5, 0.48), 0.06, 2)   # приглушённая бирюза, полипы
 	crown_meshes.append(coral)
 
 	var shroom := CylinderMesh.new()    # грибовидная крона
@@ -48,7 +48,7 @@ func _init() -> void:
 	shroom.height = 0.18
 	shroom.radial_segments = 7
 	shroom.rings = 0
-	shroom.material = _tree_material(tree_shader, Color(0.52, 0.35, 0.5), 0.05)      # приглушённый пурпур
+	shroom.material = _tree_material(tree_shader, Color(0.52, 0.35, 0.5), 0.05, 3)   # приглушённый пурпур, крапины
 	crown_meshes.append(shroom)
 
 	var fallen := CylinderMesh.new()
@@ -61,9 +61,11 @@ func _init() -> void:
 	log_mesh = fallen
 
 
-static func _tree_material(shader: Shader, color: Color, glow: float) -> ShaderMaterial:
+## pattern — пиксельный узор tree.gdshader: 1 — кора, 2 — коралл, 3 — гриб.
+static func _tree_material(shader: Shader, color: Color, glow: float, pattern: int) -> ShaderMaterial:
 	var m := ShaderMaterial.new()
 	m.shader = shader
 	m.set_shader_parameter("base_color", color)
 	m.set_shader_parameter("glow", glow)
+	m.set_shader_parameter("pattern", pattern)
 	return m

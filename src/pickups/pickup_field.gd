@@ -215,11 +215,20 @@ func _rebuild(coord: Vector2i) -> void:
 		node.add_child(mmi)
 
 
+## Пиксельный узор находки по форме (pickup.gdshader, pattern).
+const PATTERNS := {
+	PickupKind.Shape.CRYSTAL: 1, PickupKind.Shape.CAPSULE: 2, PickupKind.Shape.ORB: 3,
+	PickupKind.Shape.GEAR: 4, PickupKind.Shape.JERRYCAN: 5,
+}
+
+
 static func _make_mesh(kind: PickupKind, shader: Shader, outline: Material) -> Mesh:
 	var mat := ShaderMaterial.new()
 	mat.shader = shader
 	mat.set_shader_parameter("base_color", kind.color)
 	mat.set_shader_parameter("glow", kind.glow)
+	mat.set_shader_parameter("size", kind.size)
+	mat.set_shader_parameter("pattern", PATTERNS.get(kind.shape, 0))
 	mat.next_pass = outline
 	var s := kind.size
 	var mesh: Mesh
