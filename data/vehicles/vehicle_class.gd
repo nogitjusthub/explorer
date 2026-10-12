@@ -49,7 +49,8 @@ extends Resource
 
 @export_group("Presentation")
 @export var model: PackedScene
-## Характеристики для экрана выбора, 1–5 (относительно других классов, без чисел баланса).
+## Характеристики для экрана выбора, 1–5 (относительно других классов, без чисел баланса): по каждой у
+## лучшего класса — полная шкала, у остальных — примерно в пропорции к его числу баланса.
 @export_range(1, 5) var stat_fuel: int = 3
 @export_range(1, 5) var stat_armor: int = 3
 @export_range(1, 5) var stat_handling: int = 3

@@ -74,7 +74,7 @@ static func build(id: StringName) -> Model:
 			_hover(m)
 		_:
 			_rover(m)
-	_map_faces(m.root)
+	BodyMaterial.map_faces(m.root)
 	return m
 
 
@@ -215,21 +215,6 @@ static func _doors(hx: float, z0: float, z1: float, y0: float, y1: float) -> Arr
 		out.append(BodyMaterial.detail(BodyMaterial.Detail.DOOR, Vector3(s, 0, 0), Vector3(s * hx, y0, z0),
 				Vector3(s * hx, y1, z1), Vector3.BACK))
 	return out
-
-
-## Детали с узором (body_xray) — меш с разметкой граней (MeshKit.face_mapped): обшивка ложится по граням,
-## детали из мета details — на свои грани.
-static func _map_faces(n: Node) -> void:
-	if n is MeshInstance3D:
-		var mi := n as MeshInstance3D
-		var mat := mi.material_override as ShaderMaterial
-		if mat != null and mat.shader == BodyMaterial.SHADER_XRAY:
-			var details: Array[Dictionary] = []
-			if mi.has_meta(&"details"):
-				details.assign(mi.get_meta(&"details"))
-			mi.mesh = MeshKit.face_mapped(mi.mesh, details)
-	for c in n.get_children():
-		_map_faces(c)
 
 
 ## Купол-кабина — у всех классов одинаковый: прозрачная полусфера, в stencil не пишет.

@@ -1,16 +1,18 @@
 class_name BodyMaterial
 extends RefCounted
 ## Материалы техники и фауны с пиксельным узором (M5, body.gdshaderinc): цвет детали × яркость узора по
-## координатам меша. Свет — как у StandardMaterial3D. Техника — вариант со stencil (body_xray.gdshader) и
-## силуэтом сквозь препятствия следующим проходом — как STENCIL_MODE_XRAY у StandardMaterial3D.
-## Цвет у таких материалов — параметр шейдера: менять через set_color (годится и для StandardMaterial3D).
-## Обшивка техники (PLATES) — по граням: меш размечен MeshKit.face_mapped, на гранях — детали (Detail).
+## координатам меша. Свет — как у StandardMaterial3D. Машины — вариант со stencil (body_xray.gdshader) и
+## силуэтом сквозь препятствия следующим проходом — как STENCIL_MODE_XRAY у StandardMaterial3D; челноки и
+## капсула десанта — body_faces.gdshader, без stencil. Цвет у таких материалов — параметр шейдера: менять
+## через set_color (годится и для StandardMaterial3D). Обшивка (PLATES) — по граням: меш размечен
+## MeshKit.face_mapped (map_faces), на гранях — детали (Detail, до двух на грань).
 
 enum Pattern { NONE, PLATES, TRACK, SKIRT, SCUTES, HIDE, GROOVES, SCALES, MUD, PEBBLE }
 enum Detail { NONE, DOOR, HATCH, VENT }   ## дверь, крышка люка, решётка моторного отсека
 
 const SHADER := preload("res://src/render/shaders/body.gdshader")
 const SHADER_XRAY := preload("res://src/render/shaders/body_xray.gdshader")
+const SHADER_FACES := preload("res://src/render/shaders/body_faces.gdshader")
 
 
 ## Деталь фауны (или техники без stencil).
@@ -31,6 +33,29 @@ static func stencil(color: Color, pattern: Pattern, px: float, roughness: float 
 	if xray_color.a > 0.0:
 		m.next_pass = xray_pass(xray_color)
 	return m
+
+
+## Обшивка челнока или капсулы: по граням, без stencil.
+static func faces(color: Color, px: float, roughness: float = 0.6, metallic: float = 0.0) -> ShaderMaterial:
+	var m := ShaderMaterial.new()
+	m.shader = SHADER_FACES
+	_setup(m, color, Pattern.PLATES, px, roughness, metallic)
+	return m
+
+
+## Меши под материалами с разметкой граней (body_xray, body_faces) — размечает MeshKit.face_mapped, детали
+## граней — из мета details узла (Array[Dictionary] из detail).
+static func map_faces(n: Node) -> void:
+	if n is MeshInstance3D:
+		var mi := n as MeshInstance3D
+		var mat := mi.material_override as ShaderMaterial
+		if mat != null and (mat.shader == SHADER_XRAY or mat.shader == SHADER_FACES):
+			var details: Array[Dictionary] = []
+			if mi.has_meta(&"details"):
+				details.assign(mi.get_meta(&"details"))
+			mi.mesh = MeshKit.face_mapped(mi.mesh, details)
+	for c in n.get_children():
+		map_faces(c)
 
 
 ## Деталь грани для MeshKit.face_mapped: прямоугольник от from до to (координаты меша) на грани с нормалью

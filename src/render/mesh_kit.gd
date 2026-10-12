@@ -72,9 +72,9 @@ static func tri_out(st: SurfaceTool, a: Vector3, b: Vector3, c: Vector3, inside:
 ## Меш с координатами граней — для узора, привязанного к граням (BodyMaterial.Pattern.PLATES). Грань —
 ## треугольники одной плоскости (у коробки — по два, у призмы — веер крышки). UV — точка относительно
 ## центра грани, UV2 — полуразмеры грани; оси грани: x — по горизонтали грани, y — вверх по ней, у
-## горизонтальной — x и z меша. Деталь грани (BodyMaterial.detail) — прямоугольник на грани с её
-## нормалью: в CUSTOM0 — его центр и полуразмеры в координатах грани, в COLOR — вид (r × 8) и сторона
-## ручки или петель (g — по x грани, b — по y). Нормали вершин — прежние.
+## горизонтальной — x и z меша. Детали грани (BodyMaterial.detail, до двух на грань) — прямоугольники на
+## грани с её нормалью (и серединой на грани): в CUSTOM0 и CUSTOM1 — центр и полуразмеры в координатах грани, в COLOR.r и .g —
+## код детали / 16: вид × 4 + 2, если ручка к −x грани, + 1, если петли к +y. Нормали вершин — прежние.
 static func face_mapped(mesh: Mesh, details: Array[Dictionary] = []) -> ArrayMesh:
 	var arrays := mesh.surface_get_arrays(0)
 	var verts: PackedVector3Array = arrays[Mesh.ARRAY_VERTEX]
@@ -110,7 +110,8 @@ static func face_mapped(mesh: Mesh, details: Array[Dictionary] = []) -> ArrayMes
 	var out_uv := PackedVector2Array()
 	var out_uv2 := PackedVector2Array()
 	var out_c := PackedColorArray()
-	var out_d := PackedFloat32Array()
+	var out_d0 := PackedFloat32Array()
+	var out_d1 := PackedFloat32Array()
 	for f in face_n.size():
 		var n := face_n[f]
 		var tx := Vector3.RIGHT
@@ -128,18 +129,22 @@ static func face_mapped(mesh: Mesh, details: Array[Dictionary] = []) -> ArrayMes
 				hi = hi.max(uv)
 		var mid := (lo + hi) * 0.5
 		var half := (hi - lo) * 0.5
-		var color := Color(0, 0, 0, 1)
-		var rect := Vector4.ZERO
+		var codes := PackedFloat32Array([0.0, 0.0])
+		var rects: Array[Vector4] = [Vector4.ZERO, Vector4.ZERO]
+		var found := 0
 		for d in details:
-			if (d["normal"] as Vector3).dot(n) < 0.95:
+			if found == 2 or (d["normal"] as Vector3).normalized().dot(n) < 0.95:
 				continue
 			var a := Vector2((d["from"] as Vector3).dot(tx), (d["from"] as Vector3).dot(ty))
 			var b := Vector2((d["to"] as Vector3).dot(tx), (d["to"] as Vector3).dot(ty))
 			var c := (a + b) * 0.5 - mid
-			rect = Vector4(c.x, c.y, absf(b.x - a.x) * 0.5, absf(b.y - a.y) * 0.5)
+			if absf(c.x) > half.x or absf(c.y) > half.y:
+				continue                         # деталь — на другой грани с той же нормалью
+			rects[found] = Vector4(c.x, c.y, absf(b.x - a.x) * 0.5, absf(b.y - a.y) * 0.5)
 			var toward: Vector3 = d["toward"]
-			color = Color(int(d["kind"]) / 8.0, float(toward.dot(tx) < 0.0), float(toward.dot(ty) > 0.0), 1.0)
-			break
+			codes[found] = int(d["kind"]) * 4 + 2 * int(toward.dot(tx) < 0.0) + int(toward.dot(ty) > 0.0)
+			found += 1
+		var color := Color(codes[0] / 16.0, codes[1] / 16.0, 0.0, 1.0)
 		for t in face_tris[f]:
 			for k in 3:
 				var i := index[t * 3 + k]
@@ -149,7 +154,8 @@ static func face_mapped(mesh: Mesh, details: Array[Dictionary] = []) -> ArrayMes
 				out_uv.append(Vector2(p.dot(tx), p.dot(ty)) - mid)
 				out_uv2.append(half)
 				out_c.append(color)
-				out_d.append_array([rect.x, rect.y, rect.z, rect.w])
+				out_d0.append_array([rects[0].x, rects[0].y, rects[0].z, rects[0].w])
+				out_d1.append_array([rects[1].x, rects[1].y, rects[1].z, rects[1].w])
 	var out := []
 	out.resize(Mesh.ARRAY_MAX)
 	out[Mesh.ARRAY_VERTEX] = out_v
@@ -157,8 +163,10 @@ static func face_mapped(mesh: Mesh, details: Array[Dictionary] = []) -> ArrayMes
 	out[Mesh.ARRAY_TEX_UV] = out_uv
 	out[Mesh.ARRAY_TEX_UV2] = out_uv2
 	out[Mesh.ARRAY_COLOR] = out_c
-	out[Mesh.ARRAY_CUSTOM0] = out_d
+	out[Mesh.ARRAY_CUSTOM0] = out_d0
+	out[Mesh.ARRAY_CUSTOM1] = out_d1
 	var mapped := ArrayMesh.new()
 	mapped.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, out, [], {},
-			Mesh.ARRAY_CUSTOM_RGBA_FLOAT << Mesh.ARRAY_FORMAT_CUSTOM0_SHIFT)
+			(Mesh.ARRAY_CUSTOM_RGBA_FLOAT << Mesh.ARRAY_FORMAT_CUSTOM0_SHIFT)
+			| (Mesh.ARRAY_CUSTOM_RGBA_FLOAT << Mesh.ARRAY_FORMAT_CUSTOM1_SHIFT))
 	return mapped

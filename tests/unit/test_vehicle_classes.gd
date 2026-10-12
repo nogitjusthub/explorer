@@ -59,6 +59,16 @@ func test_selection_stats_follow_balance() -> void:
 			and tank.cargo_slots > rover.cargo_slots and rover.cargo_slots > hover.cargo_slots, "cargo order")
 
 
+func test_selection_stats_are_normalized() -> void:
+	# Шкалы нормированы: по каждой характеристике у лучшего класса — полная шкала.
+	var classes: Array[VehicleClass] = [_cls(&"rover"), _cls(&"tank"), _cls(&"hover")]
+	for i in UiKit.STAT_NAMES.size():
+		var best := 0
+		for cls in classes:
+			best = maxi(best, UiKit.stats_of(cls)[i])
+		assert_eq(best, UiKit.PIPS, "%s: full scale for the best class" % UiKit.STAT_NAMES[i])
+
+
 func test_tank_climbs_without_losing_speed() -> void:
 	var f := TerrainFixture.new(4)
 	for tz in range(0, 30):

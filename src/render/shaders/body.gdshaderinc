@@ -1,5 +1,6 @@
-// Техника и фауна (M5): цвет детали × яркость пиксельного узора. Общий код body.gdshader (фауна) и
-// body_xray.gdshader (техника: пишет 1 в stencil — силуэт сквозь препятствия). Узор — по координатам
+// Техника и фауна (M5): цвет детали × яркость пиксельного узора. Общий код body.gdshader (фауна),
+// body_xray.gdshader (машины: пишет 1 в stencil — силуэт сквозь препятствия) и body_faces.gdshader
+// (челноки и капсула десанта). Узор — по координатам
 // самого меша (держится на детали), квантованным в сетку px; палитра прежняя. Свет — как у
 // StandardMaterial3D по умолчанию (roughness, metallic — те же параметры). Узоры (BodyMaterial.Pattern):
 // 1 — обшивка техники по граням (кромка, двери, люки, решётки — см. plates), 2 — траки гусеницы (грунтозацепы поперёк
@@ -16,15 +17,17 @@ uniform float metallic : hint_range(0.0, 1.0) = 0.0;
 
 varying vec3 obj_pos;
 varying vec3 obj_nrm;
-#ifdef FACE_DECALS
-varying vec4 decal;
+#ifdef FACE_DETAILS
+varying vec4 detail0;
+varying vec4 detail1;
 #endif
 
 void vertex() {
 	obj_pos = VERTEX;
 	obj_nrm = NORMAL;
-#ifdef FACE_DECALS
-	decal = CUSTOM0;
+#ifdef FACE_DETAILS
+	detail0 = CUSTOM0;
+	detail1 = CUSTOM1;
 #endif
 }
 
@@ -49,9 +52,10 @@ vec2 face_uv(vec3 p, vec3 n) {
 // Обшивка техники — по граням (меш размечен MeshKit.face_mapped): uv — точка относительно центра грани,
 // h — полуразмеры грани. Грань делится на целое число текселей ≈ px, детали встают по сетке
 // симметрично. Кромка в тексель: у стенки верх светлее, низ темнее, бока чуть темнее; у крыши — светлая
-// по кругу. Деталь грани (kind; rect — центр и полуразмеры в координатах грани; flip — сторона ручки по
-// x, петель по y): 1 — дверь (шов по контуру, тёмное окно сверху, ручка у края), 2 — крышка люка (шов,
-// крышка светлее, петли у одного края, ручка у другого), 3 — решётка моторного отсека (шов, щели).
+// по кругу. До двух деталей на грань (codes — их коды: вид × 4 + 2, если ручка к −x грани, + 1, если
+// петли к +y; rect0, rect1 — центр и полуразмеры в координатах грани): 1 — дверь (шов по контуру,
+// тёмное окно сверху, ручка у края), 2 — крышка люка (шов, крышка светлее, петли у одного края, ручка у
+// другого), 3 — решётка (шов, щели).
 float cells(float h) {
 	return max(round(2.0 * h / px), 1.0);
 }
@@ -68,41 +72,23 @@ vec2 span(float c, float w, float h, float n) {
 	return vec2(mid - len * 0.5, len);
 }
 
-float plates(vec2 uv, vec2 h, vec3 n, float kind, vec2 flip, vec4 rect) {
-	vec2 cnt = vec2(cells(h.x), cells(h.y));
-	vec2 q = clamp(floor((uv + h) / max(2.0 * h, vec2(1e-5)) * cnt), vec2(0.0), cnt - 1.0);
-	bool side = cnt.x >= 3.0 && (q.x == 0.0 || q.x == cnt.x - 1.0);
-	bool top = cnt.y >= 3.0 && q.y == cnt.y - 1.0;
-	bool bottom = cnt.y >= 3.0 && q.y == 0.0;
-	if (n.y > 0.9) {
-		if (side || top || bottom) {
-			return 1.12;
-		}
-	} else if (n.y > -0.9) {
-		if (top) {
-			return 1.15;
-		}
-		if (bottom) {
-			return 0.82;
-		}
-		if (side) {
-			return 0.92;
-		}
-	}
+// Яркость детали с кодом code в текселе q грани (cnt текселей, полуразмеры h); вне детали — −1.
+float face_detail(vec2 q, vec2 cnt, vec2 h, float code, vec4 rect) {
+	float kind = floor(code / 4.0);
 	if (kind < 0.5) {
-		return 1.0;
+		return -1.0;
 	}
 	vec2 sx = span(rect.x, rect.z, h.x, cnt.x);
 	vec2 sy = span(rect.y, rect.w, h.y, cnt.y);
 	vec2 size = vec2(sx.y, sy.y);
 	vec2 l = q - vec2(sx.x, sy.x);
 	if (l.x < 0.0 || l.y < 0.0 || l.x >= size.x || l.y >= size.y) {
-		return 1.0;
+		return -1.0;
 	}
-	if (flip.x > 0.5) {
+	if (mod(floor(code / 2.0), 2.0) > 0.5) {
 		l.x = size.x - 1.0 - l.x;                     // ручка — к −x грани
 	}
-	if (flip.y > 0.5) {
+	if (mod(code, 2.0) > 0.5) {
 		l.y = size.y - 1.0 - l.y;                     // петли — к +y грани
 	}
 	if (l.x == 0.0 || l.y == 0.0 || l.x == size.x - 1.0 || l.y == size.y - 1.0) {
@@ -128,6 +114,34 @@ float plates(vec2 uv, vec2 h, vec3 n, float kind, vec2 flip, vec4 rect) {
 		return 1.06;
 	}
 	return mod(l.y, 2.0) == 0.0 ? 0.6 : 1.0;          // щели решётки
+}
+
+float plates(vec2 uv, vec2 h, vec3 n, vec2 codes, vec4 rect0, vec4 rect1) {
+	vec2 cnt = vec2(cells(h.x), cells(h.y));
+	vec2 q = clamp(floor((uv + h) / max(2.0 * h, vec2(1e-5)) * cnt), vec2(0.0), cnt - 1.0);
+	bool side = cnt.x >= 3.0 && (q.x == 0.0 || q.x == cnt.x - 1.0);
+	bool top = cnt.y >= 3.0 && q.y == cnt.y - 1.0;
+	bool bottom = cnt.y >= 3.0 && q.y == 0.0;
+	if (n.y > 0.9) {
+		if (side || top || bottom) {
+			return 1.12;
+		}
+	} else if (n.y > -0.9) {
+		if (top) {
+			return 1.15;
+		}
+		if (bottom) {
+			return 0.82;
+		}
+		if (side) {
+			return 0.92;
+		}
+	}
+	float d = face_detail(q, cnt, h, codes.x, rect0);
+	if (d < 0.0) {
+		d = face_detail(q, cnt, h, codes.y, rect1);
+	}
+	return d < 0.0 ? 1.0 : d;
 }
 
 // Гусеница: призма профиля, выдавленная по y меша; лента — грани с нормалью поперёк y.
@@ -209,9 +223,9 @@ float pebble(vec3 p) {
 	return r < 0.25 ? 0.86 : (r < 0.5 ? 0.95 : (r < 0.8 ? 1.03 : 1.12));
 }
 
-float body_detail(vec3 p, vec3 n, vec2 uv, vec2 uv2, vec4 col, vec4 rect) {
+float body_detail(vec3 p, vec3 n, vec2 uv, vec2 uv2, vec4 col, vec4 rect0, vec4 rect1) {
 	if (pattern == 1) {
-		return plates(uv, uv2, n, round(col.r * 8.0), col.gb, rect);
+		return plates(uv, uv2, n, round(col.rg * 16.0), rect0, rect1);
 	} else if (pattern == 2) {
 		return track(p, n);
 	} else if (pattern == 3) {
@@ -233,12 +247,14 @@ float body_detail(vec3 p, vec3 n, vec2 uv, vec2 uv2, vec4 col, vec4 rect) {
 }
 
 void fragment() {
-#ifdef FACE_DECALS
-	vec4 rect = decal;
+#ifdef FACE_DETAILS
+	vec4 rect0 = detail0;
+	vec4 rect1 = detail1;
 #else
-	vec4 rect = vec4(0.0);
+	vec4 rect0 = vec4(0.0);
+	vec4 rect1 = vec4(0.0);
 #endif
-	ALBEDO = base_color.rgb * body_detail(obj_pos, obj_nrm, UV, UV2, COLOR, rect);
+	ALBEDO = base_color.rgb * body_detail(obj_pos, obj_nrm, UV, UV2, COLOR, rect0, rect1);
 	ROUGHNESS = roughness;
 	METALLIC = metallic;
 }

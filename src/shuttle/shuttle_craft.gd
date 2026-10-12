@@ -1,11 +1,17 @@
 class_name ShuttleCraft
 extends Node3D
-## Челнок на сцене (основной и аварийный) из примитивов: спуск с неба, посадка на землю, взлёт.
+## Челнок на сцене (основной и аварийный) из примитивов. Садится, как челноки Star Trek: заход
+## по-самолётному — носом вперёд по наклонной сзади, на маршевых двигателях (факелы из кормовых сопел); над
+## площадкой зависает и опускается вертикально на факелах вниз (сопел в днище не видно — только
+## пламя), выпуская посадочные стойки. Взлёт — вертикально, стойки убираются, затем разгон вперёд.
 ## Основной (десантный) — между американским шаттлом 70–80-х, челноками Star Trek и первым вариантом
 ## игры: угловатый корпус с фасками (шире внизу, выше прежнего), чёрный нос, лобовое стекло на скосе,
-## низкие треугольные крылья с тёмным низом, киль, швы створок грузового отсека на крыше, три сопла в
-## корме; стоит, как прежде, на двух гондолах тормозных двигателей под крыльями и передней стойке.
-## Аварийный — маленький оранжевый «кирпич» на гондолах (первый вариант).
+## низкие треугольные крылья с тёмным низом, киль, швы створок грузового отсека на крыше, три тёмных
+## сопла в корме; на земле стоит на двух стойках под крыльями и передней.
+## Аварийный — в том же стиле, короче и коренастее, оранжевый.
+## Обшивка (M5, BodyMaterial.faces) — по граням, как у машин: кромка в пиксель, у основного — дверь
+## экипажа и грузовой люк по бортам, рули на задних кромках крыльев; у аварийного — двери, люк и решётка
+## на крыше, рули на крыльях.
 ## Звуки — сигналом EventBus.shuttle_sound (спуск и взлёт — тот же реактивный рёв, что у капсулы
 ## десанта; касание; луч захвата при эвакуации), играет AudioDirector.
 ## До касания под местом посадки горит предупреждающий знак — круг с косыми полосами размером с корпус:
@@ -18,6 +24,10 @@ enum Anim { NONE, DESCEND, ASCEND }
 
 const DROP_HEIGHT := 24.0
 const FLY_S := 3.0
+const APPROACH_DIST := 30.0        ## заход — с этой дальности сзади по курсу…
+const APPROACH_SHARE := 0.55       ## …за эту долю спуска; дальше — вертикально с высоты зависания
+const HOVER_H := 2.5               ## высота зависания над площадкой
+const CLIMB_SHARE := 0.4           ## взлёт: доля вертикального подъёма до HOVER_H, дальше — разгон вперёд
 const MAIN_HULL_R := 1.2           ## тайлов — радиус корпуса основного: зона урона при посадке и препятствие
 const EMERGENCY_HULL_R := 0.75
 const HATCH_Y := 0.55              ## высота люка над землёй — откуда бьёт луч эвакуации
@@ -32,12 +42,20 @@ const ZONE_SPIN := 0.25            ## рад/с — пунктир зоны по
 const HAZARD_SHADER := preload("res://src/render/shaders/landing_hazard.gdshader")
 const COLOR_GLASS := Color(0.2, 0.35, 0.5)
 const COLOR_NOSE := Color(0.16, 0.16, 0.19)      ## чёрный нос и низ крыльев, как у шаттла
+const COLOR_NOZZLE := Color(0.13, 0.13, 0.16)    ## сопла маршевых двигателей
+const COLOR_GEAR := Color(0.32, 0.32, 0.36)      ## посадочные стойки
 ## Сечения корпуса основного вдоль Z (нос — −Z): [z, полуширина низа, полуширина верха, низ, высота].
 ## Сечение — трапеция с фасками. NOSE — чёрный носовой обтекатель, HULL — остальной корпус.
 const NOSE_SECTIONS := [[-1.05, 0.26, 0.2, 0.42, 0.2], [-0.85, 0.44, 0.36, 0.34, 0.38]]
 const HULL_SECTIONS := [[-0.85, 0.44, 0.36, 0.34, 0.38], [-0.55, 0.54, 0.44, 0.32, 0.54],
 		[0.75, 0.54, 0.44, 0.32, 0.54], [0.95, 0.5, 0.4, 0.34, 0.5]]
 const HULL_CHAMFER := 0.06
+## Аварийный — те же сечения, короче и коренастее.
+const EM_NOSE_SECTIONS := [[-0.66, 0.16, 0.12, 0.2, 0.12], [-0.48, 0.3, 0.24, 0.14, 0.26]]
+const EM_HULL_SECTIONS := [[-0.48, 0.3, 0.24, 0.14, 0.26], [-0.3, 0.36, 0.28, 0.13, 0.36],
+		[0.42, 0.36, 0.28, 0.13, 0.36], [0.56, 0.32, 0.25, 0.15, 0.32]]
+const EM_CHAMFER := 0.04
+const PX := 0.035                  ## тексель обшивки — как у машин
 
 
 var kind: Kind
@@ -45,7 +63,10 @@ var zone_r := 2.0
 var hull_r := MAIN_HULL_R
 
 var _model: Node3D
-var _flames: Array[Node3D] = []
+var _thrust: Array[Node3D] = []         ## факелы маршевых двигателей (полёт вперёд)
+var _lift: Array[Node3D] = []           ## факелы вниз (зависание, вертикальные спуск и подъём)
+var _legs: Array[Node3D] = []           ## шарниры посадочных стоек (у основания)
+var _gear := 1.0                        ## выпуск стоек: 0 — убраны, 1 — выпущены
 var _beam: MeshInstance3D
 var _beam_mat: StandardMaterial3D
 var _zone: Node3D
@@ -84,9 +105,10 @@ func descend(ground: Vector3, seconds: float = FLY_S) -> void:
 	position = ground
 	visible = true
 	_model.visible = true
-	_model.position.y = DROP_HEIGHT
+	_model.position = Vector3(0.0, DROP_HEIGHT, APPROACH_DIST)
 	_hazard.visible = true
-	_set_flames(true)
+	_set_gear(0.0)
+	_set_flames(true, false)
 	_anim = Anim.DESCEND
 	_t = 0.0
 	_dur = maxf(seconds, 0.1)
@@ -96,10 +118,12 @@ func descend(ground: Vector3, seconds: float = FLY_S) -> void:
 ## Сел на землю: двигатели стихают, пыль; знак гаснет, у основного — зона погрузки пунктиром.
 func touch_down() -> void:
 	_anim = Anim.NONE
-	_model.position.y = 0.0
+	_model.position = Vector3.ZERO
+	_model.rotation = Vector3.ZERO
 	_hazard.visible = false
 	_zone.visible = kind == Kind.MAIN
-	_set_flames(false)
+	_set_gear(1.0)
+	_set_flames(false, false)
 	dust(hull_r + 0.3)
 	_sound(&"land", 0.0)
 
@@ -120,7 +144,7 @@ func ascend() -> void:
 	_beam.visible = false
 	_zone.visible = false
 	_hazard.visible = false
-	_set_flames(true)
+	_set_flames(false, true)
 	dust(hull_r + 0.6)
 	_sound(&"ascend", 0.0)
 
@@ -185,15 +209,51 @@ func _process(dt: float) -> void:
 	match _anim:
 		Anim.DESCEND:
 			_t += dt
-			var k := clampf(_t / _dur, 0.0, 1.0)
-			_model.position.y = lerpf(DROP_HEIGHT, 0.0, 1.0 - pow(1.0 - k, 3.0))
+			_descend_pose(clampf(_t / _dur, 0.0, 1.0))
 		Anim.ASCEND:
 			_t += dt
 			var k := clampf(_t / _dur, 0.0, 1.0)
-			_model.position.y = lerpf(0.0, DROP_HEIGHT, k * k)
+			_ascend_pose(k)
 			if k >= 1.0:
 				_anim = Anim.NONE
 				visible = false
+
+
+## Спуск, k — доля 0…1. Заход: по наклонной сзади, тормозя к зависанию; нос чуть опущен, к концу —
+## задран (гасит скорость), факелы вниз включаются на торможении. Затем вертикально: стойки выходят,
+## касание — с нулевой скоростью.
+func _descend_pose(k: float) -> void:
+	if k < APPROACH_SHARE:
+		var a := k / APPROACH_SHARE
+		var e := 1.0 - (1.0 - a) * (1.0 - a)
+		_model.position = Vector3(0.0, lerpf(DROP_HEIGHT, HOVER_H, e), lerpf(APPROACH_DIST, 0.0, e))
+		_model.rotation.x = lerpf(-0.15, 0.12, smoothstep(0.5, 1.0, a))
+		_set_flames(true, a > 0.7)
+		_set_gear(0.0)
+		return
+	var b := (k - APPROACH_SHARE) / (1.0 - APPROACH_SHARE)
+	_model.position = Vector3(0.0, HOVER_H * (1.0 - smoothstep(0.0, 1.0, b)), 0.0)
+	_model.rotation.x = lerpf(0.12, 0.0, smoothstep(0.0, 0.4, b))
+	_set_flames(false, true)
+	_set_gear(smoothstep(0.0, 0.6, b))
+
+
+## Взлёт, k — доля 0…1: вертикально до высоты зависания (стойки убираются), затем разгон вперёд с набором
+## высоты на маршевых, нос чуть вверх.
+func _ascend_pose(k: float) -> void:
+	if k < CLIMB_SHARE:
+		var b := k / CLIMB_SHARE
+		_model.position = Vector3(0.0, HOVER_H * smoothstep(0.0, 1.0, b), 0.0)
+		_model.rotation.x = 0.0
+		_set_flames(false, true)
+		_set_gear(1.0 - smoothstep(0.3, 1.0, b))
+		return
+	var a := (k - CLIMB_SHARE) / (1.0 - CLIMB_SHARE)
+	var e := a * a
+	_model.position = Vector3(0.0, lerpf(HOVER_H, DROP_HEIGHT, e), lerpf(0.0, -APPROACH_DIST, e))
+	_model.rotation.x = lerpf(0.0, 0.2, smoothstep(0.0, 0.3, a))
+	_set_flames(true, a < 0.15)
+	_set_gear(0.0)
 
 
 ## Луч от люка к машине: усечённый конус, растянутый по длине.
@@ -210,9 +270,19 @@ func _update_beam() -> void:
 	_beam.global_transform = Transform3D(basis, (a + b) * 0.5)
 
 
-func _set_flames(on: bool) -> void:
-	for f in _flames:
-		f.visible = on
+func _set_flames(thrust: bool, lift: bool) -> void:
+	for f in _thrust:
+		f.visible = thrust
+	for f in _lift:
+		f.visible = lift
+
+
+## Стойки: убраны — сложены назад под крыло и спрятаны, выпущены — вниз с небольшим развалом.
+func _set_gear(g: float) -> void:
+	_gear = g
+	for leg in _legs:
+		leg.rotation.x = -(1.0 - g) * PI * 0.5
+		leg.visible = g > 0.02
 
 
 func _build() -> void:
@@ -222,25 +292,39 @@ func _build() -> void:
 		_build_main()
 	else:
 		_build_emergency()
+	BodyMaterial.map_faces(_model)
 	_build_common()
 
 
 ## Основной: корпус-лофт с фасками и чёрным носом, лобовое стекло, треугольные крылья, киль, швы
-## створок отсека, три сопла в корме; тормозные гондолы под крыльями и передняя стойка — опоры.
+## створок отсека, три тёмных сопла маршевых двигателей в корме; посадочные стойки под крыльями и
+## передняя (выпускаются на вертикальном спуске), факелы вниз из днища.
 func _build_main() -> void:
-	var body := _shaded(COLOR_MAIN)
+	var body := BodyMaterial.faces(COLOR_MAIN, PX)
 	var dark := _shaded(COLOR_MAIN.darkened(0.35))
 	var nose_mat := _shaded(COLOR_NOSE)
 	var glass := _shaded(COLOR_GLASS)
 	var engine := _unshaded(COLOR_ENGINE)
+	var hull: MeshInstance3D
 	for part in [[NOSE_SECTIONS, nose_mat], [HULL_SECTIONS, body]]:
 		var mi := MeshInstance3D.new()
 		mi.mesh = _loft(part[0], HULL_CHAMFER)
 		mi.material_override = part[1]
 		_model.add_child(mi)
+		hull = mi
+	# По бортам (грань от низа 0,38 при полуширине 0,54 к верху 0,8 при 0,44): дверь экипажа за кабиной и
+	# грузовой люк с петлями сверху.
+	var side_x := func(y: float) -> float: return 0.54 - (y - 0.38) * 0.1 / 0.42
+	var details: Array[Dictionary] = []
+	for sx: float in [-1.0, 1.0]:
+		details.append(BodyMaterial.detail(BodyMaterial.Detail.DOOR, Vector3(sx, 0.24, 0),
+				Vector3(sx * side_x.call(0.44), 0.44, -0.45), Vector3(sx * side_x.call(0.74), 0.74, -0.22), Vector3.BACK))
+		details.append(BodyMaterial.detail(BodyMaterial.Detail.HATCH, Vector3(sx, 0.24, 0),
+				Vector3(sx * side_x.call(0.48), 0.48, 0.12), Vector3(sx * side_x.call(0.72), 0.72, 0.6), Vector3.UP))
+	hull.set_meta(&"details", details)
 	# Лобовое стекло — по скосу от носа (z −0.85, верх 0.72) к крыше (z −0.55, верх 0.86).
 	var shield := _mesh(_model, _box(Vector3(0.6, 0.02, 0.3)), Vector3(0, 0.8, -0.7), glass)
-	shield.rotation.x = atan2(0.86 - 0.72, 0.85 - 0.55)
+	shield.rotation.x = -atan2(0.86 - 0.72, 0.85 - 0.55)      # скат поднимается к корме
 	# Швы створок грузового отсека на крыше.
 	for sx: float in [-1.0, 1.0]:
 		_mesh(_model, _box(Vector3(0.02, 0.012, 1.15)), Vector3(sx * 0.15, 0.865, 0.15), dark)
@@ -248,51 +332,28 @@ func _build_main() -> void:
 	for sx: float in [-1.0, 1.0]:
 		var wing := PackedVector2Array([Vector2(0.48 * sx, -0.4), Vector2(1.2 * sx, 0.5), Vector2(1.2 * sx, 0.85),
 				Vector2(0.48 * sx, 0.9)])
-		MeshKit.prism(_model, wing, 0.37, 0.05, body)
+		var top := MeshKit.prism(_model, wing, 0.37, 0.05, body)
+		top.set_meta(&"details", [BodyMaterial.detail(BodyMaterial.Detail.HATCH, Vector3.UP,   # руль у задней кромки
+				Vector3(0.62 * sx, 0.42, 0.68), Vector3(1.08 * sx, 0.42, 0.84), Vector3.FORWARD)])
 		MeshKit.prism(_model, wing, 0.33, 0.04, nose_mat)
 	# Киль: контур (вверх, z) выдавлен по X — узел повёрнут на 90° вокруг Z.
 	var fin := MeshKit.prism(_model, PackedVector2Array([Vector2(0.0, 0.3), Vector2(0.0, 0.95),
 			Vector2(0.56, 1.0), Vector2(0.5, 0.62)]), -0.035, 0.07, _shaded(COLOR_MAIN.darkened(0.15)))
 	fin.position = Vector3(0, 0.84, 0)
 	fin.rotation.z = PI * 0.5
-	# Три сопла в корме, свечение — в полёте.
+	# Три сопла маршевых двигателей в корме; посадочные стойки под крыльями и передняя; факелы вниз из днища.
+	var nozzle := _shaded(COLOR_NOZZLE)
 	for at: Vector3 in [Vector3(0, 0.7, 0.98), Vector3(-0.18, 0.52, 0.98), Vector3(0.18, 0.52, 0.98)]:
-		var bell := CylinderMesh.new()
-		bell.top_radius = 0.06
-		bell.bottom_radius = 0.1
-		bell.height = 0.12
-		bell.radial_segments = 8
-		bell.rings = 0
-		_mesh(_model, bell, at, dark).rotation.x = PI * 0.5
-		var glow := CylinderMesh.new()
-		glow.top_radius = 0.07
-		glow.bottom_radius = 0.07
-		glow.height = 0.01
-		glow.radial_segments = 8
-		glow.rings = 0
-		var g := _mesh(_model, glow, at + Vector3(0, 0, 0.065), engine)
-		g.rotation.x = PI * 0.5
-		_flames.append(g)
-	# Тормозные гондолы под крыльями (на них и стоит) и пламя под ними.
+		_nozzle(at, 0.06, 0.1, 0.12, nozzle, engine)
+	# Основные стойки — у законцовок крыльев ближе к задней кромке, с развалом: камера сверху видит их лапы
+	# из-за крыльев.
+	var gear := _shaded(COLOR_GEAR)
 	for sx: float in [-1.0, 1.0]:
-		var pod := CylinderMesh.new()
-		pod.top_radius = 0.15
-		pod.bottom_radius = 0.18
-		pod.height = 0.32
-		pod.radial_segments = 8
-		pod.rings = 0
-		_mesh(_model, pod, Vector3(sx * 0.78, 0.17, 0.45), dark)
-		var flame := CylinderMesh.new()
-		flame.top_radius = 0.13
-		flame.bottom_radius = 0.04
-		flame.height = 0.28
-		flame.radial_segments = 6
-		flame.rings = 0
-		_flames.append(_mesh(_model, flame, Vector3(sx * 0.78, -0.13, 0.45), engine))
-	# Передняя стойка.
-	_mesh(_model, _box(Vector3(0.06, 0.36, 0.06)), Vector3(0, 0.18, -0.68), dark)
-	_mesh(_model, _box(Vector3(0.2, 0.03, 0.14)), Vector3(0, 0.015, -0.7), dark)
-
+		_leg(Vector3(sx * 0.98, 0.33, 0.72), 0.33 / cos(0.3), sx * 0.3, 0.035, 0.12, gear)
+		for z: float in [-0.3, 0.5]:
+			_lift_flame(Vector3(sx * 0.24, 0.32, z), 0.12, 1.1, engine)
+	_leg(Vector3(0, 0.33, -0.68), 0.318, 0.0, 0.035, 0.09, gear)
+	_lift_glow(3.5)
 
 ## Лофт по сечениям вдоль Z: каждое — [z, полуширина низа, полуширина верха, низ, высота], трапеция с
 ## фасками chamfer; торцы закрыты. Грани плоские.
@@ -329,36 +390,140 @@ static func _loft(sections: Array, chamfer: float) -> ArrayMesh:
 	return st.commit()
 
 
-## Аварийный: маленький «кирпич» на гондолах двигателей и передней опоре.
+## Аварийный — в стиле основного, короче и коренастее: оранжевый корпус-лофт с фасками и чёрным носом,
+## лобовое стекло на скосе, короткие треугольные крылья с тёмным низом и рулями, маленький киль, два сопла
+## в корме; посадочные стойки под крыльями и передняя, факелы вниз. На обшивке — двери перед крыльями,
+## на крыше люк (петли спереди) и решётка за ним.
 func _build_emergency() -> void:
-	var body_color := COLOR_EMERGENCY
-	var s := 0.55
-	var body := _shaded(body_color)
-	var dark := _shaded(body_color.darkened(0.3))
-	# Стоит на гондолах двигателей и передней опоре.
-	_mesh(_model, _box(Vector3(1.3, 0.45, 2.1) * s), Vector3(0, 0.45 * s, 0), body)
-	_mesh(_model, _box(Vector3(2.4, 0.12, 0.8) * s), Vector3(0, 0.4 * s, 0.35 * s), body)
-	var glass := _shaded(Color(0.35, 0.8, 1.0))
-	_mesh(_model, _box(Vector3(0.7, 0.25, 0.5) * s), Vector3(0, 0.75 * s, -0.7 * s), glass)
-	_mesh(_model, _box(Vector3(0.08, 0.25, 0.08) * s), Vector3(0, 0.12 * s, -0.75 * s), dark)
-	_mesh(_model, _box(Vector3(0.3, 0.04, 0.2) * s), Vector3(0, 0.02 * s, -0.78 * s), dark)
+	var body := BodyMaterial.faces(COLOR_EMERGENCY, PX)
+	var nose_mat := _shaded(COLOR_NOSE)
 	var engine := _unshaded(COLOR_ENGINE)
-	for x: float in [-0.95, 0.95]:
-		var pod := CylinderMesh.new()
-		pod.top_radius = 0.2 * s
-		pod.bottom_radius = 0.24 * s
-		pod.height = 0.5 * s
-		pod.radial_segments = 8
-		pod.rings = 0
-		_mesh(_model, pod, Vector3(x * s, 0.25 * s, 0.4 * s), dark)
-		var flame := CylinderMesh.new()
-		flame.top_radius = 0.16 * s
-		flame.bottom_radius = 0.05 * s
-		flame.height = 0.25 * s
-		flame.radial_segments = 6
-		flame.rings = 0
-		_flames.append(_mesh(_model, flame, Vector3(x * s, -0.1 * s, 0.4 * s), engine))
+	var hull: MeshInstance3D
+	for part in [[EM_NOSE_SECTIONS, nose_mat], [EM_HULL_SECTIONS, body]]:
+		var mi := MeshInstance3D.new()
+		mi.mesh = _loft(part[0], EM_CHAMFER)
+		mi.material_override = part[1]
+		_model.add_child(mi)
+		hull = mi
+	# Борт — грань от низа 0,17 при полуширине 0,36 к верху 0,45 при 0,28.
+	var side_x := func(y: float) -> float: return 0.36 - (y - 0.17) * 0.08 / 0.28
+	var details: Array[Dictionary] = []
+	for sx: float in [-1.0, 1.0]:
+		details.append(BodyMaterial.detail(BodyMaterial.Detail.DOOR, Vector3(sx, 0.27, 0),
+				Vector3(sx * side_x.call(0.2), 0.2, -0.29), Vector3(sx * side_x.call(0.43), 0.43, -0.12), Vector3.BACK))
+	details.append(BodyMaterial.detail(BodyMaterial.Detail.HATCH, Vector3.UP,
+			Vector3(-0.13, 0.49, -0.2), Vector3(0.13, 0.49, 0.14), Vector3.FORWARD))
+	details.append(BodyMaterial.detail(BodyMaterial.Detail.VENT, Vector3.UP,
+			Vector3(-0.12, 0.49, 0.22), Vector3(0.12, 0.49, 0.36)))
+	hull.set_meta(&"details", details)
+	# Лобовое стекло — по скосу от носа (z −0.48, верх 0.4) к крыше (z −0.3, верх 0.49).
+	var shield := _mesh(_model, _box(Vector3(0.4, 0.02, 0.19)), Vector3(0, 0.455, -0.39), _shaded(COLOR_GLASS))
+	shield.rotation.x = -atan2(0.49 - 0.4, 0.48 - 0.3)
+	# Короткие треугольные крылья: сверху — цвет корпуса с рулём у задней кромки, снизу — чёрные.
+	for sx: float in [-1.0, 1.0]:
+		var wing := PackedVector2Array([Vector2(0.3 * sx, -0.15), Vector2(0.62 * sx, 0.3), Vector2(0.62 * sx, 0.46),
+				Vector2(0.3 * sx, 0.5)])
+		var top := MeshKit.prism(_model, wing, 0.28, 0.04, body)
+		top.set_meta(&"details", [BodyMaterial.detail(BodyMaterial.Detail.HATCH, Vector3.UP,
+				Vector3(0.38 * sx, 0.32, 0.36), Vector3(0.58 * sx, 0.32, 0.47), Vector3.FORWARD)])
+		MeshKit.prism(_model, wing, 0.25, 0.03, nose_mat)
+	# Маленький киль: контур (вверх, z) выдавлен по X.
+	var fin := MeshKit.prism(_model, PackedVector2Array([Vector2(0.0, 0.18), Vector2(0.0, 0.52),
+			Vector2(0.26, 0.56), Vector2(0.22, 0.36)]), -0.025, 0.05, _shaded(COLOR_EMERGENCY.darkened(0.15)))
+	fin.position = Vector3(0, 0.48, 0)
+	fin.rotation.z = PI * 0.5
+	# Два сопла маршевых двигателей в корме; посадочные стойки под крыльями и передняя; факелы вниз из днища.
+	var nozzle := _shaded(COLOR_NOZZLE)
+	for x: float in [-0.12, 0.12]:
+		_nozzle(Vector3(x, 0.31, 0.58), 0.045, 0.075, 0.09, nozzle, engine)
+	var gear := _shaded(COLOR_GEAR)
+	for sx: float in [-1.0, 1.0]:
+		_leg(Vector3(sx * 0.54, 0.25, 0.42), 0.25 / cos(0.3), sx * 0.3, 0.025, 0.08, gear)
+		for z: float in [-0.18, 0.3]:
+			_lift_flame(Vector3(sx * 0.15, 0.13, z), 0.08, 0.75, engine)
+	_leg(Vector3(0, 0.135, -0.42), 0.126, 0.0, 0.025, 0.06, gear)
+	_lift_glow(2.5)
 
+
+## Сопло маршевого двигателя в корме (at — середина раструба, ось по Z): тёмный раструб, расширяется к
+## срезу; в полёте — свечение среза и факел назад.
+func _nozzle(at: Vector3, r_throat: float, r_exit: float, depth: float, mat: Material, engine: Material) -> void:
+	var bell := CylinderMesh.new()
+	bell.top_radius = r_exit
+	bell.bottom_radius = r_throat
+	bell.height = depth
+	bell.radial_segments = 8
+	bell.rings = 0
+	_mesh(_model, bell, at, mat).rotation.x = PI * 0.5      # верх цилиндра — назад (+Z)
+	var glow := CylinderMesh.new()
+	glow.top_radius = r_exit * 0.85
+	glow.bottom_radius = r_exit * 0.85
+	glow.height = 0.01
+	glow.radial_segments = 8
+	glow.rings = 0
+	var g := _mesh(_model, glow, at + Vector3(0, 0, depth * 0.5 + 0.005), engine)
+	g.rotation.x = PI * 0.5
+	_thrust.append(g)
+	var cone := CylinderMesh.new()
+	cone.top_radius = 0.0
+	cone.bottom_radius = r_exit * 0.8
+	cone.height = r_exit * 4.0
+	cone.radial_segments = 6
+	cone.rings = 0
+	var f := _mesh(_model, cone, at + Vector3(0, 0, depth * 0.5 + r_exit * 2.0), engine)
+	f.rotation.x = PI * 0.5
+	f.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	_thrust.append(f)
+
+
+## Посадочная стойка: шарнир у основания pivot (низ крыла или корпуса), стойка length вниз с развалом
+## splay (рад, наружу — по знаку x), внизу — лапа-тарелка, горизонтальная. Длина — до земли.
+func _leg(pivot: Vector3, length: float, splay: float, radius: float, foot_r: float, mat: Material) -> void:
+	var hinge := Node3D.new()
+	hinge.position = pivot
+	hinge.rotation.z = splay
+	_model.add_child(hinge)
+	var strut := CylinderMesh.new()
+	strut.top_radius = radius
+	strut.bottom_radius = radius
+	strut.height = length
+	strut.radial_segments = 6
+	strut.rings = 0
+	_mesh(hinge, strut, Vector3(0, -length * 0.5, 0), mat)
+	var foot := CylinderMesh.new()
+	foot.top_radius = foot_r * 0.75
+	foot.bottom_radius = foot_r
+	foot.height = foot_r * 0.25
+	foot.radial_segments = 8
+	foot.rings = 0
+	_mesh(hinge, foot, Vector3(0, -length, 0), mat).rotation.z = -splay
+	_legs.append(hinge)
+
+
+## Подсветка земли под челноком от факелов вниз (сами факелы сверху почти не видны): точечный свет под
+## днищем, горит вместе с ними.
+func _lift_glow(radius: float) -> void:
+	var light := OmniLight3D.new()
+	light.light_color = COLOR_ENGINE
+	light.light_energy = 1.6
+	light.omni_range = radius
+	light.shadow_enabled = false
+	light.position = Vector3(0, -0.2, 0.1)
+	_model.add_child(light)
+	_lift.append(light)
+
+
+## Факел вниз из днища (сопел в модели нет — сверху их не видно): конус от радиуса radius у днища.
+func _lift_flame(at: Vector3, radius: float, length: float, engine: Material) -> void:
+	var cone := CylinderMesh.new()
+	cone.top_radius = radius
+	cone.bottom_radius = radius * 0.2
+	cone.height = length
+	cone.radial_segments = 6
+	cone.rings = 0
+	var f := _mesh(_model, cone, at + Vector3(0, -length * 0.5, 0), engine)
+	f.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	_lift.append(f)
 
 ## Общее: луч эвакуации, зона погрузки, знак посадки.
 func _build_common() -> void:

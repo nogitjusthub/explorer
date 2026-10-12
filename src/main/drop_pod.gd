@@ -4,6 +4,8 @@ extends Node3D
 ## посадки. Капсула падает с разгоном, у самой земли включает тормозные двигатели — струи пламени вниз,
 ## подсветка, пыль с земли, рёв — и мягко садится: глухой удар, кольцо пыли, лёгкая тряска (звук удара —
 ## AudioDirector по EventBus.drop_landed). Затем капсула раскрывается тремя лепестками, машина свободна.
+## Обшивка (M5, BodyMaterial.faces) — по граням: кромка в пиксель, на каждом лепестке лючок с петлями
+## сверху и решётка тормозных двигателей внизу.
 
 signal landed                            ## касание земли
 signal opened                            ## лепестки разлетелись — машина видна
@@ -20,6 +22,7 @@ const FLAME_CORE := Color(1.0, 0.95, 0.8)
 const MARK_COLOR := Color(0.45, 1.0, 0.95, 0.8)
 const SHADOW_COLOR := Color(0.05, 0.03, 0.06, 0.5)
 const NOZZLES := 3
+const PX := 0.035 / POD_SCALE            ## тексель обшивки — как у машин (капсула уменьшена)
 
 var _t := 0.0
 var _ground := Vector3.ZERO
@@ -144,10 +147,7 @@ func _touchdown() -> void:
 
 
 func _build() -> void:
-	var shell := StandardMaterial3D.new()
-	shell.albedo_color = SHELL_COLOR
-	shell.roughness = 0.5
-	shell.metallic = 0.4
+	var shell := BodyMaterial.faces(SHELL_COLOR, PX, 0.5, 0.4)
 	var base_mat := StandardMaterial3D.new()
 	base_mat.albedo_color = BASE_COLOR
 	base_mat.roughness = 0.7
@@ -168,6 +168,12 @@ func _build() -> void:
 		petal.mesh = box
 		petal.material_override = shell
 		petal.position = Vector3(-0.06, 0.55, 0)
+		petal.set_meta(&"details", [
+			BodyMaterial.detail(BodyMaterial.Detail.HATCH, Vector3.RIGHT, Vector3(0.06, 0.1, -0.16),
+					Vector3(0.06, 0.38, 0.16), Vector3.UP),
+			BodyMaterial.detail(BodyMaterial.Detail.VENT, Vector3.RIGHT, Vector3(0.06, -0.42, -0.2),
+					Vector3(0.06, -0.26, 0.2)),
+		])
 		hinge.add_child(petal)
 		var cap := MeshInstance3D.new()
 		var cone := CylinderMesh.new()
@@ -182,6 +188,7 @@ func _build() -> void:
 		cap.scale = Vector3(0.7, 1.0, 1.0)
 		hinge.add_child(cap)
 		_petals.append(hinge)
+	BodyMaterial.map_faces(_pod)
 	# Днище с соплами тормозных двигателей; под каждым — струя пламени (видна только при торможении).
 	var base := MeshInstance3D.new()
 	var plate := CylinderMesh.new()
