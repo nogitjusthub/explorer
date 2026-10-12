@@ -28,6 +28,7 @@ const DRIFT_PERIOD_S := 16.0
 const DRIFT_SAMPLES := 16
 const FOAM_TURN := 0.18                  ## доля _spin — поворот кольца пены, рад
 const COLOR_FOAM := Color(0.86, 0.97, 0.94)
+const COLOR_FOAM_DOTS := Color(0.55, 0.75, 0.76)   ## брызги по краю — тусклее пены в шейдере
 const COLOR_DEEP := Color(0.06, 0.3, 0.36)
 const SWIRL_SHADER := preload("res://src/render/shaders/whirlpool.gdshader")
 
@@ -208,7 +209,7 @@ func _build() -> void:
 	disc.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	add_child(disc)
 	_foam = CPUParticles3D.new()
-	_foam.amount = 28
+	_foam.amount = 18
 	_foam.lifetime = 1.2
 	_foam.emitting = false
 	_foam.emission_shape = CPUParticles3D.EMISSION_SHAPE_RING
@@ -229,7 +230,7 @@ func _build() -> void:
 	var m := StandardMaterial3D.new()
 	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	m.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
-	m.albedo_color = COLOR_FOAM
+	m.albedo_color = COLOR_FOAM_DOTS
 	q.material = m
 	_foam.mesh = q
 	_foam.position = Vector3(0, 0.03, 0)

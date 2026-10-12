@@ -239,7 +239,7 @@ func _build() -> void:
 	dust.mesh = quad
 	add_child(dust)
 	_audio = AudioStreamPlayer.new()
-	_audio.stream = Sfx.wind_loop(2.0)
+	_audio.stream = Sfx.howl_loop(6.0)
 	_audio.volume_db = -40.0
 	add_child(_audio)
 	_audio.play()

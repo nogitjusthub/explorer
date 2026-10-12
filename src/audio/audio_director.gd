@@ -17,6 +17,7 @@ var _players: Array[AudioStreamPlayer] = []
 var _next := 0
 var _quake_heard := false              ## гул телеграфа текущего землетрясения уже запущен
 var _sounds: Dictionary[StringName, AudioStreamWAV] = {}
+var _dust_wind: AudioStreamPlayer      ## гул пылевой бури — петля ветра, громкость по плотности у машины
 var _makers: Dictionary[StringName, Callable] = {}
 
 
@@ -30,12 +31,17 @@ func _ready() -> void:
 		&"hit": func() -> AudioStreamWAV: return Sfx.hit(0.3),
 		&"rumble_build": func() -> AudioStreamWAV: return Sfx.rumble(2.5, true),
 		&"rumble_hit": func() -> AudioStreamWAV: return Sfx.rumble(2.4, false),
-		&"wind": func() -> AudioStreamWAV: return Sfx.wind_loop(2.0),    # гул смерча — в кэш Sfx заранее
+		&"wind": func() -> AudioStreamWAV: return Sfx.wind_loop(2.0),    # гул водоворота — в кэш Sfx заранее
+		&"howl": func() -> AudioStreamWAV: return Sfx.howl_loop(6.0),    # вой смерча — тоже
+		&"dust": func() -> AudioStreamWAV: return Sfx.dust_loop(3.0),    # ровный гул пылевой бури
 		&"screech": func() -> AudioStreamWAV: return Sfx.screech(0.75),
 		&"buzz": func() -> AudioStreamWAV: return Sfx.buzz(1.2),
 		&"bellow": func() -> AudioStreamWAV: return Sfx.bellow(1.1),
+		&"bellow_low": func() -> AudioStreamWAV: return Sfx.bellow(1.1, true),
 		&"stomp": func() -> AudioStreamWAV: return Sfx.stomp(1.3),
 		&"thrust": func() -> AudioStreamWAV: return Sfx.thrust(THRUST_S),
+		&"chime": func() -> AudioStreamWAV: return Sfx.chime(0.6),
+		&"pager": func() -> AudioStreamWAV: return Sfx.pager_beep(),
 		&"tractor": func() -> AudioStreamWAV: return Sfx.tractor(1.4),
 	}
 	for _i in VOICES:
@@ -49,6 +55,11 @@ func _ready() -> void:
 	EventBus.fauna_alerted.connect(_on_fauna_alerted)
 	EventBus.drop_landed.connect(_on_drop_landed)
 	EventBus.shuttle_sound.connect(_on_shuttle_sound)
+	EventBus.pickup_collected.connect(_on_pickup)
+	EventBus.weather_changed.connect(_on_weather)
+	_dust_wind = AudioStreamPlayer.new()
+	add_child(_dust_wind)
+	EventBus.pager_alert.connect(func(_kind: StringName) -> void: _play(_sfx(&"pager"), -17.0))
 	EventBus.vehicle_damaged.connect(func(_amount: int, _source: StringName, _at: Vector3) -> void: _play(_sfx(&"hit"), -4.0))
 	EventBus.controls_inverted.connect(func(_seconds: float) -> void: _play(_sfx(&"buzz"), -8.0))
 
@@ -100,11 +111,11 @@ func _on_fauna_alerted(kind: StringName, at: Vector3) -> void:
 		&"nessie_strike":
 			_play_at(_sfx(&"rumble_hit"), at, 0.0, 1.2, FAUNA_HEAR_TILES)      # шея падает — удар и всплеск
 		&"shellback":
-			_play_at(_sfx(&"bellow"), at, -6.0, 1.15, FAUNA_HEAR_TILES)    # панцирник услышал машину — короткое мычание
+			_play_at(_sfx(&"bellow"), at, -13.0, 0.95, FAUNA_HEAR_TILES)   # панцирник услышал машину — короткое мычание
 		&"shellback_dig":
-			_play_at(_sfx(&"bellow"), at, 0.0, 0.9, FAUNA_HEAR_TILES)      # роет перед рывком — низкий рёв
+			_play_at(_sfx(&"bellow_low"), at, -8.0, 0.75, FAUNA_HEAR_TILES)   # роет перед рывком — рёв на октаву ниже
 		&"shellback_charge":
-			_play_at(_sfx(&"stomp"), at, 0.0, 1.0, FAUNA_HEAR_TILES)       # рывок — топот и рокот
+			_play_at(_sfx(&"stomp"), at, -8.0, 0.9, FAUNA_HEAR_TILES)      # рывок — ровный затухающий топот
 		&"ray_shock":
 			_play_at(_sfx(&"crackle"), at, -4.0, 2.2, FAUNA_HEAR_TILES)        # разряд троеглазки — короткий треск
 
@@ -127,7 +138,26 @@ func _on_shuttle_sound(event: StringName, at: Vector3, small: bool, seconds: flo
 			_play_at(_sfx(&"tractor"), at, volume - 9.0, 1.0, SHUTTLE_HEAR_TILES)
 
 
+## Подбор: кристалл — «дзынь», остальной груз — то же ниже, топливо и ремкомплект — ещё ниже.
+func _on_pickup(kind: StringName, _value: int) -> void:
+	var pitch: float = {&"crystal": 1.0, &"sample": 0.89, &"core": 0.79}.get(kind, 0.67)
+	_play(_sfx(&"chime"), -10.0, pitch)
+
+
+## Пылевая буря гудит, пока идёт: фронт вдали — едва слышно, машина в массе — в полную силу (ровный
+## гул без нарастаний). Кончилась — гул стихает (threat_ended).
+func _on_weather(kind: StringName, intensity: float) -> void:
+	if kind != &"dust":
+		return
+	if not _dust_wind.playing:
+		_dust_wind.stream = _sfx(&"dust")
+		_dust_wind.play()
+	_dust_wind.volume_db = linear_to_db(lerpf(0.12, 1.0, clampf(intensity, 0.0, 1.0))) - 6.0
+
+
 func _on_threat_ended(kind: StringName) -> void:
+	if kind == &"dust":
+		_dust_wind.stop()
 	if kind == &"quake":
 		_quake_heard = false
 		_play(_sfx(&"rumble_hit"), 2.0)

@@ -3,7 +3,7 @@ extends Control
 ## Пейджер (GDD §8): под радаром, той же ширины, — до трёх сообщений об активных угрозах: только
 ## название, без направления и без отсчёта (направление на угрозы — апгрейд «продвинутый радар», §12).
 ## Кислотный туман подписан просто «ТУМАН» — его выдаёт только цвет. Кроме угроз — «МАЛО ТОПЛИВА»
-## (меньше 20% бака, GameFlow). Новое сообщение мигает;
+## (меньше 20% бака, GameFlow). Новое сообщение мигает и пищит «би-бип» (EventBus.pager_alert);
 ## держится, пока угроза шлёт телеграф.
 
 const LINES := 3
@@ -36,6 +36,7 @@ func _on_telegraphed(kind: StringName, _at: Vector3, _seconds: float, _dir_hint:
 			e["stale"] = 0.0
 			return
 	_entries.push_front({"kind": kind, "stale": 0.0, "age": 0.0})
+	EventBus.pager_alert.emit(kind)
 	if _entries.size() > LINES:
 		_entries.pop_back()
 

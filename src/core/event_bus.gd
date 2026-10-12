@@ -16,6 +16,7 @@ signal vehicle_fell(h: int, dmg: int)
 signal controls_inverted(seconds: float)   ## разряд по машине: столько секунд управление наоборот
 signal vehicle_died(cause: StringName)
 signal pickup_collected(kind: StringName, value: int)
+signal pager_alert(kind: StringName)        ## на пейджере новое сообщение — «би-бип"
 signal cargo_shipped(value: int, emergency: bool)
 
 # Угрозы и погода

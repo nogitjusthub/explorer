@@ -2,8 +2,8 @@ class_name Sfx
 extends RefCounted
 ## Процедурные звуки без ассетов (как и двигатель): AudioStreamWAV 16 бит, моно. Генерируются один
 ## раз при старте. Звуков угроз по GDD немного: молния (треск телеграфа и гром), гул землетрясения,
-## смерч, урон; у фауны — крик скакунов, мычание и топот панцирника; реактивный рёв капсулы и челноков,
-## луч захвата.
+## смерч (вой с завываниями), гул пылевой бури, урон; у фауны — крик скакунов, мычание и топот панцирника; реактивный рёв капсулы и челноков,
+## луч захвата; «дзынь» подбора находки и «би-бип» пейджера.
 
 const RATE := 22050
 
@@ -112,6 +112,82 @@ static func wind_loop(seconds: float) -> AudioStreamWAV:
 	return wav
 
 
+## Гул пылевой бури — бесшовная петля: ровный, без нарастаний — низкий гул ветра и шорох песка
+## (полоса ~300–1500 Гц) на постоянной громкости. Кэш.
+static func dust_loop(seconds: float) -> AudioStreamWAV:
+	if _cache.has(&"dust"):
+		return _cache[&"dust"]
+	var n := int(seconds * RATE)
+	var m := RATE / 4                      # перекрытие для бесшовной петли
+	var raw := PackedFloat32Array()
+	raw.resize(n + m)
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 707
+	var lp1 := 0.0
+	var lp2 := 0.0
+	var hi := 0.0
+	var lo := 0.0
+	for i in n + m:
+		var noise := rng.randf_range(-1.0, 1.0)
+		lp1 = lerpf(lp1, noise, 0.03)
+		lp2 = lerpf(lp2, lp1, 0.05)
+		hi = lerpf(hi, noise, 0.35)
+		lo = lerpf(lo, noise, 0.08)
+		raw[i] = lp2 * 9.0 + (hi - lo) * 0.35
+	var wav := _loop(raw, n, m)
+	_cache[&"dust"] = wav
+	return wav
+
+
+## Вой смерча — бесшовная петля: гул ветра, над ним завывания — шум через узкий резонансный фильтр,
+## частота которого то взлетает, то опадает (300–750 Гц, «у-у-у»), и вой громче на подъёмах.
+## Все колебания укладываются в петлю целым числом периодов. Кэш.
+static func howl_loop(seconds: float) -> AudioStreamWAV:
+	if _cache.has(&"howl"):
+		return _cache[&"howl"]
+	var n := int(seconds * RATE)
+	var m := RATE / 4
+	var raw := PackedFloat32Array()
+	raw.resize(n + m)
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 606
+	var lp1 := 0.0
+	var lp2 := 0.0
+	var low := 0.0
+	var band := 0.0
+	for i in n + m:
+		var t := float(i) / RATE
+		var noise := rng.randf_range(-1.0, 1.0)
+		lp1 = lerpf(lp1, noise, 0.04)
+		lp2 = lerpf(lp2, lp1, 0.06)
+		var sweep := 0.5 + 0.35 * sin(TAU * t / (seconds * 0.5)) + 0.15 * sin(TAU * t / (seconds / 3.0) + 1.0)
+		var fc := lerpf(300.0, 750.0, clampf(sweep, 0.0, 1.0))
+		var f := 2.0 * sin(PI * fc / RATE)
+		low += f * band
+		var high := noise - low - 0.06 * band
+		band += f * high
+		var howl := band * 0.35 * (0.3 + 0.7 * clampf(sweep, 0.0, 1.0))
+		raw[i] = lp2 * 5.0 + howl
+	var wav := _loop(raw, n, m)
+	_cache[&"howl"] = wav
+	return wav
+
+
+## Петля из n сэмплов: хвост длиной m (сверх n) плавно вводится в начало — шов не слышен.
+static func _loop(raw: PackedFloat32Array, n: int, m: int) -> AudioStreamWAV:
+	var data := PackedFloat32Array()
+	data.resize(n)
+	for i in n:
+		data[i] = raw[i]
+	for i in m:
+		data[i] = lerpf(raw[n + i], raw[i], float(i) / m)
+	var wav := _wav(data)
+	wav.loop_mode = AudioStreamWAV.LOOP_FORWARD
+	wav.loop_begin = 0
+	wav.loop_end = n
+	return wav
+
+
 ## Электрошок по машине: гудение сети с треском разрядов, к концу стихает.
 static func buzz(seconds: float) -> AudioStreamWAV:
 	var n := int(seconds * RATE)
@@ -203,8 +279,9 @@ static func screech(seconds: float) -> AudioStreamWAV:
 
 ## Мычание панцирника — низкое, модулированное: пила 95 → 125 → 80 Гц (подъём и долгий спад, «мууу»),
 ## через два фильтра-форманты, которые раскрываются к середине («му» → «ооо»); дрожание 7 Гц по тону и
-## громкости, хрип на половине тона. Перегружено (tanh) — грубо, по-звериному.
-static func bellow(seconds: float) -> AudioStreamWAV:
+## громкости, хрип на половине тона. Перегружено (tanh) — грубо, по-звериному. low — октавой ниже той же
+## длины (рёв перед рывком), форманты — те же.
+static func bellow(seconds: float, low: bool = false) -> AudioStreamWAV:
 	var n := int(seconds * RATE)
 	var data := PackedFloat32Array()
 	data.resize(n)
@@ -217,6 +294,8 @@ static func bellow(seconds: float) -> AudioStreamWAV:
 		var t := float(i) / RATE
 		var k := t / seconds
 		var f := lerpf(95.0, 125.0, smoothstep(0.0, 0.3, k)) if k < 0.3 else lerpf(125.0, 80.0, (k - 0.3) / 0.7)
+		if low:
+			f *= 0.5
 		var wobble := sin(TAU * 7.0 * t)
 		f *= 1.0 + 0.045 * wobble
 		ph += TAU * f / RATE
@@ -231,8 +310,8 @@ static func bellow(seconds: float) -> AudioStreamWAV:
 	return _wav(data)
 
 
-## Топот панцирника в рывке: шесть ног — глухие удары тройками, как галоп (та-та-там), по низкому
-## рокоту бега; к концу рывка стихает.
+## Топот панцирника в рывке: ровные глухие удары лап (~7 в секунду) по тихому рокоту бега; к концу
+## рывка стихают.
 static func stomp(seconds: float) -> AudioStreamWAV:
 	var n := int(seconds * RATE)
 	var data := PackedFloat32Array()
@@ -241,28 +320,62 @@ static func stomp(seconds: float) -> AudioStreamWAV:
 	rng.seed = 1111
 	var lp1 := 0.0
 	var lp2 := 0.0
-	var hit_t := -1.0
-	var hit_f := 60.0
-	var next_hit := 0.0
-	var beat := 0
+	var beat := 0.14
 	for i in n:
 		var t := float(i) / RATE
 		var k := t / seconds
-		if t >= next_hit:
-			hit_t = t
-			hit_f = rng.randf_range(48.0, 72.0)
-			next_hit = t + (0.2 if beat % 3 == 2 else 0.085) * rng.randf_range(0.85, 1.15)
-			beat += 1
-		var ht := t - hit_t
+		var ht := fmod(t, beat)
 		var noise := rng.randf_range(-1.0, 1.0)
-		# Удар лапы: тон с провалом высоты и щелчок грунта.
-		var thump := sin(TAU * hit_f * ht * (1.0 - minf(ht * 4.0, 0.45))) * exp(-ht * 20.0) \
-				+ noise * exp(-ht * 90.0) * 0.5
+		var thump := sin(TAU * 58.0 * ht * (1.0 - minf(ht * 3.0, 0.3))) * exp(-ht * 24.0) \
+				+ noise * exp(-ht * 120.0) * 0.25
 		lp1 = lerpf(lp1, noise, 0.04)
 		lp2 = lerpf(lp2, lp1, 0.06)
-		var roll := lp2 * 10.0 * (0.7 + 0.3 * sin(TAU * 5.0 * t))
-		var env := minf(t / 0.05, 1.0) * (1.0 - smoothstep(0.7, 1.0, k))
-		data[i] = tanh((thump + roll * 0.6) * env * 1.5)
+		var env := minf(t / 0.04, 1.0) * exp(-k * 1.8)
+		data[i] = tanh((thump + lp2 * 3.0) * env * 1.2)
+	return _wav(data)
+
+
+## «Дзынь» подбора находки: два чистых тона в квинту (1760 и 2637 Гц, второй вступает через 40 мс) и
+## короткий негармоничный призвук 5,4 кГц — металлический блеск; быстрая атака, затухание.
+static func chime(seconds: float) -> AudioStreamWAV:
+	var n := int(seconds * RATE)
+	var data := PackedFloat32Array()
+	data.resize(n)
+	for i in n:
+		var t := float(i) / RATE
+		var t2 := maxf(t - 0.04, 0.0)
+		var a := sin(TAU * 1760.0 * t) * exp(-t * 7.0)
+		var b := sin(TAU * 2637.0 * t2) * exp(-t2 * 6.0) * (1.0 if t >= 0.04 else 0.0)
+		var c := sin(TAU * 5400.0 * t) * exp(-t * 25.0) * 0.3
+		data[i] = (a * 0.6 + b * 0.5 + c) * minf(t / 0.003, 1.0)
+	return _wav(data)
+
+
+## «Би-бип» пейджера: два коротких писка (1,25 и 1,56 кГц) почти прямоугольной формы, слегка хриплые —
+## дребезг 70 Гц по громкости, немного шума и мягкое ограничение.
+static func pager_beep() -> AudioStreamWAV:
+	var n := int(0.26 * RATE)
+	var data := PackedFloat32Array()
+	data.resize(n)
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 1616
+	var ph := 0.0
+	var lp := 0.0
+	for i in n:
+		var t := float(i) / RATE
+		var on := 0.0
+		var f := 1250.0
+		if t < 0.075:
+			on = 1.0
+		elif t >= 0.125 and t < 0.21:
+			on = 1.0
+			f = 1560.0
+		ph += TAU * f / RATE
+		var square := sin(ph) + sin(ph * 3.0) / 3.0 + sin(ph * 5.0) / 5.0
+		var rasp := 0.75 + 0.25 * sin(TAU * 70.0 * t) + rng.randf_range(-0.15, 0.15)
+		var x := tanh(square * rasp * 1.6) * on
+		lp = lerpf(lp, x, 0.5)                   # смягчает щелчки краёв
+		data[i] = lp
 	return _wav(data)
 
 

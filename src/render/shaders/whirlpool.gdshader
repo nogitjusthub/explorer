@@ -2,7 +2,7 @@
 // (среднее между прежней крутой спиралью и кольцами); рукав, если идти по нему к центру, уходит в
 // сторону вращения — как сток. Сами рукава стоят, по ним к центру бегут рваные клочья пены — в ту же
 // сторону, куда крутится пена по краю и тянет машину (к убыванию угла atan(z, x)). Чёрная воронка в
-// центре, мягкая кромка пены по краю. grow 0…1 — телеграф (бледные рукава) и появление; spin растёт.
+// центре, едва заметная кромка пены по краю. grow 0…1 — телеграф (бледные рукава) и появление; spin растёт.
 shader_type spatial;
 render_mode unshaded, cull_disabled, depth_draw_never, shadows_disabled;
 uniform vec4 foam : source_color;
@@ -26,7 +26,7 @@ void fragment() {
 	arm *= smoothstep(0.16, 0.32, r) * (1.0 - smoothstep(0.86, 0.96, r));
 	float rim = smoothstep(0.84, 0.9, r) * (1.0 - smoothstep(0.93, 0.99, r));
 	float hole = 1.0 - smoothstep(0.16, 0.3, r / max(grow, 0.01));
-	float f = max(arm * (0.35 + 0.65 * grow), rim * 0.8);
+	float f = max(arm * (0.35 + 0.65 * grow), rim * 0.3);       // кромка — приглушённая
 	// Вода темнеет к центру — воронка уходит вглубь.
 	vec3 water = deep.rgb * mix(0.4, 1.0, smoothstep(0.1, 0.9, r));
 	ALBEDO = mix(water, foam.rgb, f * 0.85);

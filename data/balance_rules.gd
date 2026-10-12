@@ -92,7 +92,7 @@ extends Resource
 @export var dust_min_level: int = 2
 @export var dust_visibility: float = 3.0
 @export var dust_wind_accel: float = 1.6         ## делится на массу класса
-@export var dust_tornado_chance: float = 0.6     ## с tornado_min_level: смерч при входе в бурю
+@export var dust_tornado_chance: float = 0.3     ## с tornado_min_level: смерч при входе в бурю (было 0,6 — слишком часто)
 
 @export_group("Tornado")
 @export var tornado_min_level: int = 3
@@ -137,7 +137,7 @@ extends Resource
 @export var emergency_noise_s: float = 10.0
 @export var fauna_give_up_s: float = 6.0        ## не подобраться к машине столько — фауна сдаётся (червь уходит)
 ## Скорости погони — между Vmax танка (4) и ровера (6,5): ровер и ховер уходят от фауны, танк — нет.
-@export var hopper_speed: float = 5.2
+@export var hopper_speed: float = 4.7
 @export var hopper_wander_speed: float = 1.0       ## патрулирует медленно
 @export var hopper_patrol_r: float = 5.0          ## обходит кольцо такого радиуса вокруг места появления
 @export var hopper_sight_r: float = 6.0           ## машину ближе видит и тихую (шум не нужен)
@@ -203,8 +203,8 @@ extends Resource
 @export var whirlpool_life_min_s: float = 20.0
 @export var whirlpool_life_max_s: float = 30.0
 @export var whirlpool_form_s: float = 2.0        ## телеграф: круги и пена, тяги ещё нет
-@export var whirlpool_pull_r: float = 3.5        ## тянет к центру только по воде:
-@export var whirlpool_pull_accel: float = 4.0    ## a(r) = pull / масса × (1 − r / pull_r)
+@export var whirlpool_pull_r: float = 4.0        ## тянет к центру только по воде:
+@export var whirlpool_pull_accel: float = 5.5    ## a(r) = pull / масса × (1 − r / pull_r)
 @export var whirlpool_core_r: float = 0.8        ## в ядре топит: машина уходит в воду…
 @export var whirlpool_core_dps: float = 10.0     ## …и теряет столько HP в секунду, пока не вырвется
 
