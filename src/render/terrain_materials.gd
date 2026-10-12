@@ -5,6 +5,7 @@ extends RefCounted
 const TREE_TYPES := 2
 const TOPS_ATLAS := "res://assets/textures/terrain_tops.png"   ## генерирует tools/textures/gen_terrain_tops.gd
 const WALLS_ATLAS := "res://assets/textures/cliff_walls.png"   ## генерирует tools/textures/gen_cliff_walls.gd
+const WATER_CYCLE := "res://assets/textures/water_cycle.png"   ## генерирует tools/textures/gen_water_cycle.gd
 
 var terrain: ShaderMaterial
 var water: ShaderMaterial
@@ -21,6 +22,7 @@ func _init() -> void:
 	terrain.set_shader_parameter("walls", load(WALLS_ATLAS))   # …и стенок обрывов
 	water = ShaderMaterial.new()
 	water.shader = load("res://src/render/shaders/water.gdshader")
+	water.set_shader_parameter("cycle", load(WATER_CYCLE))     # рябь перебором палитры (M5)
 
 	var tree_shader: Shader = load("res://src/render/shaders/tree.gdshader")
 	var trunk := CylinderMesh.new()
