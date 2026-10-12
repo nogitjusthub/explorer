@@ -2,7 +2,8 @@ class_name Sfx
 extends RefCounted
 ## Процедурные звуки без ассетов (как и двигатель): AudioStreamWAV 16 бит, моно. Генерируются один
 ## раз при старте. Звуков угроз по GDD немного: молния (треск телеграфа и гром), гул землетрясения,
-## смерч, урон; у фауны — крик скакунов, мычание и топот панцирника.
+## смерч, урон; у фауны — крик скакунов, мычание и топот панцирника; реактивный рёв капсулы и челноков,
+## луч захвата.
 
 const RATE := 22050
 
@@ -132,8 +133,10 @@ static func buzz(seconds: float) -> AudioStreamWAV:
 	return _wav(data)
 
 
-## Рёв тормозных двигателей капсулы десанта: широкий шумовой рёв с треском, быстро нарастает и к концу
-## обрывается.
+## Реактивный рёв (тормозные двигатели капсулы десанта, спуск и взлёт челноков): ровный низкий рокот —
+## шум через три фильтра (основная энергия ниже ~200 Гц), суббас 45–52 Гц, медленно и неровно
+## «дышащая» громкость; немного полосы 200–600 Гц, чтобы рёв был слышен и на маленьких динамиках.
+## Без треска и быстрой модуляции.
 static func thrust(seconds: float) -> AudioStreamWAV:
 	var n := int(seconds * RATE)
 	var data := PackedFloat32Array()
@@ -142,15 +145,21 @@ static func thrust(seconds: float) -> AudioStreamWAV:
 	rng.seed = 808
 	var lp1 := 0.0
 	var lp2 := 0.0
+	var lp3 := 0.0
+	var sway := 0.0
+	var sub := 0.0
 	for i in n:
 		var t := float(i) / RATE
 		var k := t / seconds
 		var noise := rng.randf_range(-1.0, 1.0)
-		lp1 = lerpf(lp1, noise, 0.2)
-		lp2 = lerpf(lp2, lp1, 0.25)
-		var crackle := (noise - lp1) * (0.3 + 0.3 * sin(t * 61.0))
-		var env := minf(t / 0.06, 1.0) * (1.0 - smoothstep(0.85, 1.0, k))
-		data[i] = (lp2 * 3.0 + crackle) * env
+		lp1 = lerpf(lp1, noise, 0.06)
+		lp2 = lerpf(lp2, lp1, 0.06)
+		lp3 = lerpf(lp3, lp2, 0.08)
+		sway = lerpf(sway, noise, 0.0004)
+		sub += TAU * (48.0 + 4.0 * sin(t * 1.3)) / RATE
+		var roar := lp3 * 9.0 + (lp1 - lp3) * 0.6 + sin(sub) * 0.3
+		var env := minf(t / 0.12, 1.0) * (1.0 - smoothstep(0.85, 1.0, k))
+		data[i] = tanh(roar * (0.85 + sway * 6.0) * env * 1.4)
 	return _wav(data)
 
 
@@ -254,6 +263,37 @@ static func stomp(seconds: float) -> AudioStreamWAV:
 		var roll := lp2 * 10.0 * (0.7 + 0.3 * sin(TAU * 5.0 * t))
 		var env := minf(t / 0.05, 1.0) * (1.0 - smoothstep(0.7, 1.0, k))
 		data[i] = tanh((thump + roll * 0.6) * env * 1.5)
+	return _wav(data)
+
+
+## Луч захвата (эвакуация): низкий гул с пульсацией, над ним тон, плавно взлетающий вверх (300 → 1200 Гц,
+## с вибрато), и россыпь коротких высоких искорок; в конце стихает.
+static func tractor(seconds: float) -> AudioStreamWAV:
+	var n := int(seconds * RATE)
+	var data := PackedFloat32Array()
+	data.resize(n)
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 1515
+	var hum := 0.0
+	var tone := 0.0
+	var ping := 0.0
+	var ping_f := 3000.0
+	var ping_t := 1.0
+	for i in n:
+		var t := float(i) / RATE
+		var k := t / seconds
+		hum += TAU * 90.0 / RATE
+		var drone := (sin(hum) + 0.5 * sin(hum * 2.0)) * (0.6 + 0.4 * sin(TAU * 9.0 * t))
+		tone += TAU * 300.0 * pow(4.0, k) * (1.0 + 0.03 * sin(TAU * 7.0 * t)) / RATE
+		var rise := sin(tone) + 0.3 * sin(tone * 1.5)
+		if rng.randf() < 0.0015:
+			ping_t = 0.0
+			ping_f = rng.randf_range(2200.0, 4800.0)
+		ping_t += 1.0 / RATE
+		ping += TAU * ping_f / RATE
+		var sparkle := sin(ping) * exp(-ping_t * 30.0)
+		var env := minf(t / 0.15, 1.0) * (1.0 - smoothstep(0.8, 1.0, k))
+		data[i] = tanh((drone * 0.35 + rise * 0.35 + sparkle * 0.25) * env * 1.4)
 	return _wav(data)
 
 

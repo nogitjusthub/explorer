@@ -79,8 +79,8 @@ static func _rover(m: Model) -> void:
 	# Квадратный корпус на шести колёсах почти вплотную, купол-кабина.
 	for x in [-0.25, 0.25]:
 		for z in [-0.28, 0.0, 0.28]:
-			_cyl(m.root, 0.13, 0.12, Vector3(x, 0.13, z), tire, Vector3(0, 0, PI * 0.5), 10)
-			_cyl(m.root, 0.05, 0.126, Vector3(x, 0.13, z), hub, Vector3(0, 0, PI * 0.5), 8)
+			_cyl(m.root, 0.13, 0.12, Vector3(x, 0.13, z), tire, Vector3(0, 0, PI * 0.5), 8)
+			_cyl(m.root, 0.05, 0.126, Vector3(x, 0.13, z), hub, Vector3(0, 0, PI * 0.5), 6)
 	_box(b, Vector3(0.34, 0.08, 0.62), Vector3(0, 0.17, 0.0), under)
 	_box(b, Vector3(0.44, 0.2, 0.64), Vector3(0, 0.29, 0.0), paint)
 	_dome(m, Vector3(0, 0.39, -0.08))
@@ -146,8 +146,8 @@ static func _hover(m: Model) -> void:
 	var cushion := CapsuleMesh.new()
 	cushion.radius = 0.34
 	cushion.height = 0.94
-	cushion.radial_segments = 16
-	cushion.rings = 4
+	cushion.radial_segments = 12
+	cushion.rings = 2
 	var sk := _mesh(r, cushion, Vector3(0, 0.15, 0), skirt)
 	sk.rotation = Vector3(PI * 0.5, 0, 0)
 	sk.scale = Vector3(1, 1, 0.45)
@@ -162,7 +162,7 @@ static func _hover(m: Model) -> void:
 		ring.inner_radius = 0.08
 		ring.outer_radius = 0.13
 		ring.rings = 12
-		ring.ring_segments = 6
+		ring.ring_segments = 4
 		var duct := _mesh(r, ring, Vector3(x, 0.47, 0.3), fan)
 		duct.rotation = Vector3(PI * 0.5, 0, 0)
 		duct.scale = Vector3(1, 2.4, 1)      # кожух вытянут вдоль оси вентилятора
@@ -188,8 +188,8 @@ static func _dome(m: Model, pos: Vector3) -> void:
 	dome.radius = DOME_R
 	dome.height = DOME_R
 	dome.is_hemisphere = true
-	dome.radial_segments = 12
-	dome.rings = 4
+	dome.radial_segments = 10
+	dome.rings = 3
 	_mesh(m.body, dome, pos, glass)
 
 

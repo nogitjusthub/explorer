@@ -848,7 +848,7 @@ func _torus(inner: float, outer: float, mat: Material) -> MeshInstance3D:
 	var t := TorusMesh.new()
 	t.inner_radius = inner
 	t.outer_radius = outer
-	t.rings = 20
+	t.rings = 14
 	t.ring_segments = 4
 	var mi := MeshInstance3D.new()
 	mi.mesh = t

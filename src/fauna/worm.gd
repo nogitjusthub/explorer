@@ -11,7 +11,7 @@ extends Creature
 ## пастью: три вытянутые челюсти с зазубренными краями (low-poly из треугольников), внутри кольцо зубов
 ## и глотка; челюсти захлопываются над машиной (урон worm_damage) и выплёвывают её на worm_toss тайла —
 ## в полёте машина наклонена в сторону броска; червь вздымается и уходит обратно, оставив яму.
-## Сомкнутые челюсти — заострённая морда. Тело — «позвонки»: крупные 10-гранные и узкие 8-гранные
+## Сомкнутые челюсти — заострённая морда. Тело — «позвонки»: крупные 8-гранные и узкие 7-гранные
 ## диски вперемешку, каждый повёрнут вокруг оси на свой угол. Спасение — уйти с песка (через LOSE_S червь теряет след) или уехать: он медленнее
 ## ровера и ховера, и если fauna_give_up_s не может подобраться ближе — уходит в глубину и пропадает.
 
@@ -343,11 +343,11 @@ func _build_body() -> void:
 	var ring := Creature.material(RING_COLOR)
 	for i in DISCS:
 		var big := i % 2 == 0
-		var disc := MeshKit.prism(_body, MeshKit.ngon(10 if big else 8, R * (1.0 if big else 0.84)),
+		var disc := MeshKit.prism(_body, MeshKit.ngon(8 if big else 7, R * (1.0 if big else 0.84)),
 				0.0, 0.36 if big else 0.22, mat if big else ring)
 		disc.position.y = i * DISC_STEP + (0.0 if big else 0.07)
 		disc.rotation.y = i * 0.41
-	var throat := MeshKit.prism(_body, MeshKit.ngon(10, R * 0.9), 0.0, 0.04, Creature.material(THROAT_COLOR))
+	var throat := MeshKit.prism(_body, MeshKit.ngon(8, R * 0.9), 0.0, 0.04, Creature.material(THROAT_COLOR))
 	throat.position.y = BODY_LEN
 	var tooth := Creature.material(TOOTH_COLOR)
 	for i in 16:     # кольцо зубов по краю глотки, остриём внутрь и вверх

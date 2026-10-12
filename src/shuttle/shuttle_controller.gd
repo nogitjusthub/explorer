@@ -279,7 +279,7 @@ func _on_evacuate() -> void:
 	_close_menu()
 	vehicle.control_enabled = false
 	vehicle.lift(_pad_ground() + Vector3(0, ShuttleCraft.HATCH_Y, 0), LIFT_S)
-	_main_craft.tractor(vehicle)
+	_main_craft.tractor(vehicle, LIFT_S)
 	get_tree().create_timer(LIFT_S + 0.2).timeout.connect(_evac_takeoff)
 	evacuate_requested.emit()
 

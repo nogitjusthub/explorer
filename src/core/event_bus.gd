@@ -39,6 +39,9 @@ signal chunk_unloaded(coord: Vector2i)
 signal shuttle_state_changed(state: StringName, seconds_left: float, pad: Vector3)
 signal shuttle_menu_requested(open: bool)
 signal emergency_state_changed(state: StringName, seconds_left: float, penalty: int)
+## Звук челнока: event — descend (спуск, касание через seconds), land (касание), ascend (взлёт),
+## tractor (луч захвата при эвакуации, seconds — сколько тянет); small — аварийный (звук выше).
+signal shuttle_sound(event: StringName, at: Vector3, small: bool, seconds: float)
 
 # Камера
 signal camera_rotated(quarter_turns: int)

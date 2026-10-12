@@ -265,6 +265,7 @@ func _whirlpool() -> Node3D:
 
 func _shuttle(kind: ShuttleCraft.Kind) -> Node3D:
 	var s := ShuttleCraft.new(kind, rules.shuttle_zone_r)
+	s.quiet = true                       # образец — без звуков спуска и посадки
 	add_child(s)
 	s.descend(at)
 	s.touch_down()

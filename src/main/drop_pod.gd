@@ -248,7 +248,7 @@ func _build() -> void:
 	disc.top_radius = 0.8
 	disc.bottom_radius = 0.8
 	disc.height = 0.02
-	disc.radial_segments = 16
+	disc.radial_segments = 12
 	disc.rings = 0
 	_shadow = MeshInstance3D.new()
 	_shadow.mesh = disc
@@ -268,7 +268,7 @@ func _build() -> void:
 	var ring := TorusMesh.new()
 	ring.inner_radius = 1.25
 	ring.outer_radius = 1.38
-	ring.rings = 24
+	ring.rings = 16
 	ring.ring_segments = 4
 	var ring_mi := MeshInstance3D.new()
 	ring_mi.mesh = ring

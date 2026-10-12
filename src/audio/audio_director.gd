@@ -8,6 +8,8 @@ const VOICES := 6
 const HEAR_TILES := 30.0               ## дальше — не слышно (гром, гул землетрясения)
 const FAUNA_HEAR_TILES := 14.0         ## звуки фауны — чуть дальше края экрана (~8 тайлов от машины)
 const THUNDER_SPEED := 30.0            ## тайлов в секунду — гром приходит позже вспышки
+const SHUTTLE_HEAR_TILES := 45.0       ## челнок слышно издалека — прилёт к площадке за краем экрана
+const THRUST_S := 3.0                  ## реактивный рёв спуска и взлёта челноков (тот же, что у капсулы)
 
 var vehicle: Vehicle
 
@@ -33,6 +35,8 @@ func _ready() -> void:
 		&"buzz": func() -> AudioStreamWAV: return Sfx.buzz(1.2),
 		&"bellow": func() -> AudioStreamWAV: return Sfx.bellow(1.1),
 		&"stomp": func() -> AudioStreamWAV: return Sfx.stomp(1.3),
+		&"thrust": func() -> AudioStreamWAV: return Sfx.thrust(THRUST_S),
+		&"tractor": func() -> AudioStreamWAV: return Sfx.tractor(1.4),
 	}
 	for _i in VOICES:
 		var p := AudioStreamPlayer.new()
@@ -44,6 +48,7 @@ func _ready() -> void:
 	EventBus.threat_ended.connect(_on_threat_ended)
 	EventBus.fauna_alerted.connect(_on_fauna_alerted)
 	EventBus.drop_landed.connect(_on_drop_landed)
+	EventBus.shuttle_sound.connect(_on_shuttle_sound)
 	EventBus.vehicle_damaged.connect(func(_amount: int, _source: StringName, _at: Vector3) -> void: _play(_sfx(&"hit"), -4.0))
 	EventBus.controls_inverted.connect(func(_seconds: float) -> void: _play(_sfx(&"buzz"), -8.0))
 
@@ -104,6 +109,24 @@ func _on_fauna_alerted(kind: StringName, at: Vector3) -> void:
 			_play_at(_sfx(&"crackle"), at, -4.0, 2.2, FAUNA_HEAR_TILES)        # разряд троеглазки — короткий треск
 
 
+## Челноки: спуск и взлёт — реактивный рёв, как у капсулы десанта (у аварийного выше); спуск начинается
+## так, чтобы рёв кончился в момент касания. Касание — глухой удар и гул, как у капсулы. Эвакуация —
+## луч захвата.
+func _on_shuttle_sound(event: StringName, at: Vector3, small: bool, seconds: float) -> void:
+	var pitch := 1.15 if small else 1.0
+	var volume := -3.0 if small else 0.0
+	match event:
+		&"descend":
+			_play_at(_sfx(&"thrust"), at, volume, pitch, SHUTTLE_HEAR_TILES, maxf(THRUST_S - seconds * pitch, 0.0))
+		&"land":
+			_play_at(_sfx(&"hit"), at, volume + 4.0, 0.55 * pitch, SHUTTLE_HEAR_TILES)
+			_play_at(_sfx(&"rumble_hit"), at, volume - 6.0, 1.1 * pitch, SHUTTLE_HEAR_TILES)
+		&"ascend":
+			_play_at(_sfx(&"thrust"), at, volume, pitch, SHUTTLE_HEAR_TILES)
+		&"tractor":
+			_play_at(_sfx(&"tractor"), at, volume - 9.0, 1.0, SHUTTLE_HEAR_TILES)
+
+
 func _on_threat_ended(kind: StringName) -> void:
 	if kind == &"quake":
 		_quake_heard = false
@@ -126,20 +149,21 @@ func _delayed(stream: AudioStream, at: Vector3, volume_db: float, pitch: float) 
 
 
 ## Звук в точке: дальше hear — не слышно, громкость падает по квадрату (за краем экрана — уже тихо).
-func _play_at(stream: AudioStream, at: Vector3, volume_db: float, pitch: float = 1.0, hear: float = HEAR_TILES) -> void:
+func _play_at(stream: AudioStream, at: Vector3, volume_db: float, pitch: float = 1.0, hear: float = HEAR_TILES,
+		from: float = 0.0) -> void:
 	if vehicle == null:
 		return
 	var d := Vector2(at.x, at.z).distance_to(vehicle.state.pos)
 	if d > hear:
 		return
 	var k := 1.0 - d / hear
-	_play(stream, volume_db + linear_to_db(clampf(k * k, 0.03, 1.0)), pitch)
+	_play(stream, volume_db + linear_to_db(clampf(k * k, 0.03, 1.0)), pitch, from)
 
 
-func _play(stream: AudioStream, volume_db: float, pitch: float = 1.0) -> void:
+func _play(stream: AudioStream, volume_db: float, pitch: float = 1.0, from: float = 0.0) -> void:
 	var p := _players[_next]
 	_next = (_next + 1) % VOICES
 	p.stream = stream
 	p.volume_db = volume_db
 	p.pitch_scale = pitch
-	p.play()
+	p.play(from)

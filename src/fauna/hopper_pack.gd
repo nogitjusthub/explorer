@@ -547,7 +547,7 @@ static func _commit(st: SurfaceTool, mat: Material, into: ArrayMesh = null) -> A
 
 ## Труба по точкам path: сечения — эллипсы radii (полуширина, полувысота) из sides плоских граней, ребро —
 ## сверху. Нулевой радиус — острие, ненулевой на конце — плоская крышка.
-static func _tube(st: SurfaceTool, color: Color, path: Array, radii: Array, sides: int = 6) -> void:
+static func _tube(st: SurfaceTool, color: Color, path: Array, radii: Array, sides: int = 5) -> void:
 	st.set_color(color)
 	var n := path.size()
 	var rings: Array[PackedVector3Array] = []
