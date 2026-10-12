@@ -3,6 +3,9 @@
 // Верх тайла — пиксельная текстура (M5): атлас tops, 16×16 текселей на тайл, строка — UV.x (материал,
 // неровный, зыбучий), столбец — вариант по хэшу тайла; значение текстуры × TOPS_GAIN умножает цвет
 // материала — палитра и погода прежние. Фильтр nearest, без мипмапов.
+// Стенка — пласт: цвет по абсолютному ярусу (как раньше) × пиксельная текстура пласта (атлас walls,
+// 16×10 текселей на тайл × ярус: кромка сверху, тень у основания, прослойки, трещины, камешки);
+// по горизонтали — вдоль стенки, вариант — по хэшу места и яруса.
 shader_type spatial;
 render_mode cull_back, diffuse_lambert, specular_disabled;
 
@@ -15,6 +18,8 @@ uniform float grid_strength = 0.12;   // насколько темнее кра�
 uniform float grid_width = 0.05;      // ширина линии в долях тайла (~1 пиксель)
 uniform float tier_h = 0.65;          // высота яруса — ставит TerrainMaterials из Grid.TIER_H
 uniform sampler2D tops : hint_default_white, filter_nearest, repeat_disable;
+uniform sampler2D walls : hint_default_white, filter_nearest, repeat_disable;
+const float WALL_VARIANTS = 4.0;
 const vec2 TOPS_CELLS = vec2(4.0, 6.0);   // вариантов × строк в атласе
 const float TOPS_GAIN = 1.5;
 
@@ -58,11 +63,17 @@ void fragment() {
 			albedo = mire_ripples(albedo, world_pos.xz);
 		}
 	} else {
-		// Стенка: полоса цвета по абсолютному ярусу — высота читается по числу полос.
-		float tier = floor(world_pos.y / tier_h + 0.001);
+		// Стенка: полоса цвета по абсолютному ярусу — высота читается по числу полос; поверх — текстура
+		// пласта. Вдоль стенки — мировая координата по оси, лежащей в её плоскости.
+		float level = world_pos.y / tier_h + 0.001;
+		float tier = floor(level);
 		float k = mod(tier, 3.0);
 		vec3 s = k < 0.5 ? strata_a.rgb : (k < 1.5 ? strata_b.rgb : strata_c.rgb);
-		albedo = s * (0.92 + 0.08 * fract(tier * 0.37));
+		vec3 wn = (INV_VIEW_MATRIX * vec4(n, 0.0)).xyz;
+		float along = abs(wn.x) > abs(wn.z) ? world_pos.z : world_pos.x;
+		float variant = min(floor(vhash(vec2(floor(along), tier) + 0.71) * WALL_VARIANTS), WALL_VARIANTS - 1.0);
+		vec2 wuv = vec2((variant + clamp(fract(along), 0.001, 0.999)) / WALL_VARIANTS, clamp(1.0 - fract(level), 0.001, 0.999));
+		albedo = s * (0.92 + 0.08 * fract(tier * 0.37)) * texture(walls, wuv).r * TOPS_GAIN;
 	}
 	float hidden = vis_hidden(world_pos);
 	ALBEDO = weather_grade(albedo) * (1.0 - hidden) * (1.0 - storm_shade(world_pos));

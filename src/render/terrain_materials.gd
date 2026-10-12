@@ -4,6 +4,7 @@ extends RefCounted
 
 const TREE_TYPES := 2
 const TOPS_ATLAS := "res://assets/textures/terrain_tops.png"   ## генерирует tools/textures/gen_terrain_tops.gd
+const WALLS_ATLAS := "res://assets/textures/cliff_walls.png"   ## генерирует tools/textures/gen_cliff_walls.gd
 
 var terrain: ShaderMaterial
 var water: ShaderMaterial
@@ -17,6 +18,7 @@ func _init() -> void:
 	terrain.shader = load("res://src/render/shaders/terrain.gdshader")
 	terrain.set_shader_parameter("tier_h", Grid.TIER_H)
 	terrain.set_shader_parameter("tops", load(TOPS_ATLAS))     # пиксельные текстуры верха тайлов (M5)
+	terrain.set_shader_parameter("walls", load(WALLS_ATLAS))   # …и стенок обрывов
 	water = ShaderMaterial.new()
 	water.shader = load("res://src/render/shaders/water.gdshader")
 
