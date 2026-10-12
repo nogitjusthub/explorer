@@ -142,10 +142,12 @@ static func step(s: VehicleState, inp: Vector2, cls: VehicleClass, q: TerrainQue
 		s.uphill_tiles = s.uphill_tiles + 1 if slope > UPHILL_SLOPE else 0
 	_collide_trees(s, cls, q, r)
 	_collide_obstacles(s)
+	var was_y := s.y
 	s.y = ground_y(s, cls, q)
 	if _too_deep(s, cls, q):
+		# Тонет с той высоты, где был: съехал с мели под водой — с её дна, а не с поверхности.
 		var w := q.water_tier(floori(s.pos.x), floori(s.pos.y))
-		_start_drowning(s, w * Grid.TIER_H - 0.1)
+		_start_drowning(s, minf(was_y, w * Grid.TIER_H - 0.1))
 	return r
 
 
@@ -348,7 +350,8 @@ static func _fall_step(s: VehicleState, cls: VehicleClass, q: TerrainQuery, dt: 
 		p.y = clampf(p.y, s.fall_tile.y + 0.05, s.fall_tile.y + 0.95)
 	s.pos = p
 	var ground := ground_y(s, cls, q)
-	# Падение в глубокую воду: удар смягчает вода, но машина тонет.
+	# Падение в глубокую воду: удар смягчает вода, но машина тонет — с той высоты, где она сейчас
+	# (с уступа под водой — от него, а не с поверхности).
 	if cls.max_water_depth >= 0:
 		var w := q.water_tier(s.fall_tile.x, s.fall_tile.y)
 		if w != TerrainQuery.NO_WATER and s.y <= w * Grid.TIER_H \
@@ -357,7 +360,7 @@ static func _fall_step(s: VehicleState, cls: VehicleClass, q: TerrainQuery, dt: 
 			s.launched = false
 			s.tile = s.fall_tile
 			r.landed = true
-			_start_drowning(s, w * Grid.TIER_H - 0.1)
+			_start_drowning(s, minf(s.y, w * Grid.TIER_H - 0.1))
 			return
 	if s.y > ground:
 		return

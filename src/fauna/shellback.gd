@@ -1,12 +1,14 @@
 class_name Shellback
 extends Creature
-## Панцирник (GDD §5.4): размером с машину — купол-панцирь с полосами, рог, шесть ног. Ходит как танк —
-## склоны, вброд до 2 ярусов (shellback_speed — быстрее танка, медленнее ровера). Услышав машину,
-## подбирается по полю путей вида SHELLBACK; когда до неё прямой путь короче рывка — роет землю
-## shellback_dig_s (телеграф) и бросается по прямой на shellback_charge_dist со скоростью
+## Панцирник (GDD §5.4): размером с машину — купол-панцирь с полосами, рог, шесть ног. Ходит, как
+## скакуны, только склонами: ни на стенку, ни с обрыва, в воду не заходит (shellback_speed — быстрее
+## танка, медленнее ровера). Территориальный: бродит у своего места; услышав машину рядом с ним
+## (ближе shellback_territory_r), подбирается по полю путей; когда до неё прямой путь короче рывка —
+## роет землю shellback_dig_s (телеграф) и бросается по прямой на shellback_charge_dist со скоростью
 ## shellback_charge_speed (медленнее ровера). Сдвинуть машину может только таран: урон, отброс и
-## раскачка корпуса; в стенку — оглушён. Не подобраться fauna_give_up_s — сдаётся и CALM_S не слышит
-## машину. Спасение — уйти с линии атаки или уехать.
+## раскачка корпуса; в стенку — оглушён. Отстаёт (shellback_calm_s не слышит машину и уходит к себе),
+## если: протаранил её — прогнал; она ушла с его территории; не подобраться fauna_give_up_s; погоня
+## дольше shellback_chase_s. Спасение — уйти с линии атаки или уехать от его места.
 
 enum State { IDLE, APPROACH, DIG, CHARGE, STUN }
 
@@ -16,8 +18,8 @@ const LEG_COLOR := Color(0.16, 0.18, 0.17)
 const SIZE := 0.68                       ## модель ужата по плоскости — размером с машину
 const CONTACT := 0.75
 const STUN_S := 1.5
-const CALM_S := 10.0                     ## сдался — столько не слышит машину
 const WANDER_SPEED := 0.8
+const WANDER_R := 3.0                    ## бродит в стольких тайлах от своего места
 
 var state := State.IDLE
 
@@ -27,6 +29,9 @@ var _charge_dir := Vector2.ZERO
 var _charge_left := 0.0
 var _hit := false
 var _goal := Vector2.ZERO
+var _home := Vector2.ZERO                ## его место — точка появления
+var _chase := 0.0                        ## сколько секунд гонится
+var _rammed := false                     ## в этой погоне протаранил машину
 var _model: Node3D
 var _dust: CPUParticles3D
 
@@ -38,6 +43,7 @@ func _init() -> void:
 func setup(at: Vector2) -> void:
 	pos = at
 	_goal = at
+	_home = at
 	_model = _build_model()
 	add_child(_model)
 	_place(0.0)
@@ -51,12 +57,15 @@ func step(dt: float) -> void:
 		State.IDLE:
 			_calm = maxf(_calm - dt, 0.0)
 			if pos.distance_to(_goal) < 0.3:
-				_goal = pos + Vector2.from_angle(rng.randf() * TAU) * 3.0
-			_walk_to(_goal, WANDER_SPEED, dt)
-			if _calm <= 0.0 and noise.hears_vehicle(pos):
+				_goal = _home + Vector2.from_angle(rng.randf() * TAU) * rng.randf() * WANDER_R
+			_walk_to(_goal, rules.shellback_speed * 0.5 if _calm > 0.0 else WANDER_SPEED, dt)
+			if _calm <= 0.0 and _on_territory(vp) and noise.hears_vehicle(pos):
 				state = State.APPROACH
 				aggressive = true
+				_chase = 0.0
+				_rammed = false
 				reset_interest()
+				_alert(&"shellback")
 		State.APPROACH:
 			if d <= rules.shellback_charge_dist and _line_clear(pos, vp):
 				lost_interest(dt, d, true)
@@ -64,6 +73,7 @@ func step(dt: float) -> void:
 				_timer = rules.shellback_dig_s
 				_charge_dir = (vp - pos).normalized()
 				_dust.emitting = true
+				_alert(&"shellback_dig")
 			else:
 				var field: FlowField = director.call(&"field", FlowField.Mode.SHELLBACK)
 				var t := Grid.tile_of_world(pos.x, pos.y)
@@ -71,9 +81,7 @@ func step(dt: float) -> void:
 				if d > CONTACT + 0.3:                           # вплотную не лезет — только таран
 					_walk_to(Vector2(next.x + 0.5, next.y + 0.5) if next != t else vp, rules.shellback_speed, dt)
 			if state == State.APPROACH and (lost_interest(dt, d) or d > 30.0):
-				state = State.IDLE
-				aggressive = false
-				_calm = CALM_S
+				_give_up()
 		State.DIG:
 			_timer -= dt
 			_model.rotation.z = sin(_timer * 40.0) * 0.08    # дрожит, роет
@@ -84,6 +92,7 @@ func step(dt: float) -> void:
 				_hit = false
 				_dust.emitting = false
 				_model.rotation.z = 0.0
+				_alert(&"shellback_charge")
 		State.CHARGE:
 			var step := rules.shellback_charge_speed * dt
 			var np := pos + _charge_dir * step
@@ -101,6 +110,7 @@ func step(dt: float) -> void:
 				vehicle.rock(Vehicle.ROCK_RAM, _charge_dir)
 				# Удар останавливает рывок: отскок назад, оглушён — сквозь машину не проходит.
 				pos = Creature.move_on_grid(query, FlowField.Mode.SHELLBACK, pos, pos - _charge_dir * 0.3)
+				_rammed = true
 				_stun()
 				EventBus.camera_shake_requested.emit(0.7, 0.3)
 			if _charge_left <= 0.0 and state == State.CHARGE:
@@ -109,8 +119,37 @@ func step(dt: float) -> void:
 			_timer -= dt
 			if _timer <= 0.0:
 				state = State.APPROACH
+	if aggressive:
+		_chase += dt
+		# Отстаёт, когда не роет и не бежит в рывок: протаранил, машина ушла с территории, устал.
+		var busy := state == State.DIG or state == State.CHARGE or state == State.STUN
+		if not busy and (_rammed or not _on_territory(vp) or _chase > rules.shellback_chase_s):
+			_give_up()
 	_fell_trees()
 	_place(dt)
+
+
+## Звук (AudioDirector): услышал машину — мычит, роет — ревёт, рывок — топот.
+func _alert(kind: StringName) -> void:
+	EventBus.fauna_alerted.emit(kind, Vector3(pos.x, ground_y(pos), pos.y))
+
+
+## Машина на его территории.
+func _on_territory(p: Vector2) -> bool:
+	return p.distance_to(_home) <= rules.shellback_territory_r
+
+
+## Испуг (удар капсулы десанта) — отстаёт, как сдавшийся.
+func calm_down() -> void:
+	_give_up()
+
+
+## Отстал: shellback_calm_s не слышит машину и уходит к своему месту.
+func _give_up() -> void:
+	state = State.IDLE
+	aggressive = false
+	_calm = rules.shellback_calm_s
+	_goal = _home
 
 
 func _stun() -> void:

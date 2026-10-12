@@ -191,6 +191,35 @@ func test_rover_drowns_in_deep_water_hover_crosses() -> void:
 	assert_near(h.y, 5 * Grid.TIER_H, 1e-3, "hover rides on the water level")
 
 
+## Вброд по мели (глубина 1) и дальше в глубину — уступом вниз на 2 яруса или плавным склоном:
+## тонет от той высоты, где ехал, а не всплывает к поверхности воды.
+func test_drowning_starts_from_current_depth() -> void:
+	for ledge: bool in [true, false]:
+		var f := TerrainFixture.new(4)
+		for tz in range(0, 30):
+			for tx in range(0, 30):
+				if tx == 17 and not ledge:
+					f.set_tile(tx, tz, 3, 1, 1, 3)       # склон на 2 яруса вниз по X
+				else:
+					f.set_flat(tx, tz, 3 if tx < 17 else 1)
+				f.set_water(tx, tz, 4)
+		var rover := _rover()
+		var s := _state(f, rover, Vector2(14.5, 10.5), 0.0)
+		var y_before := INF
+		var top := -INF
+		for _i in 300:
+			var y := s.y
+			var was := s.drowning
+			VehicleKinematics.step(s, Vector2.RIGHT, rover, f.query, DT)
+			if s.drowning and not was:
+				y_before = y
+			if s.drowning:
+				top = maxf(top, s.y)
+		assert_true(s.drowning, "drowning (ledge=%s)" % ledge)
+		assert_true(top <= y_before + 1e-3,
+				"sinks from %.2f, not from the surface (top %.2f, ledge=%s)" % [y_before, top, ledge])
+
+
 func test_fall_into_deep_water_drowns_without_damage() -> void:
 	var f := TerrainFixture.new(4)
 	for tz in range(0, 30):

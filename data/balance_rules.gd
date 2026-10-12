@@ -7,7 +7,7 @@ extends Resource
 @export var death_delay_s: float = 1.5          ## пауза между гибелью и экраном итога
 @export var radar_range: float = 40.0
 @export var pickup_radius: float = 0.6          ## тайлов: на таком расстоянии машина подбирает находку
-@export var shock_invert_s: float = 3.0         ## разряд по машине (молния, электрошок) — столько секунд управление наоборот
+@export var shock_invert_s: float = 2.0         ## разряд по машине (молния, электрошок) — столько секунд управление наоборот
 @export var low_fuel_frac: float = 0.2          ## меньше этой доли бака — пейджер «МАЛО ТОПЛИВА»
 @export var empty_crawl_speed: float = 0.4      ## тайл/с — с пустым баком машина ползёт (тайл за 2,5 с)
 
@@ -164,6 +164,9 @@ extends Resource
 @export var shellback_charge_dist: float = 6.0
 @export var shellback_dig_s: float = 1.0
 @export var shellback_damage: int = 35
+@export var shellback_territory_r: float = 14.0   ## гонит машину, только пока она ближе этого к его месту
+@export var shellback_chase_s: float = 20.0       ## дольше не гонится — устаёт
+@export var shellback_calm_s: float = 15.0        ## сдался или протаранил — столько не слышит машину, уходит к себе
 
 @export_group("Water fauna")
 ## Водная и береговая фауна (GDD §5.6). Шокер-троеглазка — по чанкам, в мелкой воде; илозуб — в зыбучем

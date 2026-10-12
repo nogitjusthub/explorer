@@ -7,11 +7,15 @@ extends Node3D
 ## (whirlpool_core_r) топит: машина уходит в воду (VehicleState.pull_under — только модель) и получает
 ## whirlpool_core_dps урона в секунду, пока не вырвется. Спасение — пройти по краю на полном ходу или
 ## выйти на берег. На пейджере его нет — видно и так.
+## Не стоит на месте: плавно ходит по петле (эллипс до DRIFT_R тайлов, период DRIFT_PERIOD_S), не сходя
+## с глубокой воды — петля выбирается так, чтобы на всём пути под ним было 2×2 глубоких тайла.
+## Всё крутится в одну сторону — к убыванию угла atan(z, x): закрутка тяги, пена по краю (узел частиц
+## поворачивается), клочья пены по рукавам спирали в шейдере.
 
 signal damaged(amount: int, source: StringName)
 
 const DEEP := 1.95                       ## ярусов воды над центром тайла — глубоко
-const SIZE := 1.25                       ## радиус воронки на воде, тайлов (2×2 тайла и пена по краю)
+const SIZE := 1.6                        ## радиус воронки на воде, тайлов: круг накрывает квадрат 2×2 целиком
 const SWIRL := 0.45                      ## закрутка: доля тяги поперёк — машину ведёт по спирали
 const DAMAGE_STEP := 5                   ## урон ядра порциями, как у смерча
 const SINK_S := 1.5                      ## за столько в ядре машину затягивает полностью…
@@ -19,8 +23,12 @@ const SURFACE_S := 0.8                   ## …и за столько вынос
 const FADE_S := 1.5
 const HEAR_TILES := 25.0
 const SPOT_TRIES := 24
+const DRIFT_R: Array[float] = [1.5, 1.0, 0.5]   ## радиусы петли смещения — наибольший, при котором путь весь над глубокой водой
+const DRIFT_PERIOD_S := 16.0
+const DRIFT_SAMPLES := 16
+const FOAM_TURN := 0.18                  ## доля _spin — поворот кольца пены, рад
 const COLOR_FOAM := Color(0.86, 0.97, 0.94)
-const COLOR_DEEP := Color(0.02, 0.16, 0.2)
+const COLOR_DEEP := Color(0.06, 0.3, 0.36)
 const SWIRL_SHADER := preload("res://src/render/shaders/whirlpool.gdshader")
 
 
@@ -37,6 +45,10 @@ var _life := 0.0
 var _fade := -1.0
 var _damage_acc := 0.0
 var _spin := 0.0
+var _drift := Transform2D()              ## петля смещения: эллипс в своих осях → смещение от точки появления
+var _drift_t := 0.0
+var _drift_phase := 0.0
+var _origin := Vector2.ZERO              ## точка появления (вершина сетки)
 var _mat: ShaderMaterial
 var _foam: CPUParticles3D
 var _audio: AudioStreamPlayer
@@ -90,6 +102,8 @@ static func pull(r: BalanceRules, center: Vector2, p: Vector2, mass: float, k: f
 
 func begin(center: Vector2) -> void:
 	pos = center
+	_origin = center
+	_pick_drift()
 	_form = rules.whirlpool_form_s
 	_life = rng.randf_range(rules.whirlpool_life_min_s, rules.whirlpool_life_max_s)
 	var t := Grid.tile_of_world(pos.x, pos.y)
@@ -117,13 +131,45 @@ func step(dt: float) -> void:
 		if _life <= 0.0:
 			_fade = FADE_S
 			_foam.emitting = false
+	_drift_t += dt
+	pos = _drift_at(_drift_t)
+	position.x = pos.x
+	position.z = pos.y
 	_affect_vehicle(dt, k if _form <= 0.0 else 0.0)
 	_spin += dt * (2.0 + 6.0 * k)
+	_foam.rotation.y = _spin * FOAM_TURN      # поворот вокруг +Y — частицы к убыванию угла, как и тяга
 	_mat.set_shader_parameter(&"grow", k)
 	_mat.set_shader_parameter(&"spin", _spin)
 	_foam.emitting = _form <= 0.0 and _fade < 0.0
 	var d := vehicle.state.pos.distance_to(pos)
 	_audio.volume_db = linear_to_db(clampf((1.0 - d / HEAR_TILES) * maxf(k, 0.2), 0.02, 1.0)) - 8.0
+
+
+## Петля смещения: эллипс (полуоси R и 0,6 R) со случайным поворотом и фазой, сдвинутый так, что в начале
+## воронка — в точке появления. Берётся наибольший из DRIFT_R, при котором на всём пути под центром
+## 2×2 глубоких тайла; ни один не годится — стоит на месте.
+func _pick_drift() -> void:
+	var turn := rng.randf() * TAU
+	_drift_phase = rng.randf() * TAU
+	for radius in DRIFT_R:
+		_drift = Transform2D(turn, Vector2.ZERO).scaled_local(Vector2(radius, radius * 0.6))
+		var ok := true
+		for i in DRIFT_SAMPLES:
+			var p := _drift_at(DRIFT_PERIOD_S * i / DRIFT_SAMPLES)
+			if not fits(query, Vector2i(roundi(p.x), roundi(p.y))):
+				ok = false
+				break
+		if ok:
+			return
+	_drift = Transform2D(0.0, Vector2.ZERO).scaled_local(Vector2.ZERO)
+
+
+## Центр воронки через t секунд после появления.
+func _drift_at(t: float) -> Vector2:
+	var a := _drift_phase + TAU * t / DRIFT_PERIOD_S
+	var on := _drift.basis_xform(Vector2(cos(a), sin(a)))
+	var start := _drift.basis_xform(Vector2(cos(_drift_phase), sin(_drift_phase)))
+	return _origin + on - start
 
 
 ## Тяга по воде к центру с закруткой (сила k — гаснет к концу); ядро топит — машина уходит в воду
@@ -177,9 +223,7 @@ func _build() -> void:
 	_foam.gravity = Vector3.ZERO
 	_foam.radial_accel_min = -1.6
 	_foam.radial_accel_max = -1.0
-	_foam.tangential_accel_min = 3.0
-	_foam.tangential_accel_max = 4.5
-	_foam.local_coords = true
+	_foam.local_coords = true                # кольцо пены поворачивается вместе с узлом (step)
 	var q := QuadMesh.new()
 	q.size = Vector2(0.08, 0.08)
 	var m := StandardMaterial3D.new()

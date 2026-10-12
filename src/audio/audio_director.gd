@@ -31,6 +31,8 @@ func _ready() -> void:
 		&"wind": func() -> AudioStreamWAV: return Sfx.wind_loop(2.0),    # гул смерча — в кэш Sfx заранее
 		&"screech": func() -> AudioStreamWAV: return Sfx.screech(0.75),
 		&"buzz": func() -> AudioStreamWAV: return Sfx.buzz(1.2),
+		&"bellow": func() -> AudioStreamWAV: return Sfx.bellow(1.1),
+		&"stomp": func() -> AudioStreamWAV: return Sfx.stomp(1.3),
 	}
 	for _i in VOICES:
 		var p := AudioStreamPlayer.new()
@@ -74,8 +76,8 @@ func _on_drop_landed(_at: Vector3) -> void:
 	_play(_sfx(&"rumble_hit"), -6.0, 1.1)
 
 
-## Фауна: крик стаи скакунов, гул червя под песком и раскат его броска, бульканье и шлепок прыжка
-## илозуба, гул и удар Нессы, треск разряда троеглазки.
+## Фауна: крик стаи скакунов, гул червя под песком и раскат его броска, мычание и топот панцирника,
+## бульканье и шлепок прыжка илозуба, гул и удар Нессы, треск разряда троеглазки.
 func _on_fauna_alerted(kind: StringName, at: Vector3) -> void:
 	match kind:
 		&"hopper":
@@ -92,6 +94,12 @@ func _on_fauna_alerted(kind: StringName, at: Vector3) -> void:
 			_play_at(_sfx(&"rumble_build"), at, -4.0, 0.6, FAUNA_HEAR_TILES)   # Несса выныривает — низкий гул
 		&"nessie_strike":
 			_play_at(_sfx(&"rumble_hit"), at, 0.0, 1.2, FAUNA_HEAR_TILES)      # шея падает — удар и всплеск
+		&"shellback":
+			_play_at(_sfx(&"bellow"), at, -6.0, 1.15, FAUNA_HEAR_TILES)    # панцирник услышал машину — короткое мычание
+		&"shellback_dig":
+			_play_at(_sfx(&"bellow"), at, 0.0, 0.9, FAUNA_HEAR_TILES)      # роет перед рывком — низкий рёв
+		&"shellback_charge":
+			_play_at(_sfx(&"stomp"), at, 0.0, 1.0, FAUNA_HEAR_TILES)       # рывок — топот и рокот
 		&"ray_shock":
 			_play_at(_sfx(&"crackle"), at, -4.0, 2.2, FAUNA_HEAR_TILES)        # разряд троеглазки — короткий треск
 

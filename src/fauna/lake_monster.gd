@@ -15,10 +15,13 @@ extends Creature
 ## (in_impact_zone) — урон nessie_damage; ховер подбрасывает на nessie_toss тайла по линии удара,
 ## колёсную раскачивает. Потом погружение SUBMERGE_S (шея отдёргивается и уходит прямо вниз, складываясь,
 ## горбы тонут последними, остаются пузыри), передышка COOLDOWN_S и новый подход.
+## Машина ушла дальше длины шеи + ESCAPE_MARGIN, пока Несса появлялась или стояла в позе, — не бьёт:
+## WATCH — шея выпрямляется, голова поднята и следит за машиной до WATCH_S. Вернулась в досягаемость —
+## поза и удар; нет — погружение, передышка и снова погоня (если интерес не потерян).
 ## Спасение — уйти с места, пока Несса в позе, или уплыть: не подобраться fauna_give_up_s — уходит в
 ## глубину и пропадает (finished).
 
-enum State { LURK, APPROACH, EMERGE, POSE, STRIKE, LIE, SUBMERGE, COOLDOWN, LEAVE }
+enum State { LURK, APPROACH, EMERGE, WATCH, POSE, STRIKE, LIE, SUBMERGE, COOLDOWN, LEAVE }
 
 const DEEP := 1.95                       ## ярусов воды над центром тайла — глубоко (2+)
 const LAKE_R := 6                        ## «большое озеро» — считаем глубокие тайлы в этом радиусе
@@ -62,6 +65,9 @@ const POSE_MID := 0.5
 const EMERGE_S := 1.0                    ## появление — телеграф
 const UNFOLD_LAG := 0.05                 ## каждый диск трогается позже соседа сверху и догоняет
 const POSE_S := 0.6                      ## поза — телеграф направления (не меньше 0,6 с — правило LKM)
+const ESCAPE_MARGIN := 2.5               ## машина дальше nessie_reach + это — не бьёт, смотрит ей вслед
+const WATCH_S := 2.5                     ## столько стоит с поднятой головой, потом уходит под воду
+const WATCH_EASE_S := 0.35               ## шея выпрямляется из позы, пасть закрывается
 const SNAP_S := 0.12                     ## шея изгибается в позу рывком
 const STRIKE_S := 0.25                   ## шея валится
 const LIE_S := 0.35                      ## лежит на воде после удара
@@ -123,6 +129,9 @@ var _hump_wait := 0.0
 var _dolphin := -1.0                     ## время всплытия горба при подходе (< 0 — горб под водой)
 var _lurk_puff := 0.0
 var met := false                         ## гналась за машиной — следующая Несса не раньше nessie_gap_s
+var _watch_from := PackedFloat32Array()  ## WATCH: наклоны дисков, голова и пасть в начале — шея выпрямляется из них
+var _watch_head := 0.0
+var _watch_jaw := 0.0
 var _water_y := 0.0                      ## мировая высота зеркала воды под Нессой
 
 # Бросок
@@ -310,11 +319,26 @@ func step(dt: float) -> void:
 			lost_interest(dt, d, true)
 			_turn_to(vp, dt)
 			if _timer >= EMERGE_S:
+				if _escaped(d):
+					_watch()
+				else:
+					_pose(vp)
+		State.WATCH:
+			lost_interest(dt, d, true)
+			_turn_to(vp, dt)
+			if _timer >= WATCH_EASE_S and _strikable(d):
 				_pose(vp)
+			elif _timer >= WATCH_S:
+				_fall = 0.0                     # погружение — из вертикали, не из лежачей позы
+				_scale = 1.0
+				_begin(State.SUBMERGE)
 		State.POSE:
 			lost_interest(dt, d, true)
 			if _timer >= POSE_S:
-				_begin(State.STRIKE)
+				if _escaped(d):
+					_watch()
+				else:
+					_begin(State.STRIKE)
 		State.STRIKE:
 			if _timer >= STRIKE_S:
 				_impact()
@@ -402,6 +426,21 @@ func _strikable(d: float) -> bool:
 	if vehicle.wrecked or s.falling or s.drowning or d < REACH_MIN or d > rules.nessie_reach:
 		return false
 	return s.y <= _water_y + CLIFF_MAX
+
+
+## Машина ушла дальше длины шеи + ESCAPE_MARGIN (или бить нельзя совсем) — удара не будет.
+func _escaped(d: float) -> bool:
+	var s := vehicle.state
+	return d > rules.nessie_reach + ESCAPE_MARGIN or vehicle.wrecked or s.drowning
+
+
+## Не бьёт — стоит с поднятой головой и следит: шея выпрямляется из того положения, где была.
+func _watch() -> void:
+	_watch_from = _theta.duplicate()
+	_watch_head = _head_theta
+	_watch_jaw = _jaws[0].rotation.z if not _jaws.is_empty() else 0.0
+	_throat.material_override = _throat_mat
+	_begin(State.WATCH)
 
 
 ## Появление: Несса замирает на месте — здесь основание шеи; шея раскладывается, встают горбы.
@@ -523,6 +562,14 @@ func _animate_neck() -> void:
 			for j in DISCS:
 				_theta[j] = _sway(j)
 			head_theta = _theta[DISCS - 1]
+		State.WATCH:
+			var k := _ease_out(_timer / WATCH_EASE_S)
+			for j in DISCS + 1:
+				_arc[j] = _rest_arc(j)
+			for j in DISCS:
+				_theta[j] = lerpf(_watch_from[j], _sway(j), k)
+			head_theta = lerpf(_watch_head, _theta[DISCS - 1], k)
+			jaw = lerpf(_watch_jaw, 0.0, k)
 		State.POSE:
 			var k := _ease_out(_timer / SNAP_S)
 			_look = _look.slerp(_dir, k)
@@ -687,7 +734,7 @@ func _animate_foam() -> void:
 			var k := _ease_out(_timer / 0.5)
 			_ring.scale = Vector3(0.4 + 0.6 * k, 0.3, 0.4 + 0.6 * k)
 			_ring_mat.albedo_color.a = 0.85 * k
-		State.POSE, State.STRIKE, State.LIE:
+		State.WATCH, State.POSE, State.STRIKE, State.LIE:
 			pass                                  # пена у основания держится
 		State.SUBMERGE:
 			_ring_mat.albedo_color.a = 0.85 * (1.0 - clampf((_timer - 0.4) / 0.6, 0.0, 1.0))

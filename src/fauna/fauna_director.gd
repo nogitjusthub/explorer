@@ -70,8 +70,7 @@ func scare(at: Vector2, radius: float) -> void:
 		if c is HopperPack:
 			(c as HopperPack).flee()
 		elif c is Shellback:
-			(c as Shellback).state = Shellback.State.IDLE
-			c.aggressive = false
+			(c as Shellback).calm_down()
 		elif c is MireShark:
 			(c as MireShark).scare()
 

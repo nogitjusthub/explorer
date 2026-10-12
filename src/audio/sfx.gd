@@ -2,7 +2,7 @@ class_name Sfx
 extends RefCounted
 ## Процедурные звуки без ассетов (как и двигатель): AudioStreamWAV 16 бит, моно. Генерируются один
 ## раз при старте. Звуков угроз по GDD немного: молния (треск телеграфа и гром), гул землетрясения,
-## смерч, урон; у фауны — крик скакунов.
+## смерч, урон; у фауны — крик скакунов, мычание и топот панцирника.
 
 const RATE := 22050
 
@@ -189,6 +189,71 @@ static func screech(seconds: float) -> AudioStreamWAV:
 		var env_lo := minf(t / 0.05, 1.0) * (1.0 - smoothstep(0.55, 1.0, k))
 		var x := shriek * 0.55 * env_hi + growl * 0.6 * env_lo
 		data[i] = tanh(x * 1.8)
+	return _wav(data)
+
+
+## Мычание панцирника — низкое, модулированное: пила 95 → 125 → 80 Гц (подъём и долгий спад, «мууу»),
+## через два фильтра-форманты, которые раскрываются к середине («му» → «ооо»); дрожание 7 Гц по тону и
+## громкости, хрип на половине тона. Перегружено (tanh) — грубо, по-звериному.
+static func bellow(seconds: float) -> AudioStreamWAV:
+	var n := int(seconds * RATE)
+	var data := PackedFloat32Array()
+	data.resize(n)
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 1010
+	var ph := 0.0
+	var lp1 := 0.0
+	var lp2 := 0.0
+	for i in n:
+		var t := float(i) / RATE
+		var k := t / seconds
+		var f := lerpf(95.0, 125.0, smoothstep(0.0, 0.3, k)) if k < 0.3 else lerpf(125.0, 80.0, (k - 0.3) / 0.7)
+		var wobble := sin(TAU * 7.0 * t)
+		f *= 1.0 + 0.045 * wobble
+		ph += TAU * f / RATE
+		var saw := fmod(ph / TAU, 1.0) * 2.0 - 1.0
+		var cut := lerpf(0.07, 0.2, sin(PI * minf(k * 1.3, 1.0)))
+		lp1 = lerpf(lp1, saw, cut)
+		lp2 = lerpf(lp2, lp1, cut)
+		var voice := lp2 * 2.5 + (lp1 - lp2) * 1.4
+		var rasp := rng.randf_range(-1.0, 1.0) * 0.25 * maxf(sin(ph * 0.5), 0.0)
+		var env := minf(t / 0.12, 1.0) * (1.0 - smoothstep(0.7, 1.0, k)) * (0.75 + 0.25 * wobble)
+		data[i] = tanh((voice + rasp) * env * 1.8)
+	return _wav(data)
+
+
+## Топот панцирника в рывке: шесть ног — глухие удары тройками, как галоп (та-та-там), по низкому
+## рокоту бега; к концу рывка стихает.
+static func stomp(seconds: float) -> AudioStreamWAV:
+	var n := int(seconds * RATE)
+	var data := PackedFloat32Array()
+	data.resize(n)
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 1111
+	var lp1 := 0.0
+	var lp2 := 0.0
+	var hit_t := -1.0
+	var hit_f := 60.0
+	var next_hit := 0.0
+	var beat := 0
+	for i in n:
+		var t := float(i) / RATE
+		var k := t / seconds
+		if t >= next_hit:
+			hit_t = t
+			hit_f = rng.randf_range(48.0, 72.0)
+			next_hit = t + (0.2 if beat % 3 == 2 else 0.085) * rng.randf_range(0.85, 1.15)
+			beat += 1
+		var ht := t - hit_t
+		var noise := rng.randf_range(-1.0, 1.0)
+		# Удар лапы: тон с провалом высоты и щелчок грунта.
+		var thump := sin(TAU * hit_f * ht * (1.0 - minf(ht * 4.0, 0.45))) * exp(-ht * 20.0) \
+				+ noise * exp(-ht * 90.0) * 0.5
+		lp1 = lerpf(lp1, noise, 0.04)
+		lp2 = lerpf(lp2, lp1, 0.06)
+		var roll := lp2 * 10.0 * (0.7 + 0.3 * sin(TAU * 5.0 * t))
+		var env := minf(t / 0.05, 1.0) * (1.0 - smoothstep(0.7, 1.0, k))
+		data[i] = tanh((thump + roll * 0.6) * env * 1.5)
 	return _wav(data)
 
 

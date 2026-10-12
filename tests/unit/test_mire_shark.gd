@@ -1,6 +1,7 @@
 extends TestCase
-## Илозуб (GDD §5.6): ареал — зыбун и вода рядом, подход только по нему, замах запирает цель, укус при
-## пролёте рядом с машиной, возврат в ареал после прыжка на сушу, потеря интереса.
+## Илозуб (GDD §5.6): ареал — зыбун и вода рядом; в зыбуне — засада на месте, из воды — подход только по
+## ареалу; замах запирает цель, укус при пролёте рядом с машиной, возврат в ареал после прыжка на сушу,
+## потеря интереса.
 
 const DT := 1.0 / 60.0
 
@@ -48,10 +49,44 @@ func test_habitat_is_quicksand_and_water_next_to_it() -> void:
 	assert_false(MireShark.habitat(f.query, Vector2i(10, 12)), "dry land")
 
 
-func test_stalks_only_through_quicksand_and_gives_up() -> void:
+## В зыбуне — засада: услышал машину вне досягаемости — не двигается и не бросается, интерес не теряет;
+## машина въехала в зону прыжка — бросок, даже тихая (не слышно).
+func test_ambush_in_quicksand() -> void:
 	var f := TerrainFixture.new(4)
 	_mire(f, 4, 10, 20, 11)
-	# Машина на суше в 5 тайлах от полосы зыбуна — не допрыгнуть.
+	var start := Vector2(5.5, 10.5)
+	var s := _make(f, start, Vector2(15.5, 16.5))
+	s.start_hunt()
+	var t := 0.0
+	while t < s.rules.fauna_give_up_s + 4.0:
+		s.step(DT)
+		t += DT
+		assert_eq(s.state, MireShark.State.STALK, "waits in ambush")
+	assert_true(s.pos.distance_to(start) < 0.01, "does not move in the quicksand: %s" % s.pos)
+	assert_true(s.aggressive, "keeps waiting while the vehicle is near")
+	# Тихая машина въезжает в зону прыжка — бросок.
+	s.noise.update_vehicle(Vector2(7.5, 12.0), 0.0, 10.0)
+	s.vehicle.state.pos = Vector2(7.5, 12.0)
+	s.step(DT)
+	assert_eq(s.state, MireShark.State.WINDUP, "vehicle in reach — wind-up")
+	_dispose(s)
+	# Не охотится (не слышал) — всё равно бросается на машину в зоне прыжка.
+	var g := TerrainFixture.new(4)
+	_mire(g, 4, 10, 20, 11)
+	var quiet := _make(g, start, Vector2(7.5, 12.0))
+	quiet.step(DT)
+	assert_eq(quiet.state, MireShark.State.WINDUP, "ambush strikes a silent vehicle in reach")
+	_dispose(quiet)
+
+
+## Из воды у зыбуна — подбирается к машине, не выходя из ареала, медленно; не подобраться — сдаётся.
+func test_stalks_through_water_and_gives_up() -> void:
+	var f := TerrainFixture.new(4)
+	_mire(f, 4, 9, 20, 9)
+	for tx in range(4, 21):
+		f.set_flat(tx, 10, 3)
+		f.set_water(tx, 10, 4)       # мелкая вода вдоль зыбуна — тоже ареал
+	# Машина на суше в 6 тайлах от воды — не допрыгнуть.
 	var s := _make(f, Vector2(5.5, 10.5), Vector2(15.5, 16.5))
 	s.start_hunt()
 	assert_eq(s.state, MireShark.State.STALK, "hunt starts at once")
@@ -68,10 +103,10 @@ func test_stalks_only_through_quicksand_and_gives_up() -> void:
 			outside += 1
 		if s.state != MireShark.State.STALK:
 			leaped = true
-	assert_eq(outside, 0, "never leaves the quicksand while stalking")
+	assert_eq(outside, 0, "never leaves its habitat while stalking")
 	assert_false(leaped, "no wind-up when the vehicle is out of reach")
-	assert_near(s.pos.x, 15.5, 0.6, "waits at the quicksand edge nearest to the vehicle")
-	assert_true(s.pos.y > 11.5 and s.pos.y < 12.0, "at the edge: %s" % s.pos)
+	assert_near(s.pos.x, 15.5, 0.6, "waits at the water edge nearest to the vehicle")
+	assert_true(s.pos.y > 10.5 and s.pos.y < 11.0, "at the edge: %s" % s.pos)
 	assert_true(max_speed <= s.rules.shark_speed + 0.01, "approach speed %.2f ≤ shark_speed" % max_speed)
 	# Не подобраться ближе — через fauna_give_up_s сдаётся и ныряет.
 	while s.aggressive and t < 15.0:

@@ -6,8 +6,8 @@ extends RefCounted
 ## JobScheduler порциями под бюджет кадра; готовое поле заменяет прежнее.
 ##
 ## Проходимость:
-## - HOPPER (скакуны) — только склоны: ни стенки вверх, ни обрыва вниз; в воду не заходят;
-## - SHELLBACK (панцирник) — как танк: без стенок в обе стороны, вброд до 2 ярусов.
+## - HOPPER (скакуны), SHELLBACK (панцирник) — только склоны: ни стенки вверх, ни обрыва вниз; в воду
+##   не заходят. Поля у них свои — гонятся разные звери, каждому строится своё по требованию.
 
 enum Mode { HOPPER, SHELLBACK }
 
@@ -88,12 +88,7 @@ static func passable(q: TerrainQuery, field_mode: Mode, from: Vector2i, dir: int
 		return false
 	if q.edge_rise(from.x, from.y, dir) > 0 or q.edge_drop(from.x, from.y, dir) > 0:
 		return false
-	var w := q.water_tier(to.x, to.y)
-	if w == TerrainQuery.NO_WATER:
-		return true
-	if field_mode == Mode.HOPPER:
-		return false
-	return w - q.surface_tier(to.x + 0.5, to.y + 0.5) <= 2.0
+	return q.water_tier(to.x, to.y) == TerrainQuery.NO_WATER
 
 
 ## Расстояние (в тайлах пути) от тайла до цели; UNREACHED — не дойти или вне окна.

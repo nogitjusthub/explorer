@@ -172,6 +172,53 @@ func test_leaving_the_line_dodges_and_shore_rover_is_rocked() -> void:
 	rover.free()
 
 
+## Машина ушла далеко, пока Несса появлялась: не бьёт — стоит с поднятой головой и следит; вернулась —
+## удар; не вернулась — погружается и снова идёт на сближение.
+func test_does_not_strike_a_vehicle_that_ran_off() -> void:
+	var f := TerrainFixture.new(4)
+	_lake(f, 0, 0, 30, 20)
+	var v := _vehicle(f, "hover", Vector2(12.7, 10.5))
+	var m := _monster(f, v, Vector2(10.5, 10.5))
+	var hits: Array = []
+	m.damaged.connect(func(amount: int, _s: StringName) -> void: hits.append(amount))
+	m.start_hunt()
+	while m.state != LakeMonster.State.EMERGE:
+		m.step(DT)
+	var far := Vector2(10.5 + m.rules.nessie_reach + LakeMonster.ESCAPE_MARGIN + 1.0, 10.5)
+	v.state.pos = far
+	var t := 0.0
+	var watched := false
+	while t < LakeMonster.EMERGE_S + LakeMonster.WATCH_S + LakeMonster.SUBMERGE_S + 0.5:
+		m.step(DT)
+		t += DT
+		watched = watched or m.state == LakeMonster.State.WATCH
+	assert_true(watched, "raised head, watching")
+	assert_eq(hits.size(), 0, "no strike at a vehicle that ran off")
+	assert_true(m.state == LakeMonster.State.COOLDOWN or m.state == LakeMonster.State.APPROACH, "submerged to chase again: %s" % m.state)
+	assert_true(m.aggressive, "still hunting")
+	m.free()
+	v.free()
+	# Ушла и вернулась, пока Несса смотрит, — удар.
+	var v2 := _vehicle(f, "hover", Vector2(12.7, 10.5))
+	var m2 := _monster(f, v2, Vector2(10.5, 10.5))
+	var hits2: Array = []
+	m2.damaged.connect(func(amount: int, _s: StringName) -> void: hits2.append(amount))
+	m2.start_hunt()
+	while m2.state != LakeMonster.State.EMERGE:
+		m2.step(DT)
+	v2.state.pos = far
+	while m2.state != LakeMonster.State.WATCH:
+		m2.step(DT)
+	for _i in 30:
+		m2.step(DT)
+	v2.state.pos = Vector2(12.7, 10.5)
+	for _i in 120:
+		m2.step(DT)
+	assert_eq(hits2.size(), 1, "came back within reach — strike")
+	m2.free()
+	v2.free()
+
+
 func test_loses_interest_when_out_of_reach() -> void:
 	var f := TerrainFixture.new(4)
 	_lake(f, 0, 0, 20, 20)

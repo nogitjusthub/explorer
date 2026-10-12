@@ -19,7 +19,6 @@ const ROCK_TREE := 0.8
 const ROCK_WALL := 1.8
 const ROCK_LANDING := 1.0
 const ROCK_RAM := 2.8
-const COLOR_SPARK := Color(0.65, 0.85, 1.0)
 
 var cls: VehicleClass
 var query: TerrainQuery
@@ -38,7 +37,7 @@ var inverted_left := 0.0        ## секунд: после разряда (мо
 var _tilt := Basis.IDENTITY
 var _model: VehicleModels.Model
 var _beacon_light: OmniLight3D
-var _sparks: CPUParticles3D        ## искры по корпусу, пока управление наоборот
+var _shock: ShockFx                ## дуги разряда и белые вспышки корпуса, пока управление наоборот
 var _rock := Vector2.ZERO          ## наклон модели от ударов: x — тангаж (нос вверх +), y — крен (правый борт вверх +)
 var _rock_vel := Vector2.ZERO
 var _tumble := Vector2.ZERO        ## наклон в полёте после броска — равновесие пружины, пока машина в воздухе
@@ -60,8 +59,8 @@ func _ready() -> void:
 	engine = EngineSound.new()
 	add_child(engine)
 	_rebuild_model()
-	_sparks = _make_sparks()
-	add_child(_sparks)
+	_shock = ShockFx.new()
+	add_child(_shock)
 
 
 ## Смена класса (экран выбора): модель, тон двигателя, высота над водой.
@@ -161,38 +160,13 @@ func tumble(push: Vector2, angle: float) -> void:
 
 
 ## Разряд по машине (молния, электрошок, GDD §5.6): на seconds направления ввода меняются на
-## противоположные — по корпусу бегут искры, на HUD значок помех.
+## противоположные — по корпусу бегут дуги разряда, корпус мерцает белым, гудят помехи.
 func invert_controls(seconds: float) -> void:
 	if wrecked or seconds <= 0.0:
 		return
 	inverted_left = maxf(inverted_left, seconds)
-	_sparks.emitting = true
+	_shock.set_active(true, _model.root)
 	EventBus.controls_inverted.emit(inverted_left)
-
-
-## Голубые искры вокруг корпуса (в координатах машины — едут вместе с ней).
-static func _make_sparks() -> CPUParticles3D:
-	var p := CPUParticles3D.new()
-	p.amount = 18
-	p.lifetime = 0.25
-	p.emitting = false
-	p.emission_shape = CPUParticles3D.EMISSION_SHAPE_SPHERE
-	p.emission_sphere_radius = 0.38
-	p.position = Vector3(0, 0.3, 0)
-	p.direction = Vector3.UP
-	p.spread = 180.0
-	p.initial_velocity_min = 0.3
-	p.initial_velocity_max = 1.2
-	p.gravity = Vector3.ZERO
-	var q := QuadMesh.new()
-	q.size = Vector2(0.06, 0.06)
-	var m := StandardMaterial3D.new()
-	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	m.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
-	m.albedo_color = COLOR_SPARK
-	q.material = m
-	p.mesh = q
-	return p
 
 
 ## Эвакуация: луч челнока плавно втягивает машину в точку to (в мире), потом она скрывается.
@@ -228,7 +202,7 @@ func _physics_process(dt: float) -> void:
 	var inp := Vector2.ZERO
 	if inverted_left > 0.0:
 		inverted_left = maxf(inverted_left - dt, 0.0)
-		_sparks.emitting = inverted_left > 0.0 and not wrecked
+		_shock.set_active(inverted_left > 0.0 and not wrecked, _model.root)
 	if control_enabled and not wrecked:
 		if autopilot != null:
 			inp = autopilot.direction(state, dt)
