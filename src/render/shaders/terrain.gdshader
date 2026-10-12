@@ -1,6 +1,8 @@
 // Рельеф: цвет материала из COLOR.rgb, плоское освещение по производным, страты на стенках.
-// COLOR.a: стенка — 1; верх: 0 — обычный грунт, 0.12 — неровный (контрастные точки камней),
-// 0.24 — зыбучий (влажный, по нему течёт рябь).
+// COLOR.a: стенка — 1; верх: 0 — обычный грунт, 0.12 — неровный, 0.24 — зыбучий (по нему течёт рябь).
+// Верх тайла — пиксельная текстура (M5): атлас tops, 16×16 текселей на тайл, строка — UV.x (материал,
+// неровный, зыбучий), столбец — вариант по хэшу тайла; значение текстуры × TOPS_GAIN умножает цвет
+// материала — палитра и погода прежние. Фильтр nearest, без мипмапов.
 shader_type spatial;
 render_mode cull_back, diffuse_lambert, specular_disabled;
 
@@ -12,21 +14,18 @@ uniform vec4 strata_c : source_color = vec4(0.38, 0.36, 0.48, 1.0);
 uniform float grid_strength = 0.12;   // насколько темнее край тайла — ромбы сетки читаются
 uniform float grid_width = 0.05;      // ширина линии в долях тайла (~1 пиксель)
 uniform float tier_h = 0.65;          // высота яруса — ставит TerrainMaterials из Grid.TIER_H
+uniform sampler2D tops : hint_default_white, filter_nearest, repeat_disable;
+const vec2 TOPS_CELLS = vec2(4.0, 6.0);   // вариантов × строк в атласе
+const float TOPS_GAIN = 1.5;
 
 varying vec3 world_pos;
 
-// Неровный грунт: в каждой из 4×4 клеток тайла — камешек (светлая точка с тенью) с вероятностью 70%.
-vec3 rough_stones(vec3 albedo, vec2 p) {
-	vec2 cell = floor(p * 4.0);
-	vec2 local = fract(p * 4.0);
-	if (vhash(cell) < 0.3) {
-		return albedo * 0.93;
-	}
-	vec2 c = vec2(0.3, 0.3) + 0.4 * vec2(vhash(cell + 3.1), vhash(cell + 7.7));
-	float r = 0.17 + 0.13 * vhash(cell + 11.3);
-	float stone = step(length(local - c), r);
-	float shadow = step(length(local - c - vec2(0.09, 0.09)), r) * (1.0 - stone);
-	return albedo * (0.93 - 0.33 * shadow) + (albedo * 0.55 + vec3(0.07)) * stone;
+// Пиксельная текстура верха: вариант — по хэшу тайла, тексель — по положению внутри тайла.
+float tops_detail(vec2 p, float row) {
+	vec2 tile = floor(p);
+	float variant = min(floor(vhash(tile + 0.37) * TOPS_CELLS.x), TOPS_CELLS.x - 1.0);
+	vec2 uv = (vec2(variant, row) + clamp(fract(p), 0.001, 0.999)) / TOPS_CELLS;
+	return texture(tops, uv).r * TOPS_GAIN;
 }
 
 // Зыбучий грунт: темнее и холоднее (влажный), по нему медленно текут волнистые тёмные штрихи.
@@ -54,9 +53,8 @@ void fragment() {
 		vec2 f = fract(world_pos.xz);
 		float edge = min(min(f.x, 1.0 - f.x), min(f.y, 1.0 - f.y));
 		albedo *= 1.0 - grid_strength * (1.0 - step(grid_width, edge));
-		if (COLOR.a > 0.06 && COLOR.a < 0.18) {
-			albedo = rough_stones(albedo, world_pos.xz);
-		} else if (COLOR.a >= 0.18) {
+		albedo *= tops_detail(world_pos.xz, floor(UV.x + 0.5));
+		if (COLOR.a >= 0.18) {
 			albedo = mire_ripples(albedo, world_pos.xz);
 		}
 	} else {

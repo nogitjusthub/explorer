@@ -3,6 +3,7 @@ extends RefCounted
 ## Общие материалы и меши рельефа: создаются один раз и делятся между всеми чанками.
 
 const TREE_TYPES := 2
+const TOPS_ATLAS := "res://assets/textures/terrain_tops.png"   ## генерирует tools/textures/gen_terrain_tops.gd
 
 var terrain: ShaderMaterial
 var water: ShaderMaterial
@@ -15,6 +16,7 @@ func _init() -> void:
 	terrain = ShaderMaterial.new()
 	terrain.shader = load("res://src/render/shaders/terrain.gdshader")
 	terrain.set_shader_parameter("tier_h", Grid.TIER_H)
+	terrain.set_shader_parameter("tops", load(TOPS_ATLAS))     # пиксельные текстуры верха тайлов (M5)
 	water = ShaderMaterial.new()
 	water.shader = load("res://src/render/shaders/water.gdshader")
 
@@ -33,7 +35,7 @@ func _init() -> void:
 	coral.height = 0.45
 	coral.radial_segments = 6
 	coral.rings = 3
-	coral.material = _tree_material(tree_shader, Color(0.25, 0.85, 0.75), 0.35)
+	coral.material = _tree_material(tree_shader, Color(0.26, 0.5, 0.48), 0.06)      # приглушённая бирюза
 	crown_meshes.append(coral)
 
 	var shroom := CylinderMesh.new()    # грибовидная крона
@@ -42,7 +44,7 @@ func _init() -> void:
 	shroom.height = 0.18
 	shroom.radial_segments = 7
 	shroom.rings = 0
-	shroom.material = _tree_material(tree_shader, Color(0.85, 0.36, 0.78), 0.3)
+	shroom.material = _tree_material(tree_shader, Color(0.52, 0.35, 0.5), 0.05)      # приглушённый пурпур
 	crown_meshes.append(shroom)
 
 	var fallen := CylinderMesh.new()

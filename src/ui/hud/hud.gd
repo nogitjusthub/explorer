@@ -35,6 +35,9 @@ var _time := 0.0
 var _damage_flash := 0.0
 var _popups: Array[Dictionary] = []    ## {text, color, t}
 var _banner := ""
+var _notice := ""                      ## сообщение челнока над его отсчётом (низ-центр)
+var _notice_color := Color.WHITE
+var _notice_t := 0.0
 var _banner_color := COLOR_TEXT
 var _banner_t := 0.0
 var _shuttle_state := &""
@@ -89,6 +92,13 @@ func banner(text: String, color: Color = COLOR_TEXT, seconds: float = 2.5) -> vo
 	_banner = text
 	_banner_color = color
 	_banner_t = seconds
+
+
+## Сообщение челнока над его отсчётом внизу (площадка выбрана и т. п.); первую секунду мигает.
+func shuttle_notice(text: String, color: Color = COLOR_TEXT, seconds: float = 4.0) -> void:
+	_notice = text
+	_notice_color = color
+	_notice_t = seconds
 
 
 ## Короткое сообщение под счётом.
@@ -149,6 +159,7 @@ func _process(dt: float) -> void:
 	_damage_flash = maxf(_damage_flash - dt, 0.0)
 	_flash = maxf(_flash - dt * 5.0, 0.0)
 	_banner_t = maxf(_banner_t - dt, 0.0)
+	_notice_t = maxf(_notice_t - dt, 0.0)
 	for p in _popups:
 		p["t"] -= dt
 	_popups = _popups.filter(func(p: Dictionary) -> bool: return p["t"] > 0.0)
@@ -203,22 +214,29 @@ func _draw_hud() -> void:
 		_text(Vector2(0, size.y * 0.5 - 30), _banner, 16, c, HORIZONTAL_ALIGNMENT_CENTER, size.x)
 
 
-## Низ-центр: внизу — таймер основного челнока; над ним — аварийный челнок (летит, ищет место) и при
+## Низ-центр: внизу — таймер основного челнока; над ним — его сообщение (площадка выбрана), выше —
+## аварийный челнок (летит, ищет место) и при
 ## пустом баке мигающие две строки: «НЕТ ТОПЛИВА» и вызов аварийного [F] (или что с воды вызвать нельзя).
 func _draw_bottom(size: Vector2) -> void:
 	var y := size.y - 8.0
 	var blink := fmod(_time, 0.6) < 0.4
 	match _shuttle_state:
 		&"waiting":
-			_text(Vector2(0, y), "ЧЕЛНОК  %s" % _clock(_shuttle_left), 8, COLOR_TEXT, HORIZONTAL_ALIGNMENT_CENTER, size.x)
+			_text(Vector2(0, y), "ПОСАДКА ЧЕЛНОКА ЧЕРЕЗ  %s" % _clock(_shuttle_left), 8, COLOR_TEXT,
+					HORIZONTAL_ALIGNMENT_CENTER, size.x)
 		&"announced":
-			_text(Vector2(0, y), "ЧЕЛНОК  %s  — площадка на радаре" % _clock(_shuttle_left), 8, COLOR_PAD,
+			_text(Vector2(0, y), "ПОСАДКА ЧЕЛНОКА ЧЕРЕЗ  %s" % _clock(_shuttle_left), 8, COLOR_PAD,
 					HORIZONTAL_ALIGNMENT_CENTER, size.x)
 		&"landed":
 			var col := COLOR_PAD if _shuttle_left > 5.0 or blink else COLOR_FUEL_LOW
 			_text(Vector2(0, y), "ЧЕЛНОК НА ПЛОЩАДКЕ  %s  — остановитесь в круге" % _clock(_shuttle_left), 8, col,
 					HORIZONTAL_ALIGNMENT_CENTER, size.x)
 	y -= 12.0
+	if _notice_t > 0.0:
+		var c := _notice_color
+		c.a = clampf(_notice_t / 0.5, 0.0, 1.0) * (0.4 if _notice_t > 3.0 and not blink else 1.0)
+		_text(Vector2(0, y), _notice, 8, c, HORIZONTAL_ALIGNMENT_CENTER, size.x)
+		y -= 12.0
 	var call_line := ""
 	var call_color := COLOR_WARN
 	match _em_state:

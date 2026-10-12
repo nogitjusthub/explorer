@@ -5,13 +5,15 @@ extends RefCounted
 ## Освещение плоское — нормаль грани считает шейдер. Вершинные нормали (наклон тайла, стенка —
 ## наружу) нужны только теням: смещение теней по нормали берётся из них. COLOR.a = 1 помечает стенку.
 ## Стенку на ребре рисует только более высокая сторона — без дублей и без соседних чанков.
+## UV.x верха тайла — строка атласа текстур верха (terrain_tops.png): материал 0–3, неровный —
+## ROW_ROUGH, зыбучий — ROW_MIRE; у стенок UV не используется.
 
 const SECTION := 16
 const MATERIAL_COLORS: Array[Color] = [
 	Color(0.50, 0.30, 0.24),   # грунт
 	Color(0.60, 0.52, 0.66),   # песок
 	Color(0.32, 0.37, 0.47),   # камень
-	Color(0.22, 0.66, 0.64),   # кристалл
+	Color(0.25, 0.5, 0.5),     # кристалл (приглушён — был слишком ярким)
 ]
 
 
@@ -22,6 +24,17 @@ const MATERIAL_COLORS: Array[Color] = [
 ## неровный (точки камней), ALPHA_MIRE — зыбучий (рябь).
 const ALPHA_ROUGH := 0.12
 const ALPHA_MIRE := 0.24
+const ROW_ROUGH := 4
+const ROW_MIRE := 5
+
+
+## Строка атласа текстур верха для тайла.
+static func tops_row(material: int, flags: int) -> int:
+	if (flags & ChunkData.FLAG_MIRE) != 0:
+		return ROW_MIRE
+	if (flags & ChunkData.FLAG_ROUGH) != 0:
+		return ROW_ROUGH
+	return material
 
 
 static func ground_alpha(flags: int) -> float:
@@ -58,10 +71,12 @@ static func build_section(data: ChunkData, s: int, _run_seed: int = 0) -> Array:
 	var verts := PackedVector3Array()
 	var normals := PackedVector3Array()
 	var colors := PackedColorArray()
+	var uvs := PackedVector2Array()
 	var indices := PackedInt32Array()
 	verts.resize(quads * 4)
 	normals.resize(quads * 4)
 	colors.resize(quads * 4)
+	uvs.resize(quads * 4)
 	indices.resize(quads * 6)
 	var vi := 0
 	var ii := 0
@@ -96,6 +111,11 @@ static func build_section(data: ChunkData, s: int, _run_seed: int = 0) -> Array:
 			colors[vi + 1] = col
 			colors[vi + 2] = col
 			colors[vi + 3] = col
+			var row := Vector2(tops_row(mats[i], data.flags[i]), 0.0)
+			uvs[vi] = row
+			uvs[vi + 1] = row
+			uvs[vi + 2] = row
+			uvs[vi + 3] = row
 			# Обход по часовой стрелке при взгляде сверху — лицевая сторона в Godot.
 			if c1 == c3 and c0 != c2:
 				_tri(indices, ii, vi, 0, 1, 3)
@@ -128,6 +148,7 @@ static func build_section(data: ChunkData, s: int, _run_seed: int = 0) -> Array:
 	arrays[Mesh.ARRAY_VERTEX] = verts
 	arrays[Mesh.ARRAY_NORMAL] = normals
 	arrays[Mesh.ARRAY_COLOR] = colors
+	arrays[Mesh.ARRAY_TEX_UV] = uvs
 	arrays[Mesh.ARRAY_INDEX] = indices
 	return arrays
 

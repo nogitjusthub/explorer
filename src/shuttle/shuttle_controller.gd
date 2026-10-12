@@ -207,9 +207,12 @@ func _pad_ground() -> Vector3:
 	return Vector3(pad.x + 0.5, Grid.tier_to_y(pad.z), pad.y + 0.5)
 
 
+## Площадка выбрана (за shuttle_announce_s до посадки): сообщение над отсчётом внизу и «би-бип» пейджера;
+## площадка появляется на радаре, на ней — знак посадки.
 func _on_announced(_pad: Vector3i) -> void:
 	_main_craft.show_marker(_pad_ground())
-	hud.popup("Площадка челнока на радаре", ShuttleCraft.COLOR_RING)
+	hud.shuttle_notice("Посадочная площадка выбрана", ShuttleCraft.COLOR_RING)
+	EventBus.pager_alert.emit(&"shuttle_pad")
 
 
 func _on_landed(_pad: Vector3i) -> void:

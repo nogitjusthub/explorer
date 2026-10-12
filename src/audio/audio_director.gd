@@ -147,8 +147,8 @@ func _on_pickup(kind: StringName, _value: int) -> void:
 ## Пылевая буря гудит, пока идёт: фронт вдали — едва слышно, машина в массе — в полную силу (ровный
 ## гул без нарастаний). Кончилась — гул стихает (threat_ended).
 func _on_weather(kind: StringName, intensity: float) -> void:
-	if kind != &"dust":
-		return
+	if kind != &"dust" or not is_inside_tree():
+		return                             # при закрытии сцены буря шлёт «стихла» уже без нас
 	if not _dust_wind.playing:
 		_dust_wind.stream = _sfx(&"dust")
 		_dust_wind.play()

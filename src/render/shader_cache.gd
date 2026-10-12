@@ -18,6 +18,11 @@ func keep(n: Node) -> void:
 		keep(c)
 
 
+## Выход из игры: материалы отпускаем, пока сервер отрисовки ещё жив.
+func _exit_tree() -> void:
+	_kept.clear()
+
+
 func kept_count() -> int:
 	return _kept.size()
 
