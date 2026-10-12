@@ -10,6 +10,6 @@ cargo = true
 slots = 1
 value = 10
 shape = 0
-color = Color(1, 0.9, 0.3, 1)
+color = Color(0.72, 0.36, 1, 1)
 glow = 0.8
 size = 0.3

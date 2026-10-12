@@ -2,7 +2,7 @@ class_name PickupKind
 extends Resource
 ## Вид находки (GDD §6). Один .tres на вид.
 
-enum Shape { CRYSTAL, CAPSULE, ORB, BOX, CANISTER }
+enum Shape { CRYSTAL, CAPSULE, ORB, BOX, CANISTER, GEAR, JERRYCAN }
 
 @export var id: StringName
 @export var display_name: String

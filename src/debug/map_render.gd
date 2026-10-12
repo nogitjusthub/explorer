@@ -7,9 +7,9 @@ extends RefCounted
 
 const MATERIAL_COLORS: Array[Color] = [
 	Color(0.62, 0.38, 0.27),   # грунт
-	Color(0.74, 0.66, 0.78),   # песок
+	Color(0.84, 0.72, 0.52),   # песок
 	Color(0.36, 0.42, 0.52),   # камень
-	Color(0.30, 0.85, 0.80),   # кристалл
+	Color(0.66, 0.40, 0.76),   # кристалл
 ]
 const UNLOADED_COLOR := Color(0.15, 0.15, 0.17)
 const LEDGE_COLOR := Color(0.95, 0.55, 0.1)

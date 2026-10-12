@@ -26,7 +26,7 @@ extends Creature
 enum State { IDLE, STALK, WINDUP, LEAP, LANDED, CRAWL, DIVE }
 
 const MUD_GROUND := Color(0.3, 0.19, 0.16)      ## тело в зыбуне на грунте — темнее мокрого грунта
-const MUD_SAND := Color(0.34, 0.29, 0.4)        ## …и на песке — лиловее
+const MUD_SAND := Color(0.4, 0.33, 0.24)        ## …и на песке — мокрый песок
 const THROAT_COLOR := Color(0.16, 0.06, 0.07)   ## #290F12 — глотка и кромка гребня; в замахе разгораются алым
 const THREAT_COLOR := Color(1.0, 0.25, 0.2)     ## #FF4033 — глаза; свечение глотки и кромки гребня
 const EYE_DIM := Color(0.72, 0.17, 0.13)        ## #B82B21 — глаза, пока таится
@@ -34,7 +34,7 @@ const SAIL_COLOR := Color(0.7, 0.13, 0.16)      ## #B3202A — перепонк�
 const TOOTH_COLOR := Color(0.95, 0.92, 0.82)    ## #F2EBD1
 const FOAM_COLOR := Color(0.82, 0.92, 0.88)     ## брызги и круги над водой
 const CLOD_GROUND := Color(0.45, 0.29, 0.23)    ## комья зыбуна на грунте…
-const CLOD_SAND := Color(0.52, 0.46, 0.62)      ## …и на песке
+const CLOD_SAND := Color(0.6, 0.5, 0.36)        ## …и на песке
 
 const IDLE_SPEED := 0.7
 const CRAWL_SPEED := 2.6                 ## рывками на плавниках: в среднем ~2 тайл/с
@@ -727,7 +727,7 @@ func _place() -> void:
 	_model.rotation.y = _yaw
 
 
-## Тон ила — от зыбуна, в котором сидит: на грунте бурый, на песке лиловый.
+## Тон ила — от зыбуна, в котором сидит: на грунте бурый, на песке — мокрый песок.
 func _tint(dt: float) -> void:
 	var t := _tile()
 	if (query.flags(t.x, t.y) & ChunkData.FLAG_MIRE) != 0:

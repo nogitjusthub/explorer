@@ -10,6 +10,6 @@ cargo = true
 slots = 2
 value = 400
 shape = 2
-color = Color(1, 0.35, 0.9, 1)
+color = Color(1, 0.8, 0.25, 1)
 glow = 1.2
 size = 0.36

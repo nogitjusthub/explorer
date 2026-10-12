@@ -1,9 +1,10 @@
 class_name Worm
 extends Creature
-## Песчаный червь (GDD §5.4) — как в «Дюне». Живёт под рыхлым грунтом — песок (SAND) и грунт равнин
-## (GROUND в биоме PLAINS) — и только там ходит (habitat). Пока не слышит машину — незаметно, без вала,
-## дрейфует к ней (worm_idle_speed), если она на его грунте.
-## Слышит машину на песке — идёт к ней под землёй: песок над ним вспучивается валом (деформация рельефа,
+## Песчаный червь (GDD §5.4) — как в «Дюне». Живёт под рыхлым грунтом — песок (SAND) и грунт (GROUND)
+## в любом биоме, не под камнем, кристаллической породой и водой — и только там ходит (habitat);
+## под землёй уступы ему не помеха. Появляется только в песке (spawn_ground), гонится и по грунту.
+## Пока не слышит машину — незаметно, без вала, дрейфует к ней (worm_idle_speed), если она на его грунте.
+## Слышит машину на своём грунте — идёт к ней под землёй: грунт над ним вспучивается валом (деформация рельефа,
 ## «обратная» борозде смерча, не выше яруса) и оседает обратно в RIDGE_KEEP тайлах позади; летит пыль,
 ## гудит. Деревья на пути валятся.
 ## Догнал — за worm_telegraph_s до броска песок вокруг машины трескается кольцом и дрожит. Бросок:
@@ -17,8 +18,9 @@ extends Creature
 
 enum State { IDLE, HUNT, TELEGRAPH, STRIKE, COOLDOWN }
 
-const SAND_COLOR := Color(0.55, 0.42, 0.56)      ## пыль на песке — в тон лилового песка, темнее
+const SAND_COLOR := Color(0.62, 0.52, 0.38)      ## пыль на песке — в тон песка, темнее
 const GROUND_DUST := Color(0.62, 0.42, 0.34)     ## пыль на грунте равнин — терракотовая
+const SAND_BURST := Color(0.74, 0.64, 0.46)      ## выброс песка при броске
 const BODY_COLOR := Color(0.7, 0.6, 0.52)
 const RING_COLOR := Color(0.47, 0.39, 0.34)
 const THROAT_COLOR := Color(0.16, 0.06, 0.07)
@@ -84,12 +86,17 @@ func on_sand(p: Vector2) -> bool:
 	return habitat(query, Grid.tile_of_world(p.x, p.y))
 
 
-## Грунт червя: сухой песок или грунт равнин.
+## Где червь может появиться: только в сухом песке.
+static func spawn_ground(q: TerrainQuery, t: Vector2i) -> bool:
+	return habitat(q, t) and q.material(t.x, t.y) == ChunkData.Mat.SAND
+
+
+## Грунт червя: сухой песок или грунт (любой биом).
 static func habitat(q: TerrainQuery, t: Vector2i) -> bool:
 	if not q.is_loaded(t.x, t.y) or q.water_tier(t.x, t.y) != TerrainQuery.NO_WATER:
 		return false
 	var m := q.material(t.x, t.y)
-	return m == ChunkData.Mat.SAND or (m == ChunkData.Mat.GROUND and q.biome(t.x, t.y) == ChunkData.Biome.PLAINS)
+	return m == ChunkData.Mat.SAND or m == ChunkData.Mat.GROUND
 
 
 func step(dt: float) -> void:
@@ -303,7 +310,7 @@ func _build() -> void:
 	_wake.emission_box_extents = Vector3(0.8, 0.05, 1.4)
 	_build_ring()
 	_build_body()
-	_burst = _dust(Color(0.66, 0.52, 0.66), 90, 1.4, Vector3.UP, 30.0, 4.0, 9.0, 0.16)
+	_burst = _dust(SAND_BURST, 90, 1.4, Vector3.UP, 30.0, 4.0, 9.0, 0.16)
 	_burst.one_shot = true
 	_burst.explosiveness = 0.8
 	_burst.emission_shape = CPUParticles3D.EMISSION_SHAPE_RING
@@ -433,14 +440,14 @@ static func _jaw_mesh() -> ArrayMesh:
 	return st.commit()
 
 
-## Пыль — в цвет грунта под червём: лиловая над песком, терракотовая над грунтом равнин.
+## Пыль — в цвет грунта под червём: песочная над песком, терракотовая над грунтом равнин.
 func _tint_dust() -> void:
 	var t := Grid.tile_of_world(pos.x, pos.y)
 	var sand := query.is_loaded(t.x, t.y) and query.material(t.x, t.y) == ChunkData.Mat.SAND
 	var wake := (_wake.mesh as QuadMesh).material as StandardMaterial3D
 	wake.albedo_color = SAND_COLOR.darkened(0.2) if sand else GROUND_DUST.darkened(0.15)
 	var burst := (_burst.mesh as QuadMesh).material as StandardMaterial3D
-	burst.albedo_color = Color(0.66, 0.52, 0.66) if sand else GROUND_DUST.lightened(0.1)
+	burst.albedo_color = SAND_BURST if sand else GROUND_DUST.lightened(0.1)
 
 
 func _dust(color: Color, amount: int, lifetime: float, direction: Vector3, spread: float,

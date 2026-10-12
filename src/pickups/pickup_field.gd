@@ -222,7 +222,7 @@ static func _make_mesh(kind: PickupKind, shader: Shader, outline: Material) -> M
 	mat.set_shader_parameter("glow", kind.glow)
 	mat.next_pass = outline
 	var s := kind.size
-	var mesh: PrimitiveMesh
+	var mesh: Mesh
 	match kind.shape:
 		PickupKind.Shape.CRYSTAL:
 			var m := SphereMesh.new()      # 4 сегмента × 2 кольца — октаэдр
@@ -249,6 +249,10 @@ static func _make_mesh(kind: PickupKind, shader: Shader, outline: Material) -> M
 			var m := BoxMesh.new()
 			m.size = Vector3(s, s * 0.7, s)
 			mesh = m
+		PickupKind.Shape.GEAR:
+			mesh = _gear_mesh(s)
+		PickupKind.Shape.JERRYCAN:
+			mesh = _jerrycan_mesh(s)
 		_:
 			var m := CylinderMesh.new()
 			m.top_radius = s * 0.4
@@ -257,5 +261,87 @@ static func _make_mesh(kind: PickupKind, shader: Shader, outline: Material) -> M
 			m.radial_segments = 8
 			m.rings = 0
 			mesh = m
-	mesh.material = mat
+	if mesh is PrimitiveMesh:
+		(mesh as PrimitiveMesh).material = mat
+	else:
+		mesh.surface_set_material(0, mat)
 	return mesh
+
+
+## Шестерёнка ремкомплекта: плоская, лежит; 6 крупных зубьев, отверстие ступицы. Вращение находки вокруг Y
+## (шейдер) — шестерня крутится, как в механизме. Верх и низ — кольцо между контуром зубьев и
+## отверстием (точки отверстия — на тех же углах, что и контура), стенки снаружи и внутри.
+static func _gear_mesh(s: float) -> ArrayMesh:
+	const TEETH := 6
+	var r_tip := s * 0.62
+	var r_root := s * 0.4
+	var r_hole := s * 0.15
+	var h := s * 0.26
+	var outer: Array[Vector2] = []
+	var angles: Array[float] = []
+	var step := TAU / TEETH
+	for i in TEETH:
+		var a := i * step
+		# Зуб занимает середину шага: основание, вершина, вершина, основание.
+		for k: Array in [[0.1, r_root], [0.28, r_tip], [0.62, r_tip], [0.8, r_root]]:
+			var ang: float = a + step * float(k[0])
+			angles.append(ang)
+			outer.append(Vector2.from_angle(ang) * float(k[1]))
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var n := outer.size()
+	for i in n:
+		var j := (i + 1) % n
+		var o0 := outer[i]
+		var o1 := outer[j]
+		var i0 := Vector2.from_angle(angles[i]) * r_hole
+		var i1 := Vector2.from_angle(angles[j]) * r_hole
+		for y: float in [h * 0.5, -h * 0.5]:
+			var nrm := Vector3.UP if y > 0.0 else Vector3.DOWN
+			MeshKit.tri(st, Vector3(o0.x, y, o0.y), Vector3(o1.x, y, o1.y), Vector3(i0.x, y, i0.y), nrm)
+			MeshKit.tri(st, Vector3(o1.x, y, o1.y), Vector3(i1.x, y, i1.y), Vector3(i0.x, y, i0.y), nrm)
+		var e := o1 - o0
+		var side := Vector3(e.y, 0.0, -e.x).normalized()
+		if side.dot(Vector3(o0.x + o1.x, 0.0, o0.y + o1.y)) < 0.0:
+			side = -side
+		var a0 := Vector3(o0.x, -h * 0.5, o0.y)
+		var a1 := Vector3(o1.x, -h * 0.5, o1.y)
+		MeshKit.tri(st, a0, a1, a1 + Vector3(0, h, 0), side)
+		MeshKit.tri(st, a0, a1 + Vector3(0, h, 0), a0 + Vector3(0, h, 0), side)
+		var b0 := Vector3(i0.x, -h * 0.5, i0.y)
+		var b1 := Vector3(i1.x, -h * 0.5, i1.y)
+		var inward := -Vector3(i0.x + i1.x, 0.0, i0.y + i1.y).normalized()
+		MeshKit.tri(st, b0, b1, b1 + Vector3(0, h, 0), inward)
+		MeshKit.tri(st, b0, b1 + Vector3(0, h, 0), b0 + Vector3(0, h, 0), inward)
+	return st.commit()
+
+
+## Канистра топлива: высокий плоский бак с фаской, сверху ручка из трёх перемычек, на углу — горлышко
+## с крышкой. Стоит; вращение находки показывает её то плашмя, то боком.
+static func _jerrycan_mesh(s: float) -> ArrayMesh:
+	var w := s * 0.72
+	var d := s * 0.34
+	var hgt := s * 0.9
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var body := BoxMesh.new()
+	body.size = Vector3(w, hgt, d)
+	st.append_from(body, 0, Transform3D(Basis.IDENTITY, Vector3(0, 0, 0)))
+	# Ручка: две стойки и перекладина над баком, ближе к одному краю.
+	var top := hgt * 0.5
+	for x: float in [-w * 0.32, w * 0.02]:
+		var post := BoxMesh.new()
+		post.size = Vector3(s * 0.06, s * 0.12, d * 0.4)
+		st.append_from(post, 0, Transform3D(Basis.IDENTITY, Vector3(x, top + s * 0.06, 0)))
+	var bar := BoxMesh.new()
+	bar.size = Vector3(w * 0.42, s * 0.05, d * 0.4)
+	st.append_from(bar, 0, Transform3D(Basis.IDENTITY, Vector3(-w * 0.15, top + s * 0.13, 0)))
+	# Горлышко с крышкой — на другом углу, наклонено наружу.
+	var neck := CylinderMesh.new()
+	neck.top_radius = s * 0.06
+	neck.bottom_radius = s * 0.07
+	neck.height = s * 0.14
+	neck.radial_segments = 6
+	neck.rings = 0
+	st.append_from(neck, 0, Transform3D(Basis(Vector3.BACK, -0.45), Vector3(w * 0.33, top + s * 0.05, 0)))
+	return st.commit()

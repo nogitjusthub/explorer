@@ -180,10 +180,10 @@ func _spawn() -> void:
 		var at: Variant = _ring_point(func(t: Vector2i) -> bool: return _dry(t))
 		if at != null:
 			_spawn_pack(at, _rng.randi_range(rules.pack_min, rules.pack_max))
-	# Червь — когда машина на его грунте: рядом, за кадром, на том же грунте.
+	# Червь — когда машина на его грунте (песок или грунт): рядом, за кадром, в песке.
 	var on_habitat := Worm.habitat(query, Grid.tile_of_world(vehicle.state.pos.x, vehicle.state.pos.y))
 	if counts["worms"] < _wanted(&"worms") and on_habitat and _worm_wait <= 0.0 and _rng.randf() < rules.worm_chance:
-		var at: Variant = _ring_point(func(t: Vector2i) -> bool: return Worm.habitat(query, t),
+		var at: Variant = _ring_point(func(t: Vector2i) -> bool: return Worm.spawn_ground(query, t),
 				rules.worm_spawn_min, rules.worm_spawn_max)
 		if at != null:
 			_spawn_worm(at)
@@ -352,11 +352,11 @@ func _force(kind: StringName) -> void:
 			if at != null:
 				_spawn_pack(at, rules.pack_max).wake()
 		&"worm":
-			var at: Variant = _ring_point(func(t: Vector2i) -> bool: return Worm.habitat(query, t), 3.0, 25.0)
+			var at: Variant = _scan_point(func(t: Vector2i) -> bool: return Worm.spawn_ground(query, t), 3.0, 25.0)
 			if at != null:
 				_spawn_worm(at).start_hunt()
 			else:
-				print("fauna: no worm ground (sand, plains) near the vehicle")
+				print("fauna: no sand for a worm near the vehicle")
 		&"shellback":
 			var at: Variant = _ring_point(func(t: Vector2i) -> bool: return _dry(t), 10.0, 12.0)
 			if at != null:
