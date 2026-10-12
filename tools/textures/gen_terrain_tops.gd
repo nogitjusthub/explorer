@@ -1,41 +1,31 @@
 extends SceneTree
 ## Генератор пиксельных текстур верха рельефа (GDD §11, M5): атлас assets/textures/terrain_tops.png —
-## 4 варианта (столбцы) × 6 видов поверхности (строки) по 16×16 текселей на тайл.
-## Строки: 0 — грунт, 1 — песок, 2 — камень, 3 — кристалл (как ChunkData.Mat), 4 — неровный грунт
-## (камни), 5 — зыбучий грунт (влажные пятна; рябь рисует шейдер).
-## Текстура — множитель цвета материала в оттенках серого: значение v = множитель / GAIN, поэтому
-## палитра планеты и погода остаются за шейдером. Уровни — пиксель-арт: тень, тёмный, основа,
-## светлый, блик. Детерминирована (свой seed на клетку) — повторный запуск даёт тот же файл.
+## 6 строк по 64×64 текселя; клетка накрывает 4×4 тайла (16 текселей на тайл) и бесшовна — узор идёт
+## сквозь тайлы без швов и повторяется только через 4 тайла. Шейдер берёт её по мировым XZ.
+## Строки: 0 — грунт (мягкие комья и пятна почвы), 1 — песок (сплошные гребни ряби), 2 — камень (плиты
+## с трещинами), 3 — кристаллическая порода (гранёные плиты со светлыми жилами), 4 — неровный грунт
+## (почва с мелким щебнем; крупные камни — спрайты), 5 — зыбучий грунт (влажные разводы; рябь — шейдер).
+## Как прежде, значение v = множитель / GAIN: шейдер умножает цвет материала — палитра и погода прежние.
+## Уровни квантуются (пиксель-арт), шум и ячейки — периодические (бесшовность). Детерминирован.
 ## Запуск: godot --headless --path . --script res://tools/textures/gen_terrain_tops.gd
 
-const S := 16
-const VARIANTS := 4
+const S := 64
 const ROWS := 6
-const GAIN := 1.5                       ## шейдер умножает цвет на v × GAIN
+const GAIN := 1.5
 const OUT := "res://assets/textures/terrain_tops.png"
 
-const SHADOW := 0.62
-const DARK := 0.82
-const BASE := 1.0
-const LIGHT := 1.14
-const GLINT := 1.32
-
 var _img: Image
-var _ox := 0
 var _oy := 0
-var _rng := RandomNumberGenerator.new()
+var _seed := 0
 
 
 func _initialize() -> void:
-	_img = Image.create(S * VARIANTS, S * ROWS, false, Image.FORMAT_RGB8)
+	_img = Image.create(S, S * ROWS, false, Image.FORMAT_RGB8)
 	var painters: Array[Callable] = [_ground, _sand, _rock, _crystal, _rough, _mire]
 	for row in ROWS:
-		for v in VARIANTS:
-			_ox = v * S
-			_oy = row * S
-			_rng.seed = 9000 + row * 100 + v
-			_fill(BASE)
-			painters[row].call(v)
+		_oy = row * S
+		_seed = 9100 + row * 37
+		painters[row].call()
 	DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(OUT.get_base_dir()))
 	var err := _img.save_png(OUT)
 	print("terrain tops: %s (%d×%d), error %d" % [OUT, _img.get_width(), _img.get_height(), err])
@@ -45,131 +35,155 @@ func _initialize() -> void:
 # --- Поверхности ----------------------------------------------------------------------------------
 
 
-## Грунт: пятна потемнее, мелкие тёмные крапинки, светлые комочки с тенью; в двух вариантах — кустик.
-func _ground(v: int) -> void:
-	for _i in 2:
-		_blob(_rng.randi_range(0, S - 1), _rng.randi_range(0, S - 1), 7, DARK)
-	for _i in 8:
-		_px(_rng.randi_range(0, S - 1), _rng.randi_range(0, S - 1), SHADOW)
-	for _i in 4:
-		_pebble(_rng.randi_range(1, S - 2), _rng.randi_range(1, S - 2))
-	if v >= 2:
-		_tuft(_rng.randi_range(4, S - 5), _rng.randi_range(5, S - 3))
-
-
-## Песок: три волнистых гребня ряби с разрывами — светлый гребень и тёмная ложбинка под ним, мягкий
-## контраст; редкие тёмные зёрна.
-func _sand(v: int) -> void:
-	var phase := _rng.randf() * TAU
-	for k in 3:
-		var y0 := k * 5 + v
-		for x in S:
-			if _rng.randf() < 0.18:
-				continue                              # разрыв гребня
-			var y := posmod(y0 + roundi(1.3 * sin(x * 0.45 + phase + k * 2.0)), S)
-			_px(x, y, 1.08)
-			if _rng.randf() < 0.6:
-				_px(x, (y + 1) % S, 0.92)
-	for _i in 3:
-		_px(_rng.randi_range(0, S - 1), _rng.randi_range(0, S - 1), DARK)
-
-
-## Камень: пятнистая плита и одна-две длинные извилистые трещины (тёмные, со светлым скосом над
-## ними), мягкий контраст.
-func _rock(_v: int) -> void:
-	for _i in 3:
-		_blob(_rng.randi_range(0, S - 1), _rng.randi_range(0, S - 1), 10, 0.9)
-	for _i in _rng.randi_range(1, 2):
-		var p := Vector2(_rng.randi_range(0, S - 1), _rng.randi_range(0, S - 1))
-		var a := _rng.randf() * TAU
-		for _j in _rng.randi_range(8, 14):
-			var x := roundi(p.x)
-			var y := roundi(p.y)
-			_px(x, y, 0.72)
-			_px(x, y - 1, 1.08)
-			a += _rng.randf_range(-0.7, 0.7)          # трещина петляет
-			p += Vector2.from_angle(a)
-
-
-## Кристаллическая порода: основа чуть темнее, 2–4 осколка-ромба — светлые, с бликом сверху-слева и
-## тенью снизу-справа.
-func _crystal(_v: int) -> void:
-	_fill(DARK)
-	for _i in 6:
-		_px(_rng.randi_range(0, S - 1), _rng.randi_range(0, S - 1), SHADOW)
-	for _i in _rng.randi_range(2, 4):
-		var cx := _rng.randi_range(2, S - 3)
-		var cy := _rng.randi_range(2, S - 3)
-		for dy in range(-2, 3):
-			for dx in range(-2, 3):
-				if absi(dx) + absi(dy) <= 2:
-					_px(cx + dx, cy + dy, LIGHT)
-		_px(cx - 1, cy - 1, GLINT)
-		_px(cx, cy - 2, GLINT)
-		_px(cx + 1, cy + 1, SHADOW)
-		_px(cx + 2, cy, SHADOW)
-
-
-## Неровный грунт: 4–6 камней (светлые кружки с тенью снизу-справа) и мелкий тёмный щебень.
-func _rough(_v: int) -> void:
-	for _i in 10:
-		_px(_rng.randi_range(0, S - 1), _rng.randi_range(0, S - 1), DARK)
-	for _i in _rng.randi_range(4, 6):
-		var cx := _rng.randi_range(2, S - 3)
-		var cy := _rng.randi_range(2, S - 3)
-		var r := _rng.randf_range(1.2, 2.3)
-		for dy in range(-3, 4):
-			for dx in range(-3, 4):
-				var d := Vector2(dx, dy).length()
-				if d <= r:
-					_px(cx + dx, cy + dy, LIGHT)
-				elif Vector2(dx - 1, dy - 1).length() <= r:
-					_px(cx + dx, cy + dy, SHADOW)
-		_px(cx - 1, cy - 1, GLINT)
-
-
-## Зыбучий грунт: влажный, ровный, с тёмными расплывчатыми пятнами (рябь поверх рисует шейдер).
-func _mire(_v: int) -> void:
-	_fill(DARK)
-	for _i in 3:
-		_blob(_rng.randi_range(0, S - 1), _rng.randi_range(0, S - 1), 8, SHADOW)
-	for _i in 4:
-		_px(_rng.randi_range(0, S - 1), _rng.randi_range(0, S - 1), BASE)
-
-
-# --- Мазки ----------------------------------------------------------------------------------------
-
-
-## Пятно: случайное блуждание на steps пикселей.
-func _blob(x: int, y: int, steps: int, level: float) -> void:
-	for _i in steps:
-		_px(x, y, level)
-		x += _rng.randi_range(-1, 1)
-		y += _rng.randi_range(-1, 1)
-
-
-## Комочек: светлый пиксель с тенью снизу-справа.
-func _pebble(x: int, y: int) -> void:
-	_px(x, y, LIGHT)
-	_px(x + 1, y + 1, SHADOW)
-
-
-## Кустик: «V» из тёмных пикселей с тенью у основания.
-func _tuft(x: int, y: int) -> void:
-	for d in 3:
-		_px(x - d, y - d, DARK)
-		_px(x + d, y - d, DARK)
-	_px(x, y, SHADOW)
-	_px(x, y + 1, SHADOW)
-
-
-func _fill(level: float) -> void:
+## Грунт: периодический шум в четыре уровня — мягкие пятна почвы; редкие тёмные комочки.
+func _ground() -> void:
 	for y in S:
 		for x in S:
+			var n := _fbm(x, y, [4, 8, 16], [0.55, 0.3, 0.15])
+			_px(x, y, _quant(n, [0.9, 0.96, 1.02, 1.07]))
+	for i in 40:
+		_px(_ih(i, 1) % S, _ih(i, 2) % S, 0.84)
+
+
+## Песок: сплошные гребни ряби, идущие сквозь тайлы: светлый гребень, тёмная ложбинка; шаг ~5 текселей,
+## гребни изгибаются по шуму.
+func _sand() -> void:
+	for y in S:
+		for x in S:
+			var warp := _fbm(x, y, [4, 8], [0.7, 0.3]) * 2.0
+			var ph := fposmod((x * 0.5 + y) / 5.33 + warp, 1.0)      # 12 гребней на клетку — бесшовно
+			var level := 1.0
+			if ph < 0.18:
+				level = 1.08
+			elif ph < 0.34:
+				level = 0.93
 			_px(x, y, level)
 
 
-## Пиксель клетки: координаты заворачиваются внутрь тайла (узор бесшовный в пределах клетки).
+## Камень: крупные плиты (ячейки Вороного, ~тайл), каждая своей яркости, с пятнами; тонкие трещины по
+## границам — тень со светлым краем.
+func _rock() -> void:
+	var cells := _cells(4)
+	for y in S:
+		for x in S:
+			var v := _voronoi(cells, x, y)
+			var mottle := _fbm(x, y, [8, 16], [0.6, 0.4])
+			var level: float = [0.94, 0.98, 1.0, 1.03][int(v.z) % 4] + (0.04 if mottle > 0.62 else (-0.04 if mottle < 0.38 else 0.0))
+			if v.y - v.x < 1.0:
+				level = 0.8                           # трещина между плитами
+			elif v.y - v.x < 1.9:
+				level = 1.05                          # светлый край у трещины
+			_px(x, y, level)
+
+
+## Кристаллическая порода: гранёные плиты — светлее с одной стороны ячейки, темнее с другой; по границам —
+## светлые жилы.
+func _crystal() -> void:
+	var cells := _cells(5)
+	for y in S:
+		for x in S:
+			var v := _voronoi(cells, x, y)
+			var level := 1.0
+			if v.y - v.x < 1.4:
+				level = 1.16                          # жила
+			else:
+				var d := _wrap_delta(Vector2(x + 0.5, y + 0.5), cells[int(v.z)])
+				level = 1.06 if d.x + d.y < 0.0 else 0.9   # грань к свету / от света
+			_px(x, y, level)
+
+
+## Неровный грунт: почва, как у грунта, с частым мелким щебнем (тёмные и светлые точки).
+func _rough() -> void:
+	_ground()
+	for i in 220:
+		_px(_ih(i, 3) % S, _ih(i, 4) % S, 1.12 if i % 3 == 0 else 0.8)
+
+
+## Зыбучий грунт: влажные разводы — шум в три уровня, темнее обычного.
+func _mire() -> void:
+	for y in S:
+		for x in S:
+			var n := _fbm(x, y, [8, 16], [0.6, 0.4])
+			_px(x, y, _quant(n, [0.78, 0.86, 0.94]))
+
+
+# --- Периодический шум и ячейки -------------------------------------------------------------------
+
+
+## Целочисленный хэш (детерминирован, зависит от строки атласа).
+func _ih(a: int, b: int) -> int:
+	var h := (a * 374761393 + b * 668265263 + _seed * 1013904223) & 0x7FFFFFFF
+	h = ((h ^ (h >> 13)) * 1274126177) & 0x7FFFFFFF
+	return h ^ (h >> 16)
+
+
+func _hf(a: int, b: int) -> float:
+	return float(_ih(a, b) & 0xFFFF) / 65535.0
+
+
+## Значение шума на решётке с периодом n ячеек на клетку (бесшовно по обеим осям).
+func _lattice(x: int, y: int, n: int) -> float:
+	var cell := float(S) / n
+	var fx := x / cell
+	var fy := y / cell
+	var ix := floori(fx)
+	var iy := floori(fy)
+	var tx := smoothstep(0.0, 1.0, fx - ix)
+	var ty := smoothstep(0.0, 1.0, fy - iy)
+	var a := _hf(posmod(ix, n) + n * 100, posmod(iy, n))
+	var b := _hf(posmod(ix + 1, n) + n * 100, posmod(iy, n))
+	var c := _hf(posmod(ix, n) + n * 100, posmod(iy + 1, n))
+	var d := _hf(posmod(ix + 1, n) + n * 100, posmod(iy + 1, n))
+	return lerpf(lerpf(a, b, tx), lerpf(c, d, tx), ty)
+
+
+func _fbm(x: int, y: int, periods: Array, weights: Array) -> float:
+	var v := 0.0
+	for i in periods.size():
+		v += _lattice(x, y, periods[i]) * float(weights[i])
+	return v
+
+
+## Уровень из списка по значению 0…1 (равные доли).
+func _quant(v: float, levels: Array) -> float:
+	return levels[clampi(floori(v * levels.size()), 0, levels.size() - 1)]
+
+
+## Точки ячеек: по одной в каждой клетке решётки n×n (со сдвигом).
+func _cells(n: int) -> Array[Vector2]:
+	var pts: Array[Vector2] = []
+	var cell := float(S) / n
+	for j in n:
+		for i in n:
+			pts.append(Vector2((i + 0.15 + 0.7 * _hf(i, j + 50)) * cell, (j + 0.15 + 0.7 * _hf(i + 50, j)) * cell))
+	return pts
+
+
+## Расстояния до точек ячеек с заворотом: x — до ближайшей, y — до второй, z — индекс ближайшей.
+func _voronoi(pts: Array[Vector2], x: int, y: int) -> Vector3:
+	var p := Vector2(x + 0.5, y + 0.5)
+	var d1 := INF
+	var d2 := INF
+	var best := 0
+	for i in pts.size():
+		var d := _wrap_delta(p, pts[i]).length()
+		if d < d1:
+			d2 = d1
+			d1 = d
+			best = i
+		elif d < d2:
+			d2 = d
+	return Vector3(d1, d2, best)
+
+
+## Разность с заворотом по периоду клетки.
+func _wrap_delta(a: Vector2, b: Vector2) -> Vector2:
+	var d := a - b
+	d.x -= roundf(d.x / S) * S
+	d.y -= roundf(d.y / S) * S
+	return d
+
+
 func _px(x: int, y: int, level: float) -> void:
 	var g := level / GAIN
-	_img.set_pixel(_ox + posmod(x, S), _oy + posmod(y, S), Color(g, g, g))
+	_img.set_pixel(posmod(x, S), _oy + posmod(y, S), Color(g, g, g))

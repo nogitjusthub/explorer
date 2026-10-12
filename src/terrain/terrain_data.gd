@@ -5,6 +5,7 @@ extends RefCounted
 ## чтобы правка пережила выгрузку чанка.
 
 const DIRTY_TREES := 1 << 5
+const DIRTY_SPRITES := 1 << 6           ## мелочь на земле — стоит на высоте тайла
 
 var chunks: Dictionary[Vector2i, ChunkData] = {}
 var diffs := DiffStore.new()
@@ -76,6 +77,8 @@ func write_tile(tx: int, tz: int, record: PackedByteArray, mesh_dirty: bool, tre
 			data.write_record(data.local_index(tx, tz), record)
 			if mesh_dirty:
 				data.dirty_sections |= _sections_touching(data, tx, tz)
+				if data.coord == owner:
+					data.dirty_sections |= DIRTY_SPRITES
 			if trees_dirty and data.coord == owner:
 				data.dirty_sections |= DIRTY_TREES
 

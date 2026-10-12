@@ -297,6 +297,20 @@ func _world_kit() -> Node3D:
 		var trees: Array[Mesh] = [materials.trunk_mesh, materials.log_mesh]
 		trees.append_array(materials.crown_meshes)
 		_batches(root, trees, -1.0)
+		# Мелочь на земле — пачкой с цветом и данными экземпляра, как в чанке.
+		var mm := MultiMesh.new()
+		mm.transform_format = MultiMesh.TRANSFORM_3D
+		mm.use_colors = true
+		mm.use_custom_data = true
+		mm.mesh = materials.sprite_mesh
+		mm.instance_count = 1
+		mm.set_instance_transform(0, Transform3D.IDENTITY)
+		mm.set_instance_color(0, Color.WHITE)
+		mm.set_instance_custom_data(0, Color(0, 0, 0, 0))
+		var mmi := MultiMeshInstance3D.new()
+		mmi.multimesh = mm
+		mmi.position = Vector3(1.0, 0.2, -1.0)
+		root.add_child(mmi)
 	if pickups != null:
 		_batches(root, pickups.meshes(), 1.0)
 	return root

@@ -9,8 +9,9 @@ const R_UNLOAD := 81.0        ## тайлов: чанк выгружается, 
 const LOOKAHEAD_S := 2.0      ## центр загрузки смещён по скорости машины
 const REFRESH_DIST := 2.0     ## пересчёт набора чанков после такого смещения центра
 const PART_TREES := 5
+const PART_SPRITES := 6
 const PART_WATER := 4
-const ALL_PARTS := 0x3F
+const ALL_PARTS := 0x7F
 
 enum State { GENERATING, BUILDING, READY }
 
@@ -247,7 +248,7 @@ func _start_build(e: Entry, data: ChunkData, mask: int, priority: float) -> void
 	job.streamer = self
 	job.entry = e
 	job.data = data
-	for part in 6:
+	for part in 7:
 		if mask & (1 << part):
 			job.parts.append(part)
 	e.job = job
@@ -259,6 +260,8 @@ func _build_part(node: ChunkNode, data: ChunkData, part: int) -> void:
 		node.set_section(part, ChunkMesher.build_section(data, part, run_seed))
 	elif part == PART_WATER:
 		node.set_water(ChunkMesher.build_water(data))
+	elif part == PART_SPRITES:
+		GroundSprites.build(node, data, query, run_seed)
 	else:
 		TreeField.build(node, data, query, run_seed)
 

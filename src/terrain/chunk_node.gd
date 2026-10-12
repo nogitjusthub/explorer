@@ -1,6 +1,7 @@
 class_name ChunkNode
 extends Node3D
-## Визуальная часть чанка: 4 секции рельефа, вода, деревья (стволы, кроны двух типов, поваленные).
+## Визуальная часть чанка: 4 секции рельефа, вода, деревья (стволы, кроны двух типов, поваленные),
+## мелочь на земле — спрайты травы и камней (GroundSprites).
 ## Узлы переиспользуются через пул WorldStreamer; стоят в мировом углу чанка.
 
 var sections: Array[MeshInstance3D] = []
@@ -8,6 +9,7 @@ var water: MeshInstance3D
 var trunks: MultiMeshInstance3D
 var crowns: Array[MultiMeshInstance3D] = []
 var logs: MultiMeshInstance3D
+var sprites: MultiMeshInstance3D
 
 
 func _init(mats: TerrainMaterials) -> void:
@@ -27,6 +29,9 @@ func _init(mats: TerrainMaterials) -> void:
 	for mesh in mats.crown_meshes:
 		crowns.append(_multimesh(mesh))
 	logs = _multimesh(mats.log_mesh)
+	sprites = _multimesh(mats.sprite_mesh)
+	sprites.multimesh.use_custom_data = true          # вид спрайта и зеркало
+	sprites.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 
 
 func set_section(s: int, arrays: Array) -> void:
@@ -51,6 +56,7 @@ func clear() -> void:
 	for c in crowns:
 		c.multimesh.instance_count = 0
 	logs.multimesh.instance_count = 0
+	sprites.multimesh.instance_count = 0
 
 
 func _multimesh(mesh: Mesh) -> MultiMeshInstance3D:

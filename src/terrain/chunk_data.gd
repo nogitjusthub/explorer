@@ -28,7 +28,7 @@ var trees := PackedByteArray()          ## N*N: 0 — нет; биты 0–5 —
 var tree_offset := PackedByteArray()    ## N*N: старшие 4 бита — x, младшие — z (доли тайла)
 var flags := PackedByteArray()          ## N*N: FLAG_*
 var biome := PackedByteArray()          ## N*N: Biome
-var dirty_sections: int = 0             ## биты 0–3 — секции меша, 4 — вода, 5 — деревья
+var dirty_sections: int = 0             ## биты 0–3 — секции меша, 4 — вода, 5 — деревья, 6 — мелочь на земле
 
 
 func _init(chunk_coord: Vector2i = Vector2i.ZERO) -> void:
