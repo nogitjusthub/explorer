@@ -102,3 +102,8 @@ static func material(color: Color) -> StandardMaterial3D:
 	m.albedo_color = color
 	m.roughness = 0.8
 	return m
+
+
+## Покров с пиксельным узором (M5): панцирь, шкура, чешуя, ил. Цвет — BodyMaterial.set_color.
+static func skin(color: Color, pattern: BodyMaterial.Pattern, px: float, roughness: float = 0.8) -> ShaderMaterial:
+	return BodyMaterial.make(color, pattern, px, roughness)

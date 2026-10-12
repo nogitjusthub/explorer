@@ -163,8 +163,8 @@ var _wake: Node3D
 var _arms: Array[MeshInstance3D] = []
 var _bubbles: CPUParticles3D
 var _splash: CPUParticles3D
-var _bone: StandardMaterial3D
-var _narrow: StandardMaterial3D
+var _bone: ShaderMaterial
+var _narrow: ShaderMaterial
 var _hot: StandardMaterial3D
 var _throat_mat: StandardMaterial3D
 var _ring_mat: StandardMaterial3D
@@ -754,8 +754,8 @@ func _hide_body() -> void:
 ## основание морды, глотка и три челюсти, как у червя; спина — дуга из таких же звеньев; пена: кольцо у основания, два гребня
 ## V-следа; пузыри и всплеск. 20 деталей и 2 системы частиц.
 func _build() -> void:
-	_bone = Creature.material(BONE_COLOR)
-	_narrow = Creature.material(NARROW_COLOR)
+	_bone = Creature.skin(BONE_COLOR, BodyMaterial.Pattern.SCALES, 0.035)
+	_narrow = Creature.skin(NARROW_COLOR, BodyMaterial.Pattern.SCALES, 0.035)
 	_hot = StandardMaterial3D.new()
 	_hot.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	_hot.albedo_color = HOT_COLOR

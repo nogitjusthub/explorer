@@ -346,8 +346,8 @@ func _build_ring() -> void:
 func _build_body() -> void:
 	_body = Node3D.new()
 	add_child(_body)
-	var mat := Creature.material(BODY_COLOR)
-	var ring := Creature.material(RING_COLOR)
+	var mat := Creature.skin(BODY_COLOR, BodyMaterial.Pattern.GROOVES, 0.05)
+	var ring := Creature.skin(RING_COLOR, BodyMaterial.Pattern.GROOVES, 0.05)
 	for i in DISCS:
 		var big := i % 2 == 0
 		var disc := MeshKit.prism(_body, MeshKit.ngon(8 if big else 7, R * (1.0 if big else 0.84)),

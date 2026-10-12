@@ -15,6 +15,10 @@ extends RefCounted
 ## Силуэт сквозь стены: крупные окрашенные части — stencil XRAY (силуэт рисуется там, где в stencil
 ## не 1), остальные непрозрачные детали пишут в stencil ту же 1 — иначе силуэт корпуса ложился бы
 ## поверх них, и они казались бы прозрачными.
+##
+## Пиксельные узоры (M5, BodyMaterial): обшивка — по граням (MeshKit.face_mapped): кромка в пиксель,
+## двери по бортам, крышки багажных люков, решётки моторных отсеков — симметрично по сетке грани;
+## гусеницы — траки, юбка ховера — секции.
 
 const XRAY_COLOR := Color(1.0, 0.75, 0.25, 0.75)
 const TRIM := Color(0.1, 0.1, 0.12)
@@ -22,13 +26,14 @@ const RUBBER := Color(0.12, 0.11, 0.13)
 const LAMP := Color(1.0, 0.95, 0.7)
 const BODY := Color(0.92, 0.52, 0.16)       ## цвет экспедиции — общий для всех классов
 const UNDER := Color(0.24, 0.24, 0.27)      ## днище, кант
-const METAL := Color(0.72, 0.72, 0.76)      ## диски и катки
+const METAL := Color(0.58, 0.55, 0.5)       ## диски и катки — грязно-серые
 const DOME_GLASS := Color(0.4, 0.82, 0.98, 0.7)
 const DOME_R := 0.15
 const ROD_R := 0.014                       ## толщина антенны — по ней трубы бамперов и кенгурятника
 const BEACON := Color(1.0, 0.35, 0.25)       ## огонёк антенны: ярко — вызов аварийного челнока
 const BEACON_DIM := Color(0.5, 0.15, 0.11)   ## обычно тлеет
 const BOW_DEG := 60.0                      ## скосы носа ховера от поперечной линии
+const PX := 0.035                          ## тексель узора — около пикселя рендера при обычном зуме
 
 
 ## Собранная модель: корень, все материалы (для потемнения при гибели) и вращающиеся части.
@@ -37,7 +42,7 @@ class Model:
 	var root: Node3D
 	var body: Node3D                        ## корпус на подвеске (тряска хода); дочерний root, в покое — без смещения
 	var antenna: Node3D                     ## шарнир у основания антенны (качается хлыстом), дочерний body
-	var materials: Array[StandardMaterial3D] = []
+	var materials: Array[Material] = []        ## StandardMaterial3D и BodyMaterial (цвет — BodyMaterial.set_color)
 	var spinners: Array[Node3D] = []        ## вращаются вокруг своей оси Z (вентиляторы)
 	var hover_height := 0.0                 ## модель парит над поверхностью (ховер)
 	var beacon: StandardMaterial3D          ## огонёк на конце антенны (мигает, пока летит аварийный челнок)
@@ -48,7 +53,10 @@ class Model:
 static func build_plain(id: StringName) -> Model:
 	var m := build(id)
 	for mat in m.materials:
-		mat.stencil_mode = BaseMaterial3D.STENCIL_MODE_DISABLED
+		if mat is ShaderMaterial:
+			mat.next_pass = null                  # запись в stencil без силуэта ничего не рисует
+		else:
+			(mat as BaseMaterial3D).stencil_mode = BaseMaterial3D.STENCIL_MODE_DISABLED
 	return m
 
 
@@ -66,6 +74,7 @@ static func build(id: StringName) -> Model:
 			_hover(m)
 		_:
 			_rover(m)
+	_map_faces(m.root)
 	return m
 
 
@@ -82,7 +91,14 @@ static func _rover(m: Model) -> void:
 			_cyl(m.root, 0.13, 0.12, Vector3(x, 0.13, z), tire, Vector3(0, 0, PI * 0.5), 8)
 			_cyl(m.root, 0.05, 0.126, Vector3(x, 0.13, z), hub, Vector3(0, 0, PI * 0.5), 6)
 	_box(b, Vector3(0.34, 0.08, 0.62), Vector3(0, 0.17, 0.0), under)
-	_box(b, Vector3(0.44, 0.2, 0.64), Vector3(0, 0.29, 0.0), paint)
+	var hull := _box(b, Vector3(0.44, 0.2, 0.64), Vector3(0, 0.29, 0.0), paint)
+	# Двери под куполом, багажник в корме (петли сверху), решётка мотора на крыше за куполом.
+	var details := _doors(0.22, -0.2, 0.02, -0.065, 0.065)
+	details.append(BodyMaterial.detail(BodyMaterial.Detail.HATCH, Vector3.BACK,
+			Vector3(-0.13, -0.065, 0.32), Vector3(0.13, 0.065, 0.32), Vector3.UP))
+	details.append(BodyMaterial.detail(BodyMaterial.Detail.VENT, Vector3.UP,
+			Vector3(-0.12, 0.1, 0.1), Vector3(0.12, 0.1, 0.28)))
+	hull.set_meta(&"details", details)
 	_dome(m, Vector3(0, 0.39, -0.08))
 	for x in [-0.12, 0.12]:
 		_box(b, Vector3(0.06, 0.04, 0.02), Vector3(x, 0.3, -0.325), lamp)
@@ -98,20 +114,32 @@ static func _rover(m: Model) -> void:
 
 static func _tank(m: Model) -> void:
 	var paint := _paint(m, BODY)
-	var track := _solid(m, RUBBER)
+	var track := _patterned(m, RUBBER, BodyMaterial.Pattern.TRACK)
 	var wheel := _solid(m, METAL)
 	var lamp := _lamp(m)
 	var r := m.body
 	# Купол-кабина спереди — самая высокая точка, кузов сзади ниже купола: перед читается сразу.
+	const TRACK_W := 0.15
+	const WHEEL_W := 0.03
 	for x in [-0.245, 0.245]:
-		_side_prism(m.root, _octagon(0.18, 0.84, 0.06), x, 0.15, track)   # гусеница: углы срезаны под 45°
+		_side_prism(m.root, _octagon(0.18, 0.84, 0.06), x, TRACK_W, track)   # гусеница: углы срезаны под 45°
 		var side := signf(x)
-		for z in [-0.33, -0.11, 0.11, 0.33]:          # катки равномерно, крайние — у концов гусеницы
-			_cyl(m.root, 0.065, 0.03, Vector3(x + side * 0.08, 0.085, z), wheel, Vector3(0, 0, PI * 0.5), 8)
+		# Катки равномерно, крайние — у концов гусеницы; утоплены в ленту, наружу — едва (как диски ровера).
+		var wx: float = x + side * (TRACK_W * 0.5 + 0.003 - WHEEL_W * 0.5)
+		for z in [-0.33, -0.11, 0.11, 0.33]:
+			_cyl(m.root, 0.065, WHEEL_W, Vector3(wx, 0.085, z), wheel, Vector3(0, 0, PI * 0.5), 8)
 	_box(r, Vector3(0.62, 0.03, 0.8), Vector3(0, 0.195, 0.0), paint)       # полки над гусеницами
-	_box(r, Vector3(0.4, 0.19, 0.82), Vector3(0, 0.275, 0.0), paint)       # корпус
+	var hull := _box(r, Vector3(0.4, 0.19, 0.82), Vector3(0, 0.275, 0.0), paint)   # корпус
+	# Двери под куполом над полками, решётка мотора в корме.
+	var details := _doors(0.2, -0.33, -0.1, -0.055, 0.055)
+	details.append(BodyMaterial.detail(BodyMaterial.Detail.VENT, Vector3.BACK,
+			Vector3(-0.12, -0.04, 0.41), Vector3(0.12, 0.04, 0.41)))
+	hull.set_meta(&"details", details)
 	_dome(m, Vector3(0, 0.37, -0.2))
-	_box(r, Vector3(0.42, 0.11, 0.38), Vector3(0, 0.425, 0.22), paint)     # трюм — вровень с кормой, ниже купола
+	# Трюм — вровень с кормой, ниже купола; на крыше — люк, петли спереди.
+	var hold := _box(r, Vector3(0.42, 0.11, 0.38), Vector3(0, 0.425, 0.22), paint)
+	hold.set_meta(&"details", [BodyMaterial.detail(BodyMaterial.Detail.HATCH, Vector3.UP,
+			Vector3(-0.1, 0.055, -0.13), Vector3(0.1, 0.055, 0.13), Vector3.FORWARD)])
 	for x in [-0.12, 0.12]:
 		_box(r, Vector3(0.06, 0.04, 0.02), Vector3(x, 0.3, -0.415), lamp)
 	# Кенгурятник как у Humvee (design_references/tank/front_guard*): плоская прямоугольная рамка перед
@@ -136,7 +164,7 @@ static func _tank(m: Model) -> void:
 
 static func _hover(m: Model) -> void:
 	m.hover_height = 0.05
-	var skirt := _paint(m, Color(0.13, 0.13, 0.15))
+	var skirt := _paint(m, Color(0.13, 0.13, 0.15), BodyMaterial.Pattern.SKIRT)
 	var paint := _paint(m, BODY)
 	var under := _solid(m, UNDER)
 	var fan := _solid(m, BODY)
@@ -154,7 +182,10 @@ static func _hover(m: Model) -> void:
 	# Корпус — призмы с прямым носом и скосами по бокам (BOW_DEG от поперечной линии).
 	MeshKit.prism(r, _bow(0.25, -0.37, 0.37, 0.11), 0.27, 0.035, under)          # кант палубы
 	MeshKit.prism(r, _bow(0.23, -0.35, 0.35, 0.1), 0.3, 0.05, paint)              # палуба
-	MeshKit.prism(r, _bow(0.18, -0.25, 0.21, 0.09), 0.35, 0.1, paint)             # надстройка
+	# Надстройка; на крыше за куполом — люк, петли спереди.
+	var cabin := MeshKit.prism(r, _bow(0.18, -0.25, 0.21, 0.09), 0.35, 0.1, paint)
+	cabin.set_meta(&"details", [BodyMaterial.detail(BodyMaterial.Detail.HATCH, Vector3.UP,
+			Vector3(-0.08, 0.45, 0.07), Vector3(0.08, 0.45, 0.17), Vector3.FORWARD)])
 	_dome(m, Vector3(0, 0.45, -0.08))
 	# Два вентилятора в длинных кожухах на корме; лопасти вращаются.
 	for x in [-0.13, 0.13]:
@@ -174,6 +205,31 @@ static func _hover(m: Model) -> void:
 		_box(rotor, Vector3(0.03, 0.17, 0.01), Vector3.ZERO, blade)
 		m.spinners.append(rotor)
 	_antenna(m, Vector3(0.12, 0.45, 0.14))
+
+
+## Двери по обоим бортам коробки полушириной hx: от z0 до z1, по высоте от y0 до y1 (координаты коробки);
+## ручка — к корме.
+static func _doors(hx: float, z0: float, z1: float, y0: float, y1: float) -> Array[Dictionary]:
+	var out: Array[Dictionary] = []
+	for s: float in [-1.0, 1.0]:
+		out.append(BodyMaterial.detail(BodyMaterial.Detail.DOOR, Vector3(s, 0, 0), Vector3(s * hx, y0, z0),
+				Vector3(s * hx, y1, z1), Vector3.BACK))
+	return out
+
+
+## Детали с узором (body_xray) — меш с разметкой граней (MeshKit.face_mapped): обшивка ложится по граням,
+## детали из мета details — на свои грани.
+static func _map_faces(n: Node) -> void:
+	if n is MeshInstance3D:
+		var mi := n as MeshInstance3D
+		var mat := mi.material_override as ShaderMaterial
+		if mat != null and mat.shader == BodyMaterial.SHADER_XRAY:
+			var details: Array[Dictionary] = []
+			if mi.has_meta(&"details"):
+				details.assign(mi.get_meta(&"details"))
+			mi.mesh = MeshKit.face_mapped(mi.mesh, details)
+	for c in n.get_children():
+		_map_faces(c)
 
 
 ## Купол-кабина — у всех классов одинаковый: прозрачная полусфера, в stencil не пишет.
@@ -244,13 +300,15 @@ static func _side_prism(parent: Node3D, profile: PackedVector2Array, x_center: f
 
 
 ## Крупная окрашенная часть: даёт силуэт сквозь препятствия.
-static func _paint(m: Model, color: Color) -> StandardMaterial3D:
-	var mat := StandardMaterial3D.new()
-	mat.albedo_color = color
-	mat.roughness = 0.7
-	mat.stencil_mode = BaseMaterial3D.STENCIL_MODE_XRAY
-	mat.stencil_color = XRAY_COLOR
-	mat.stencil_reference = 1
+static func _paint(m: Model, color: Color, pattern := BodyMaterial.Pattern.PLATES) -> ShaderMaterial:
+	var mat := BodyMaterial.stencil(color, pattern, PX, 0.7, XRAY_COLOR)
+	m.materials.append(mat)
+	return mat
+
+
+## Деталь с узором: как _solid, пишет 1 в stencil.
+static func _patterned(m: Model, color: Color, pattern: BodyMaterial.Pattern) -> ShaderMaterial:
+	var mat := BodyMaterial.stencil(color, pattern, PX)
 	m.materials.append(mat)
 	return mat
 

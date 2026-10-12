@@ -487,11 +487,13 @@ func _place() -> void:
 func _build() -> void:
 	_root = Node3D.new()
 	add_child(_root)
-	_mesh_off(MeshKit.prism(_root, MeshKit.ngon(3, R_RIM, _phase), LID_TOP - 0.03, 0.02, Creature.material(RIM_COLOR)))
+	_mesh_off(MeshKit.prism(_root, MeshKit.ngon(3, R_RIM, _phase), LID_TOP - 0.03, 0.02,
+			Creature.skin(RIM_COLOR, BodyMaterial.Pattern.PEBBLE, 0.03)))
 	_lid = Node3D.new()
 	_root.add_child(_lid)
-	_mesh_off(MeshKit.prism(_lid, MeshKit.ngon(3, R_LID, _phase), LID_TOP - LID_H, LID_H, Creature.material(LID_COLOR)))
-	var pebble := Creature.material(LID_COLOR.lightened(0.15))
+	_mesh_off(MeshKit.prism(_lid, MeshKit.ngon(3, R_LID, _phase), LID_TOP - LID_H, LID_H,
+			Creature.skin(LID_COLOR, BodyMaterial.Pattern.PEBBLE, 0.03)))
+	var pebble := Creature.skin(LID_COLOR.lightened(0.15), BodyMaterial.Pattern.PEBBLE, 0.03)
 	var lid_box := BoxMesh.new()
 	lid_box.size = Vector3(0.1, 0.02, 0.09)
 	for i in 3:

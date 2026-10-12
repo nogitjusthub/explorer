@@ -212,7 +212,7 @@ func _build_model() -> Node3D:
 	sm.radial_segments = 10
 	sm.rings = 3
 	shell.mesh = sm
-	shell.material_override = Creature.material(SHELL_COLOR)
+	shell.material_override = Creature.skin(SHELL_COLOR, BodyMaterial.Pattern.SCUTES, 0.05)
 	shell.position = Vector3(0, 0.12, 0)
 	shell.scale = Vector3(1.0, 0.85, 1.25)
 	root.add_child(shell)
@@ -229,7 +229,8 @@ func _build_model() -> Node3D:
 	var hb := BoxMesh.new()
 	hb.size = Vector3(0.24, 0.16, 0.18)
 	head.mesh = hb
-	head.material_override = Creature.material(LEG_COLOR)
+	var hide := Creature.skin(LEG_COLOR, BodyMaterial.Pattern.HIDE, 0.04)
+	head.material_override = hide
 	head.position = Vector3(0, 0.14, -0.55)
 	root.add_child(head)
 	var horn := MeshInstance3D.new()
@@ -244,7 +245,7 @@ func _build_model() -> Node3D:
 	horn.position = Vector3(0, 0.22, -0.68)
 	horn.rotation.x = -1.1
 	root.add_child(horn)
-	var leg := Creature.material(LEG_COLOR)
+	var leg := hide
 	for x in [-0.4, 0.4]:
 		for z in [-0.25, 0.0, 0.25]:
 			var l := MeshInstance3D.new()

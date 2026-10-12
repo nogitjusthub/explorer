@@ -124,8 +124,8 @@ var _lids: Array[Node3D] = []
 var _frill: Node3D
 var _tail: Node3D
 var _pecs: Array[Node3D] = []
-var _mud_mat: StandardMaterial3D
-var _fin_mat: StandardMaterial3D
+var _mud_mat: ShaderMaterial
+var _fin_mat: ShaderMaterial
 var _throat_mat: StandardMaterial3D
 var _eye_mat: StandardMaterial3D
 var _sail_mat: StandardMaterial3D        ## перепонка гребня
@@ -713,7 +713,7 @@ func _animate(dt: float) -> void:
 			p.rotation = Vector3(0.0, -s * 0.9, s * 0.4)             # прижаты к телу
 	# Алое — свечением по тёмному: освещённый алый альбедо со свечением выгорает в оранжевый.
 	_throat_mat.emission_energy_multiplier = _glow
-	var fin := _fin_mat.albedo_color
+	var fin := _mud.darkened(0.25)
 	_sail_mat.albedo_color = fin.lerp(SAIL_COLOR, _glow)
 	_sail_mat.emission_energy_multiplier = _glow * 0.35
 	_rim_mat.albedo_color = fin.lerp(THROAT_COLOR, _glow)
@@ -735,8 +735,8 @@ func _tint(dt: float) -> void:
 		var k := minf(dt * 2.0, 1.0)
 		_mud = _mud.lerp(MUD_SAND if sand else MUD_GROUND, k)
 		_clod = _clod.lerp(CLOD_SAND if sand else CLOD_GROUND, k)
-	_mud_mat.albedo_color = _mud
-	_fin_mat.albedo_color = _mud.darkened(0.25)
+	BodyMaterial.set_color(_mud_mat, _mud)
+	BodyMaterial.set_color(_fin_mat, _mud.darkened(0.25))
 
 
 ## След макушки, пока плывёт под поверхностью: комья ила (брызги над водой) и расходящиеся круги.
@@ -810,10 +810,8 @@ const JAW: Array[Vector4] = [Vector4(0.04, 0.14, 0.085, -0.035), Vector4(-0.07, 
 ## Илозуб из 21 детали: туловище и голова — низкополигональные лофты, плавники — клинья и веера, гребень —
 ## лучи с перепонкой. Перед — по −Z.
 func _build() -> void:
-	_mud_mat = Creature.material(_mud)
-	_mud_mat.roughness = 0.45                      # мокрый — чуть блестит
-	_fin_mat = Creature.material(_mud.darkened(0.25))
-	_fin_mat.roughness = 0.45
+	_mud_mat = Creature.skin(_mud, BodyMaterial.Pattern.MUD, 0.03, 0.45)    # мокрый — чуть блестит
+	_fin_mat = Creature.skin(_mud.darkened(0.25), BodyMaterial.Pattern.MUD, 0.03, 0.45)
 	_throat_mat = Creature.material(THROAT_COLOR)
 	_throat_mat.emission_enabled = true
 	_throat_mat.emission = THREAT_COLOR

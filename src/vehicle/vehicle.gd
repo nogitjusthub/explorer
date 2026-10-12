@@ -245,7 +245,7 @@ func _physics_process(dt: float) -> void:
 func wreck() -> void:
 	wrecked = true
 	for mat in _model.materials:
-		mat.albedo_color = mat.albedo_color.darkened(WRECK_DARKEN)
+		BodyMaterial.set_color(mat, BodyMaterial.color_of(mat).darkened(WRECK_DARKEN))
 
 
 func _apply_transform() -> void:
