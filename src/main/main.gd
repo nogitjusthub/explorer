@@ -11,6 +11,7 @@ const EVAC_SCENE_S := 3.4         ## эвакуация: машину втяги
 const LANDING_TRIES := 40
 const SPAWN_HEADING := -PI * 0.75
 const SPAWN_PAD_OFFSET := 2.0     ## без десанта машина стоит на краю площадки — в зоне погрузки, не под челноком
+const HANGAR_JOB_BUDGET_USEC := 12000   ## в трюме кадр почти пустой — мир догружается быстрее
 
 var run_seed: int
 var terrain: TerrainData
@@ -41,6 +42,10 @@ var _weather_k := {&"storm": 0.0, &"murk": 0.0}
 var _spawn := Vector2.ZERO
 var _over_timer := 0.0
 var _refused_key := -1             ## находка, на которую уже показали «трюм полон»
+var _hangar: HangarScreen
+var _world_pending := false        ## мир вокруг старта ещё грузится в фоне (пока игрок в трюме)
+var _begin_waiting := false        ## игрок уже нажал «Высадка» — ждём мир за затемнением
+var _job_budget := 0
 
 
 func _ready() -> void:
@@ -76,6 +81,7 @@ func _ready() -> void:
 		rig.turn_enabled = false
 		hud.visible = false
 		add_child(hangar)
+		_hangar = hangar
 
 
 func _build_world(args: Dictionary) -> void:
@@ -120,12 +126,19 @@ func _build_world(args: Dictionary) -> void:
 	streamer.chunk_removed.connect(pickups.on_chunk_removed)
 
 	var spawn := _spawn_point(args)
-	var t0 := Time.get_ticks_usec()
-	streamer.preload_around(spawn)
-	if _plays_drop() and not args.has("spawn"):
-		spawn = _landing_point(spawn)
+	# Обычный старт — через трюм: он показывается сразу, а мир вокруг точки старта догружается задачами,
+	# пока игрок выбирает машину (в браузере синхронная загрузка — это секунды чёрного экрана).
+	_world_pending = not dev.skips_start() and not Settings.quick_restart
+	if _world_pending:
+		_job_budget = scheduler.budget_usec
+		scheduler.budget_usec = maxi(_job_budget, HANGAR_JOB_BUDGET_USEC)
+	else:
+		var t0 := Time.get_ticks_usec()
 		streamer.preload_around(spawn)
-	print("preload: %d chunks in %d ms" % [streamer.loaded_count(), (Time.get_ticks_usec() - t0) / 1000])
+		if _plays_drop() and not args.has("spawn"):
+			spawn = _landing_point(spawn)
+			streamer.preload_around(spawn)
+		print("preload: %d chunks in %d ms" % [streamer.loaded_count(), (Time.get_ticks_usec() - t0) / 1000])
 
 	var vehicle_id := StringName(args.get("vehicle", Settings.vehicle_id))
 	if Balance.vehicle(vehicle_id) == null:
@@ -134,6 +147,7 @@ func _build_world(args: Dictionary) -> void:
 	vehicle.crawl_speed = rules.empty_crawl_speed
 	add_child(vehicle)
 	vehicle.place(spawn, SPAWN_HEADING)
+	vehicle.set_physics_process(not _world_pending)     # под незагруженным рельефом машине нечего делать
 	vehicle.damaged.connect(_on_vehicle_damaged)
 	vehicle.died.connect(_on_vehicle_died)
 	_spawn = spawn
@@ -199,7 +213,7 @@ func _build_world(args: Dictionary) -> void:
 	add_child(_help)
 
 	var warmup := Warmup.new()
-	warmup.at = Vector3(spawn.x, vehicle.state.y, spawn.y)
+	warmup.at = Vector3(spawn.x, 0.0 if _world_pending else vehicle.state.y, spawn.y)
 	warmup.rules = rules
 	warmup.vehicle = vehicle
 	warmup.query = query
@@ -309,6 +323,12 @@ func _plays_drop() -> bool:
 
 
 func _begin() -> void:
+	if _world_pending:
+		# «Высадка» раньше, чем догрузился мир: трюм держит затемнение с надписью, пока мир не готов.
+		_begin_waiting = true
+		if _hangar != null and is_instance_valid(_hangar):
+			_hangar.waiting = true
+		return
 	if not dev.skips_start():
 		Settings.vehicle_id = String(vehicle.cls.id)
 		Settings.save_settings()
@@ -381,7 +401,25 @@ func _step(dt: float) -> void:
 	hud.radar.jammed = threats.radar_jammed()
 
 
+## Мир вокруг старта догрузился (трюм): точка высадки, машина на место, обычный бюджет задач.
+func _on_world_ready() -> void:
+	_world_pending = false
+	print("world ready in background: %d chunks, %d ms after start" % [streamer.loaded_count(), Time.get_ticks_msec()])
+	scheduler.budget_usec = _job_budget
+	if _plays_drop() and not dev.args.has("spawn"):
+		_spawn = _landing_point(_spawn)
+	vehicle.place(_spawn, SPAWN_HEADING)
+	vehicle.set_physics_process(true)
+	if _begin_waiting:
+		_begin_waiting = false
+		if _hangar != null and is_instance_valid(_hangar):
+			_hangar.waiting = false
+		_begin()
+
+
 func _process(dt: float) -> void:
+	if _world_pending and streamer.ready_around(_spawn):
+		_on_world_ready()
 	if phase == Phase.OVER:
 		_over_timer -= dt
 		if _over_timer <= 0.0:

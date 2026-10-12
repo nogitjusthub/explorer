@@ -133,6 +133,24 @@ func generating_count() -> int:
 	return n
 
 
+## Мир вокруг точки готов: все чанки в радиусе загрузки собраны и ямы залиты (рельеф окончательный).
+func ready_around(pos: Vector2) -> bool:
+	if _pits_needed or _pit_job != null:
+		return false
+	var c0 := Grid.chunk_of_world(pos.x - R_LOAD, pos.y - R_LOAD)
+	var c1 := Grid.chunk_of_world(pos.x + R_LOAD, pos.y + R_LOAD)
+	for cz in range(c0.y, c1.y + 1):
+		for cx in range(c0.x, c1.x + 1):
+			var coord := Vector2i(cx, cz)
+			var x0 := float(cx * Grid.CHUNK)
+			var z0 := float(cz * Grid.CHUNK)
+			var dx := maxf(maxf(x0 - pos.x, pos.x - (x0 + Grid.CHUNK)), 0.0)
+			var dz := maxf(maxf(z0 - pos.y, pos.y - (z0 + Grid.CHUNK)), 0.0)
+			if sqrt(dx * dx + dz * dz) <= R_LOAD and not is_ready(coord):
+				return false
+	return true
+
+
 func is_ready(coord: Vector2i) -> bool:
 	var e: Entry = _entries.get(coord)
 	return e != null and e.state == State.READY

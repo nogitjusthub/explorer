@@ -9,9 +9,9 @@ func _fixed_pad(pad: Vector3i) -> Callable:
 
 func test_schedule_intervals_and_distances() -> void:
 	var s := ShuttleScheduler.new(BalanceRules.new(), _fixed_pad(ShuttleScheduler.NO_PAD))
-	assert_eq(s.interval(0), 90.0)
-	assert_eq(s.interval(1), 120.0)
-	assert_eq(s.interval(5), 180.0, "capped")
+	assert_eq(s.interval(0), 60.0)
+	assert_eq(s.interval(1), 75.0)
+	assert_eq(s.interval(5), 120.0, "capped")
 	assert_eq(s.distance(0), 25.0)
 	assert_eq(s.distance(2), 55.0)
 	assert_eq(s.distance(9), 70.0, "capped")
@@ -25,7 +25,7 @@ func test_announce_land_hold_depart() -> void:
 	s.announced.connect(func(_p: Vector3i) -> void: events.append("announced"))
 	s.landed.connect(func(_p: Vector3i) -> void: events.append("landed"))
 	s.departed.connect(func() -> void: events.append("departed"))
-	s.tick(59.0, Vector2.ZERO, false)
+	s.tick(29.0, Vector2.ZERO, false)
 	assert_false(s.has_pad(), "pad unknown until 30 s before landing")
 	s.tick(1.5, Vector2.ZERO, false)
 	assert_true(s.has_pad())
@@ -40,7 +40,7 @@ func test_announce_land_hold_depart() -> void:
 	s.tick(rules.shuttle_window_s, Vector2.ZERO, false)
 	assert_eq(s.state, ShuttleScheduler.State.WAITING)
 	assert_eq(s.k, 1)
-	assert_eq(s.time_left, 120.0, "next interval counts from departure")
+	assert_eq(s.time_left, 75.0, "next interval counts from departure")
 	assert_false(s.has_pad())
 	assert_eq(events, ["announced", "landed", "departed"] as Array[String])
 
@@ -50,12 +50,12 @@ func test_departs_right_after_shipping() -> void:
 	var s := ShuttleScheduler.new(BalanceRules.new(), _fixed_pad(Vector3i(10, 20, 5)))
 	var departed := [false]
 	s.departed.connect(func() -> void: departed[0] = true)
-	s.tick(91.0, Vector2.ZERO, false)
+	s.tick(61.0, Vector2.ZERO, false)
 	assert_eq(s.state, ShuttleScheduler.State.LANDED)
 	s.depart()
 	assert_true(departed[0])
 	assert_eq(s.state, ShuttleScheduler.State.WAITING)
-	assert_eq(s.time_left, 120.0)
+	assert_eq(s.time_left, 75.0)
 	departed[0] = false
 	s.depart()
 	assert_false(departed[0], "only a landed shuttle can depart")

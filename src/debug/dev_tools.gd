@@ -69,6 +69,7 @@ var _chunks_built := 0
 var _slow_frames := 0
 var _physics_seen := 0                 ## Engine.get_physics_frames() в прошлом кадре — сколько шагов физики было
 var script_usec := 0                   ## шаги игры (GameFlow) с прошлого кадра, мкс — копит main
+var _builds := 0                       ## сборок чанков (в т. ч. пересборок) с прошлого кадра — для --log-slow
 var _objects_at_start := 0
 var _presses: Array[Dictionary] = []    ## {action, at}
 var _clicks: Array[Dictionary] = []     ## {pos (пиксели рендера), at}
@@ -101,6 +102,8 @@ func _init(parsed_args: Dictionary) -> void:
 
 
 func _ready() -> void:
+	if streamer != null:
+		streamer.chunk_built.connect(func(_c: Vector2i) -> void: _builds += 1)
 	if args.has("log-slow"):
 		# Время отрисовки кадра (ЦП и ГП) — чтобы отличить тормоза игры от тормозов рендера и браузера.
 		RenderingServer.viewport_set_measure_render_time(get_viewport().get_viewport_rid(), true)
@@ -187,6 +190,7 @@ func _process(dt: float) -> void:
 				_log_slow(dt)
 	_physics_seen = Engine.get_physics_frames()
 	script_usec = 0
+	_builds = 0
 	for action in _release:
 		var up := InputEventAction.new()
 		up.action = action
@@ -304,10 +308,10 @@ func _report(line: String) -> void:
 ## браузер (сборка мусора, звук, драйвер). В вебе при бенчмарке строка уходит и на локальный сервер.
 func _log_slow(dt: float) -> void:
 	var vp := get_viewport().get_viewport_rid()
-	var line := "slow frame %.1f ms at %.2f s — game steps %.1f ms ×%d, jobs %.1f ms, render cpu %.1f / gpu %.1f ms, draws %d, objects %d" % [
+	var line := "slow frame %.1f ms at %.2f s — game steps %.1f ms ×%d, jobs %.1f ms, chunks built %d, render cpu %.1f / gpu %.1f ms, draws %d, objects %d" % [
 		dt * 1000.0, _elapsed,
 		script_usec / 1000.0, Engine.get_physics_frames() - _physics_seen,
-		scheduler.last_frame_usec / 1000.0 if scheduler != null else 0.0,
+		scheduler.last_frame_usec / 1000.0 if scheduler != null else 0.0, _builds,
 		RenderingServer.viewport_get_measured_render_time_cpu(vp),
 		RenderingServer.viewport_get_measured_render_time_gpu(vp),
 		Performance.get_monitor(Performance.RENDER_TOTAL_DRAW_CALLS_IN_FRAME),

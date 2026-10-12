@@ -8,6 +8,9 @@ extends CanvasLayer
 ## Трюм — отдельный мир в SubViewport: свой свет и окружение, игровой мир под экраном не трогаем.
 
 signal started
+
+var waiting := false               ## мир ещё грузится: после «Высадки» держим затемнение с надписью
+var _loading: Label
 signal vehicle_changed(id: StringName)
 
 const VIEW := Vector2i(480, 320)
@@ -673,5 +676,26 @@ func _leave(dt: float) -> void:
 			if c != _fade and c is CanvasItem:
 				(c as CanvasItem).visible = false
 		started.emit()
+	if waiting and _emitted:
+		_leave_t = minf(_leave_t, 0.2 + SINK_S + 0.1)   # затемнение не уходит, пока мир не готов
+		_fade.color.a = 1.0
+		_show_loading()
+		return
+	if _loading != null:
+		_loading.visible = false
 	if fade_out >= 1.0:
 		queue_free()
+
+
+## Надпись «загрузка мира…» поверх затемнения (точки бегут).
+func _show_loading() -> void:
+	if _loading == null:
+		_loading = Label.new()
+		_loading.add_theme_font_size_override(&"font_size", 8)
+		_loading.add_theme_color_override(&"font_color", Color(0.75, 0.72, 0.8))
+		_loading.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		_loading.position = Vector2(0, 152)
+		_loading.size = Vector2(480, 16)
+		add_child(_loading)
+	_loading.visible = true
+	_loading.text = "загрузка мира" + ".".repeat(Time.get_ticks_msec() / 400 % 4)

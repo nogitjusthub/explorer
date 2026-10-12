@@ -179,10 +179,13 @@ func _draw_hud() -> void:
 	_text(Vector2(6, 21), "ТОП", 8, COLOR_FUEL_LOW if low and blink_on else COLOR_DIM)
 	_bar(Vector2(32, 16), fuel_frac, COLOR_FUEL_LOW if low else COLOR_FUEL, blink_on)
 	_text(Vector2(6, 31), "ГРУЗ", 8, COLOR_DIM)
-	var slot_w := mini(5, (BAR_W + 1) / maxi(_slots_max, 1) - 1)
-	for i in _slots_max:
-		var r := Rect2(32 + i * (slot_w + 1), 26, slot_w, 5)
-		_canvas.draw_rect(r, COLOR_SLOT if i < _slots else COLOR_SLOT_EMPTY)
+	# Ячейки трюма — во всю ширину полос HP и топлива при любом числе слотов: границы ячеек делят
+	# BAR_W + 1 пикселей поровну (с округлением), между ячейками — пиксель зазора.
+	var n := maxi(_slots_max, 1)
+	for i in n:
+		var x0 := roundi(i * (BAR_W + 1.0) / n)
+		var x1 := roundi((i + 1) * (BAR_W + 1.0) / n) - 1
+		_canvas.draw_rect(Rect2(32 + x0, 26, x1 - x0, 5), COLOR_SLOT if i < _slots else COLOR_SLOT_EMPTY)
 
 	_text(Vector2(0, 17), "%06d" % roundi(_score_shown), 16, COLOR_TEXT, HORIZONTAL_ALIGNMENT_CENTER, size.x)
 	var y := 30.0

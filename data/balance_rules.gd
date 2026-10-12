@@ -29,9 +29,9 @@ extends Resource
 @export var canister_fade_s: float = 600.0      ## за столько секунд плотность падает до floor
 
 @export_group("Shuttle")
-@export var shuttle_interval_base: float = 90.0
-@export var shuttle_interval_step: float = 30.0
-@export var shuttle_interval_max: float = 180.0
+@export var shuttle_interval_base: float = 60.0   ## трюм набирается быстро — челнок прилетает часто…
+@export var shuttle_interval_step: float = 15.0
+@export var shuttle_interval_max: float = 120.0   ## …и не реже раза в две минуты
 @export var shuttle_dist_base: float = 25.0
 @export var shuttle_dist_step: float = 15.0
 @export var shuttle_dist_max: float = 70.0
