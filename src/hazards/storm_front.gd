@@ -3,7 +3,8 @@ extends Node3D
 ## Грозовой фронт (GDD §5.1): тень облаков радиусом storm_radius ползёт через окрестность машины,
 ## над ней — слои туч (MurkLayers), в тучах зарницы; под фронтом сцена темнеет и идёт дождь
 ## (через weather_changed — свет и экранный слой частиц).
-## Внутри — удар молнии каждые strike_interval_s: часть рядом с машиной (если она под фронтом),
+## Внутри — удары молнии неравномерно, в среднем раз в strike_interval_s: паузы разной длины, иногда
+## серия из двух-трёх ударов подряд (next_strike_gap); часть рядом с машиной (если она под фронтом),
 ## остальные — по фронту; точка выбирается с весом по высоте (вершины и деревья притягивают удары).
 ## Телеграф — светящийся круг и треск, удар через strike_telegraph_s: урон, поваленное дерево, из
 ## кристаллической породы выбиваются кристаллы; изредка (strike_crater_chance, в воду — никогда) —
@@ -41,6 +42,7 @@ var ended := false                       ## фронт ушёл: новых уд
 var finished := false                    ## ушёл и отгремели начатые удары — узел можно убрать
 
 var _strike_timer := 1.0
+var _series := 0                         ## сколько ещё ударов в текущей серии
 var _pending: Array[Dictionary] = []     ## {pos: Vector2, left: float, node: Node3D}
 var _bolts: Array[Dictionary] = []       ## {node, left, light}
 var _clouds: MurkLayers
@@ -96,7 +98,7 @@ func step(dt: float) -> void:
 	if not ended:
 		_strike_timer -= dt
 		if _strike_timer <= 0.0:
-			_strike_timer = rules.strike_interval_s
+			_strike_timer = _next_strike_gap()
 			var target := _pick_target()
 			if target != NO_TARGET:
 				_telegraph(target)
@@ -125,6 +127,17 @@ func step(dt: float) -> void:
 			(b["light"] as Node3D).queue_free()
 			_bolts.remove_at(i)
 	finished = ended and _pending.is_empty() and _bolts.is_empty() and _fade <= 0.0
+
+
+## Пауза до следующего удара: в серии — короткая (0,35–0,9 с); иначе 0,5–2 × strike_interval_s, и с
+## шансом 30% после неё начинается серия ещё из одного-двух ударов. В среднем — около strike_interval_s.
+func _next_strike_gap() -> float:
+	if _series > 0:
+		_series -= 1
+		return rng.randf_range(0.35, 0.9)
+	if rng.randf() < 0.3:
+		_series = rng.randi_range(1, 2)
+	return rng.randf_range(0.5, 2.0) * rules.strike_interval_s
 
 
 func _end() -> void:

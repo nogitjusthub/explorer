@@ -9,7 +9,7 @@ extends Creature
 ## (plan) к ближайшей точке, откуда машина на длине шеи.
 ## Дошла — бросок. Появление EMERGE_S (телеграф): шея-колонна из дисков-«позвонков» раскладывается диск
 ## за диском, за ней встают три полосатых горба. Поза POSE_S («фото хирурга»): шея изгибается буквой S,
-## голова смотрит на машину, пасть раскрыта, узкие диски и глотка горят алым; направление и длина
+## голова смотрит на машину, пасть раскрыта, глотка горит алым (шея не мигает — поза и так читается); направление и длина
 ## удара фиксируются (линии на воде нет — куда упадёт шея, видно по позе). Удар STRIKE_S: шея валится,
 ## как подрубленная колонна, голова бьёт в точку удара — всплеск и кольцо пены. Машина у этой точки
 ## (in_impact_zone) — урон nessie_damage; ховер подбрасывает на nessie_toss тайла по линии удара,
@@ -24,20 +24,19 @@ const DEEP := 1.95                       ## ярусов воды над цен�
 const LAKE_R := 6                        ## «большое озеро» — считаем глубокие тайлы в этом радиусе
 
 const BONE_COLOR := Color(0.749, 0.663, 0.769)     ## #BFA9C4 — широкие диски: бледно-лиловая кость
-const NARROW_COLOR := Color(0.431, 0.337, 0.439)   ## #6E5670 — узкие диски в покое
-const HOT_COLOR := Color(1.0, 0.251, 0.2)          ## #FF4033 — телеграф: узкие диски и глотка, unshaded
+const NARROW_COLOR := Color(0.62, 0.54, 0.65)     ## #9E8AA6 — узкие звенья чуть темнее: рёбра, а не полосы
+const HOT_COLOR := Color(1.0, 0.251, 0.2)          ## #FF4033 — телеграф: глотка в раскрытой пасти, unshaded
 const JAW_COLOR := Color(0.949, 0.922, 0.82)       ## #F2EBD1
 const THROAT_COLOR := Color(0.161, 0.059, 0.071)   ## #290F12
-const HUMP_COLOR := Color(0.173, 0.227, 0.251)     ## #2C3A40 — мокрые купола-горбы…
-const HUMP_STRIPE := Color(0.431, 0.541, 0.502)    ## #6E8A80 — …в полоску, как у панцирника
 const FOAM_COLOR := Color(0.86, 0.97, 0.94)        ## пена — как у водоворота
 
 # Шея и голова: элементы 0…DISCS − 1 — диски снизу вверх, DISCS — голова.
-const DISCS := 9                         ## чётные — широкие 10-гранные, нечётные — узкие 8-гранные
-const DISC_STEP := 0.32
+const DISCS := 6                         ## чётные — широкие 10-гранные, нечётные — узкие 8-гранные
+const DISC_STEP := 0.48                  ## звенья длинные…
+const DISC_OVERLAP := 1.4                ## …и заходят друг в друга: на изгибе шея остаётся цельной
 const DISC_R0 := 0.28                    ## радиус широкого диска у основания…
 const DISC_R1 := 0.15                    ## …и у головы
-const NARROW := 0.84                     ## узкий диск — такая доля широкого
+const NARROW := 0.93                     ## узкий диск — такая доля широкого (разница мягкая — шея одна колонна)
 const TWIST := 0.41                      ## каждый диск повёрнут вокруг оси на свой угол, как у червя
 const HEAD_R := 0.2                      ## основание морды
 const HEAD_H := 0.12
@@ -47,21 +46,17 @@ const JAW_OPEN := -1.0                   ## рад — челюсти раскр
 const BASE_SINK := 0.12                  ## основание шеи — под зеркалом воды
 const SINK_ARC := 1.4                    ## до появления шея сложена на столько ниже основания
 const HIDE_DEPTH := 0.4                  ## деталь глубже под зеркалом скрыта: глубокая вода почти непрозрачна
+# Спина — дуга из таких же звеньев, как шея, выгибается из воды за шеей (петля морского змея).
+const ARCH_SEGS := 7
+const ARCH_R := 0.8                      ## радиус дуги…
+const ARCH_DROP := 0.45                  ## …её центр под зеркалом: над водой — верх дуги высотой ARCH_R − ARCH_DROP
+const ARCH_BEHIND := 0.6                 ## ближний конец дуги — за основанием шеи на столько
+const BACK_R := 0.25                     ## толщина спины — как шея у основания
 # Поза «фото хирурга» — наклон шеи от вертикали (+ — к машине): у основания, в изгибе и у головы.
 const POSE_LEAN := 0.3
 const POSE_BACK := -0.4
 const POSE_TOP := 1.05
 const POSE_MID := 0.5
-
-# Горбы — половинки вытянутого эллипсоида: ширина 2·HUMP_R, высота HUMP_H, длина 2·HUMP_L.
-const HUMP_R := 0.4
-const HUMP_H := 0.3
-const HUMP_L := 0.42
-const HUMP_SINK := 0.45                  ## под водой горб на столько ниже зеркала
-const HUMP_UP := -0.06                   ## всплывший горб — купол чуть притоплен
-const HUMPS := 3
-const HUMP_GAP := 1.0                    ## между горбами — вода
-const HUMP_SIDE: Array[float] = [0.0, 0.18, -0.14]   ## сдвиг горбов вбок от оси тела
 
 # Бросок
 const EMERGE_S := 1.0                    ## появление — телеграф
@@ -96,7 +91,7 @@ const TURN_RATE := 4.0                   ## рад/с — поворот V-сл�
 const WAKE_LEN := 2.4
 const WAKE_ANGLE := 0.42                 ## рад — полураствор V-следа
 const WAKE_W := 0.16
-const HUMP_EVERY_MIN_S := 3.0            ## горб всплывает раз в столько…
+const HUMP_EVERY_MIN_S := 3.0            ## при подходе спина всплывает раз в столько…
 const HUMP_EVERY_MAX_S := 5.5
 const HUMP_SURFACE_S := 1.0              ## …на столько
 const WATER_DROP := 0.06                 ## зеркало воды рисуется чуть ниже яруса (ChunkMesher)
@@ -107,7 +102,7 @@ const NEIGHBORS: Array[Vector2i] = [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0,
 # Профиль челюсти (как у червя): доля радиуса морды на доле длины челюсти.
 const JAW_U: Array[float] = [0.0, 0.25, 0.5, 0.72, 0.88, 1.0]
 const JAW_R: Array[float] = [1.0, 0.97, 0.84, 0.62, 0.36, 0.0]
-const HUMP_CUTS: Array[float] = [-1.0, -0.5, -0.18, 0.14, 0.46, 1.0]   ## срезы горба поперёк: через один — полосы
+
 
 const FOAM_SHADER := preload("res://src/render/shaders/foam_strip.gdshader")   ## V-след
 
@@ -151,8 +146,9 @@ var _discs: Array[MeshInstance3D] = []
 var _head: Node3D
 var _jaws: Array[Node3D] = []
 var _throat: MeshInstance3D
-var _humps: Array[MeshInstance3D] = []
-var _hump_at: Array[Vector2] = []
+var _arch: Node3D                        ## спина-дуга; локальная +Z — вдоль спины
+var _arch_segs: Array[MeshInstance3D] = []
+var _arch_at := Vector2.ZERO
 var _ring: MeshInstance3D                ## кольцо пены у основания шеи
 var _wake: Node3D
 var _arms: Array[MeshInstance3D] = []
@@ -325,8 +321,6 @@ func step(dt: float) -> void:
 		State.LIE:
 			if _timer >= LIE_S:
 				_begin(State.SUBMERGE)
-				for j in range(1, DISCS, 2):
-					_discs[j].material_override = _narrow
 				_throat.material_override = _throat_mat
 		State.SUBMERGE:
 			if _timer >= SUBMERGE_S:
@@ -419,9 +413,7 @@ func _emerge() -> void:
 	var to := vehicle.state.pos - _base
 	_look = to.normalized() if to.length() > 0.01 else _heading
 	_back = -_look
-	var side := Vector2(-_back.y, _back.x)
-	for k in HUMPS:
-		_hump_at[k] = _base + _back * (0.85 + HUMP_GAP * k) + side * HUMP_SIDE[k]
+	_arch_at = _base + _back * (ARCH_BEHIND + ARCH_R)
 	_body.visible = true
 	_ring.visible = true
 	_ring.position = Vector3(_base.x, _water_y + FOAM_LIFT, _base.y)
@@ -443,8 +435,6 @@ func _pose(vp: Vector2) -> void:
 	var e := Vector3(_impact_at.x, _impact_y + 0.06, _impact_at.y) - _base3
 	_fall = atan2(Vector2(e.x, e.z).length(), e.y)
 	_scale = clampf((e.length() - HEAD_LEN) / _rest_arc(DISCS), 0.4, 1.25)
-	for j in range(1, DISCS, 2):
-		_discs[j].material_override = _hot
 	_throat.material_override = _hot
 
 
@@ -514,7 +504,7 @@ func _top_y(p: Vector2) -> float:
 
 func _animate(dt: float) -> void:
 	_animate_neck()
-	_animate_humps(dt)
+	_animate_back(dt)
 	_animate_wake(dt)
 	_animate_foam()
 
@@ -610,9 +600,9 @@ func _layout(head_theta: float, aim: float) -> void:
 	_head.visible = p.y > _water_y - HIDE_DEPTH
 
 
-## Горбы: в броске встают за шеей (после неё) и тонут последними; при подходе один изредка всплывает
-## на секунду и уходит под воду, перекатываясь, как спина дельфина.
-func _animate_humps(dt: float) -> void:
+## Спина: в броске выгибается из воды за шеей (после неё) и тонет последней; при подходе изредка
+## всплывает на секунду и уходит под воду, перекатываясь вперёд, как спина дельфина.
+func _animate_back(dt: float) -> void:
 	var attack := state >= State.EMERGE and state <= State.SUBMERGE
 	if state == State.APPROACH:
 		if _dolphin < 0.0:
@@ -626,30 +616,30 @@ func _animate_humps(dt: float) -> void:
 				_hump_wait = rng.randf_range(HUMP_EVERY_MIN_S, HUMP_EVERY_MAX_S)
 	elif not attack:
 		_dolphin = -1.0
-	for k in HUMPS:
-		var hump := _humps[k]
-		var y := -HUMP_SINK
-		var roll := 0.0
-		var at := _hump_at[k]
-		var along := _back
-		if attack:
-			match state:
-				State.EMERGE:
-					y = lerpf(-HUMP_SINK, HUMP_UP, _ease_out((_timer - 0.3 - 0.15 * k) / 0.35))
-				State.SUBMERGE:
-					y = lerpf(HUMP_UP, -HUMP_SINK, _ease_out((_timer - 0.5 - 0.1 * k) / 0.4))
-				_:
-					y = HUMP_UP + 0.02 * sin(_time * 3.0 + k)
-		elif k == 0 and _dolphin >= 0.0:
-			var u := _dolphin / HUMP_SURFACE_S
-			y = -HUMP_SINK + (HUMP_SINK + HUMP_UP) * sin(PI * u)
-			roll = lerpf(0.35, -0.35, u)
-			at = pos - _heading * 0.9
-			along = _heading
-		hump.visible = y > -HUMP_SINK + 0.05 and query.water_tier(floori(at.x), floori(at.y)) != TerrainQuery.NO_WATER
-		if hump.visible:
-			hump.position = Vector3(at.x, _water_y + y, at.y)
-			hump.rotation = Vector3(roll, atan2(along.x, along.y), 0.0)
+	var hidden := -(ARCH_R - ARCH_DROP) - 0.1      # верх дуги под водой
+	var rise := hidden
+	var at := _arch_at
+	var along := _back
+	if attack:
+		match state:
+			State.EMERGE:
+				rise = lerpf(hidden, 0.0, _ease_out((_timer - 0.3) / 0.5))
+			State.SUBMERGE:
+				rise = lerpf(0.0, hidden, _ease_out((_timer - 0.5) / 0.5))
+			_:
+				rise = 0.02 * sin(_time * 3.0)
+	elif _dolphin >= 0.0:
+		var u := _dolphin / HUMP_SURFACE_S
+		rise = lerpf(hidden, -0.12, sin(PI * u))
+		along = _heading
+		at = pos - _heading * (0.9 - 0.6 * u)
+	_arch.visible = rise > hidden + 0.03 and query.water_tier(floori(at.x), floori(at.y)) != TerrainQuery.NO_WATER
+	if not _arch.visible:
+		return
+	_arch.position = Vector3(at.x, _water_y - ARCH_DROP + rise, at.y)
+	_arch.rotation = Vector3(0.0, atan2(along.x, along.y), 0.0)
+	for s in _arch_segs:
+		s.visible = s.global_position.y > _water_y - HIDE_DEPTH
 
 
 ## V-след: вершина — над Нессой, два пенных гребня расходятся назад; гаснет, когда она стоит или
@@ -707,15 +697,14 @@ func _animate_foam() -> void:
 
 func _hide_body() -> void:
 	_body.visible = false
-	for hump in _humps:
-		hump.visible = false
+	_arch.visible = false
 	_ring.visible = false
 
 
 # --- Сборка -----------------------------------------------------------------------------------------
 
 ## Шея — 9 дисков-«позвонков» (low-poly призмы, широкие светлые и узкие тёмные вперемешку), голова —
-## основание морды, глотка и три челюсти, как у червя; 3 горба; пена: кольцо у основания, два гребня
+## основание морды, глотка и три челюсти, как у червя; спина — дуга из таких же звеньев; пена: кольцо у основания, два гребня
 ## V-следа; пузыри и всплеск. 20 деталей и 2 системы частиц.
 func _build() -> void:
 	_bone = Creature.material(BONE_COLOR)
@@ -729,21 +718,10 @@ func _build() -> void:
 	for j in DISCS:
 		var wide := j % 2 == 0
 		var r := lerpf(DISC_R0, DISC_R1, j / (DISCS - 1.0)) * (1.0 if wide else NARROW)
-		var h := DISC_STEP * (1.08 if wide else 0.96)
+		var h := DISC_STEP * DISC_OVERLAP * (1.0 if wide else 0.92)
 		_discs.append(MeshKit.prism(_body, MeshKit.ngon(10 if wide else 8, r), -h * 0.5, h, _bone if wide else _narrow))
 	_build_head()
-	var hump_mesh := _hump_mesh()
-	var hump_mat := StandardMaterial3D.new()
-	hump_mat.vertex_color_use_as_albedo = true
-	hump_mat.roughness = 0.6
-	for k in HUMPS:
-		var hump := MeshInstance3D.new()
-		hump.mesh = hump_mesh
-		hump.material_override = hump_mat
-		hump.visible = false
-		add_child(hump)
-		_humps.append(hump)
-		_hump_at.append(Vector2.ZERO)
+	_build_back()
 	_ring_mat = _foam_material()
 	_ring = _torus(0.32, 0.46, _ring_mat)
 	_build_wake()
@@ -870,32 +848,23 @@ static func _strip_mesh(width: float) -> ArrayMesh:
 	return m
 
 
-## Горб — половина вытянутого эллипсоида (ось — локальная Z), низ открыт; low-poly: срезы поперёк
-## (HUMP_CUTS) по 5 граней полукруга, через срез — светлая полоса (цвет вершин).
-static func _hump_mesh() -> ArrayMesh:
-	const SEG := 5
-	var st := SurfaceTool.new()
-	st.begin(Mesh.PRIMITIVE_TRIANGLES)
-	for i in HUMP_CUTS.size() - 1:
-		st.set_color(HUMP_STRIPE if i % 2 == 1 else HUMP_COLOR)
-		var u0 := HUMP_CUTS[i]
-		var u1 := HUMP_CUTS[i + 1]
-		var inside := Vector3(0, 0, (u0 + u1) * 0.5 * HUMP_L)
-		for k in SEG:
-			var a := _hump_point(u0, float(k) / SEG)
-			var b := _hump_point(u0, float(k + 1) / SEG)
-			var c := _hump_point(u1, float(k) / SEG)
-			var d := _hump_point(u1, float(k + 1) / SEG)
-			MeshKit.tri_out(st, a, b, c, inside)
-			MeshKit.tri_out(st, b, d, c, inside)
-	return st.commit()
-
-
-## Точка горба: u — доля полудлины (−1…1), w — доля полукруга сечения (0…1, от борта до борта).
-static func _hump_point(u: float, w: float) -> Vector3:
-	var r := sqrt(maxf(1.0 - u * u, 0.0))
-	var a := PI * w
-	return Vector3(cos(a) * HUMP_R * r, sin(a) * HUMP_H * r, u * HUMP_L)
+## Спина: дуга-полукольцо из ARCH_SEGS звеньев шеи (широкие и узкие вперемешку, внахлёст) в плоскости
+## локальных Y–Z; центр дуги — в начале координат узла.
+func _build_back() -> void:
+	_arch = Node3D.new()
+	_arch.visible = false
+	add_child(_arch)
+	var step := PI * ARCH_R / ARCH_SEGS
+	for k in ARCH_SEGS:
+		var wide := k % 2 == 0
+		var r := BACK_R * (1.0 if wide else NARROW)
+		var h := step * DISC_OVERLAP * (1.0 if wide else 0.92)
+		var seg := MeshKit.prism(_arch, MeshKit.ngon(10 if wide else 8, r, k * TWIST), -h * 0.5, h,
+				_bone if wide else _narrow)
+		var a := PI * (k + 0.5) / ARCH_SEGS
+		seg.position = Vector3(0.0, ARCH_R * sin(a), ARCH_R * cos(a))
+		seg.rotation.x = -a                              # ось звена — по касательной к дуге
+		_arch_segs.append(seg)
 
 
 ## Челюсть (как у червя, в масштабе морды): сектор в 120° вокруг оси Y, сходящийся к кончику клюва;

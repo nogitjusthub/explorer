@@ -8,7 +8,7 @@ extends Node3D
 
 const ELEVATION_DEG := 45.0
 const DISTANCE := 60.0
-const TILE_PX := 32.0            ## ширина ромба тайла в пикселях рендера
+const TILE_PX := 40.0            ## ширина ромба тайла в пикселях рендера (~12 тайлов по ширине кадра)
 const LEAD := 0.06               ## доля кадра, на которую камера смещается по ходу
 const TURN_TIME := 0.3
 

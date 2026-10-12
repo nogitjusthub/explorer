@@ -4,7 +4,11 @@ extends AudioStreamPlayer
 ## AudioStreamWAV работает и в веб-сборке (режим сэмплов), в отличие от AudioStreamGenerator.
 
 const RATE := 22050
-const BASE_HZ := 55.0            ## целое число периодов на секунду — петля без щелчка
+const BASE_HZ := 55.0
+const LOOP_S := 2.0              ## длина петли: каждая составляющая (BASE_HZ, ×2, ×0,5) укладывается в неё
+                                 ## целым числом периодов — стык петли без щелчка и сбоя гула
+
+const VOLUME_TRIM_DB := -3.1     ## общая громкость двигателя: −30% по амплитуде (на фоне остальных звуков)
 
 var pitch_mult := 1.0            ## тон класса: танк ниже, ховер выше
 
@@ -19,15 +23,16 @@ func _ready() -> void:
 func update(speed_ratio: float, throttle: float, dt: float) -> void:
 	var k := 1.0 - exp(-6.0 * dt)
 	pitch_scale = lerpf(pitch_scale, (0.55 + 0.9 * speed_ratio + 0.1 * throttle) * pitch_mult, k)
-	volume_db = lerpf(volume_db, lerpf(-22.0, -10.0, maxf(throttle, speed_ratio)), k)
+	volume_db = lerpf(volume_db, lerpf(-22.0, -10.0, maxf(throttle, speed_ratio)) + VOLUME_TRIM_DB, k)
 
 
 static func make_loop() -> AudioStreamWAV:
+	var n := int(RATE * LOOP_S)
 	var data := PackedByteArray()
-	data.resize(RATE * 2)
+	data.resize(n * 2)
 	var rng := RandomNumberGenerator.new()
 	rng.seed = 12345
-	for i in RATE:
+	for i in n:
 		var t := float(i) / RATE
 		var x := 0.45 * _saw(BASE_HZ * t) + 0.25 * _saw(BASE_HZ * 2.0 * t + 0.31) \
 				+ 0.2 * sin(TAU * BASE_HZ * 0.5 * t) + 0.06 * rng.randf_range(-1.0, 1.0)
@@ -38,7 +43,7 @@ static func make_loop() -> AudioStreamWAV:
 	wav.stereo = false
 	wav.loop_mode = AudioStreamWAV.LOOP_FORWARD
 	wav.loop_begin = 0
-	wav.loop_end = RATE
+	wav.loop_end = n
 	wav.data = data
 	return wav
 

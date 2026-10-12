@@ -2,7 +2,7 @@ class_name Sfx
 extends RefCounted
 ## Процедурные звуки без ассетов (как и двигатель): AudioStreamWAV 16 бит, моно. Генерируются один
 ## раз при старте. Звуков угроз по GDD немного: молния (треск телеграфа и гром), гул землетрясения,
-## смерч, урон.
+## смерч, урон; у фауны — крик скакунов.
 
 const RATE := 22050
 
@@ -111,28 +111,6 @@ static func wind_loop(seconds: float) -> AudioStreamWAV:
 	return wav
 
 
-## Визг стаи скакунов: несколько коротких писков, тон скачет.
-static func squeal(seconds: float) -> AudioStreamWAV:
-	var n := int(seconds * RATE)
-	var data := PackedFloat32Array()
-	data.resize(n)
-	var rng := RandomNumberGenerator.new()
-	rng.seed = 606
-	var phase := 0.0
-	var chirp := 0.12
-	var f0 := 1400.0
-	for i in n:
-		var t := float(i) / RATE
-		var local := fmod(t, chirp) / chirp
-		if local < 1.0 / RATE * 20.0 / chirp:
-			f0 = rng.randf_range(1100.0, 1900.0)
-		var f := f0 * (1.0 + 0.6 * local) * (1.0 + 0.04 * sin(t * 90.0))
-		phase += TAU * f / RATE
-		var env := sin(local * PI) * (1.0 - t / seconds * 0.5)
-		data[i] = (sin(phase) * 0.7 + sin(phase * 2.01) * 0.2) * env
-	return _wav(data)
-
-
 ## Электрошок по машине: гудение сети с треском разрядов, к концу стихает.
 static func buzz(seconds: float) -> AudioStreamWAV:
 	var n := int(seconds * RATE)
@@ -173,6 +151,44 @@ static func thrust(seconds: float) -> AudioStreamWAV:
 		var crackle := (noise - lp1) * (0.3 + 0.3 * sin(t * 61.0))
 		var env := minf(t / 0.06, 1.0) * (1.0 - smoothstep(0.85, 1.0, k))
 		data[i] = (lp2 * 3.0 + crackle) * env
+	return _wav(data)
+
+
+## Крик скакуна — хищный: резкий визг, как у ястреба (высокий тон с быстрым подъёмом и долгим спадом,
+## хрип и дрожание), и под ним низкий хриплый рык — как имитировали крик рапторов. Перегружен по краям
+## (tanh) — звучит грубо, «живо».
+static func screech(seconds: float) -> AudioStreamWAV:
+	var n := int(seconds * RATE)
+	var data := PackedFloat32Array()
+	data.resize(n)
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 909
+	var hi := 0.0
+	var lo := 0.0
+	var air_lp := 0.0
+	var air_hp := 0.0
+	for i in n:
+		var t := float(i) / RATE
+		var k := t / seconds
+		# Визг: 2,4 кГц → 3,4 кГц за первую десятую, потом сползает к 1,9 кГц; дрожание 38 Гц.
+		var f := lerpf(2400.0, 3400.0, minf(k / 0.1, 1.0)) if k < 0.1 else lerpf(3400.0, 1900.0, (k - 0.1) / 0.9)
+		f *= 1.0 + 0.035 * sin(TAU * 38.0 * t)
+		hi += TAU * f / RATE
+		var shriek := sin(hi) + 0.45 * sin(hi * 2.0 + 0.4) + 0.25 * sin(hi * 3.0 + 1.1)
+		# Хрип визга — шум в полосе около тона.
+		var noise := rng.randf_range(-1.0, 1.0)
+		air_lp = lerpf(air_lp, noise, 0.55)
+		air_hp = air_lp - lerpf(air_hp, air_lp, 0.15)
+		shriek += air_hp * 0.8
+		# Рык: 140 → 85 Гц, пила с «дребезгом» 23 Гц.
+		var g := lerpf(140.0, 85.0, k)
+		lo += TAU * g / RATE
+		var saw := fmod(lo / TAU, 1.0) * 2.0 - 1.0
+		var growl := saw * (0.55 + 0.45 * sin(TAU * 23.0 * t)) + 0.3 * rng.randf_range(-1.0, 1.0) * (0.5 + 0.5 * sin(TAU * 23.0 * t))
+		var env_hi := minf(t / 0.015, 1.0) * pow(1.0 - k, 1.4)
+		var env_lo := minf(t / 0.05, 1.0) * (1.0 - smoothstep(0.55, 1.0, k))
+		var x := shriek * 0.55 * env_hi + growl * 0.6 * env_lo
+		data[i] = tanh(x * 1.8)
 	return _wav(data)
 
 

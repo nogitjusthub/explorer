@@ -17,11 +17,11 @@ extends Resource
 
 @export_group("Pickups")
 ## Шанс находки на тайле (по хэшу тайла); канистры — на чанк, решаются при первой загрузке.
-@export var crystal_chance_on_crystal: float = 0.07
-@export var crystal_chance_elsewhere: float = 0.001
-@export var sample_chance_lakeside: float = 0.0045
-@export var sample_chance_forest: float = 0.0025
-@export var core_chance_rocky: float = 0.0008
+@export var crystal_chance_on_crystal: float = 0.04
+@export var crystal_chance_elsewhere: float = 0.0006
+@export var sample_chance_lakeside: float = 0.003
+@export var sample_chance_forest: float = 0.0016
+@export var core_chance_rocky: float = 0.0005
 @export var rough_pickup_mult: float = 1.5      ## в россыпях камней находки чуть чаще (риск и награда)
 @export var repair_per_chunk: float = 1.0 / 30.0
 @export var canister_d0: float = 1.0 / 18.0     ## канистр на чанк в начале забега
@@ -138,13 +138,15 @@ extends Resource
 @export var fauna_give_up_s: float = 6.0        ## не подобраться к машине столько — фауна сдаётся (червь уходит)
 ## Скорости погони — между Vmax танка (4) и ровера (6,5): ровер и ховер уходят от фауны, танк — нет.
 @export var hopper_speed: float = 5.2
-@export var hopper_wander_speed: float = 1.4
+@export var hopper_wander_speed: float = 1.0       ## патрулирует медленно
+@export var hopper_patrol_r: float = 5.0          ## обходит кольцо такого радиуса вокруг места появления
+@export var hopper_sight_r: float = 6.0           ## машину ближе видит и тихую (шум не нужен)
 @export var hopper_bite: int = 6
 @export var hopper_bite_cd_s: float = 1.2         ## кусает одна, передняя особь стаи
 @export var hopper_chase_s: float = 10.0
 @export var hopper_chase_dist: float = 20.0
-@export var pack_min: int = 3
-@export var pack_max: int = 4
+@export var pack_min: int = 2
+@export var pack_max: int = 3
 @export var worm_min_level: int = 2
 @export var worm_first_s: float = 90.0            ## червь редок: первый — не раньше этого времени забега…
 @export var worm_gap_s: float = 150.0             ## …следующий — не раньше этого после встречи (гнался за машиной)
@@ -162,8 +164,6 @@ extends Resource
 @export var shellback_charge_dist: float = 6.0
 @export var shellback_dig_s: float = 1.0
 @export var shellback_damage: int = 35
-@export var nest_wake_r: float = 10.0            ## ближе к гнезду — из него выходит стая
-@export var nest_cooldown_s: float = 60.0
 
 @export_group("Water fauna")
 ## Водная и береговая фауна (GDD §5.6). Шокер-троеглазка — по чанкам, в мелкой воде; илозуб — в зыбучем

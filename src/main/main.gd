@@ -200,6 +200,12 @@ func _build_world(args: Dictionary) -> void:
 
 	var warmup := Warmup.new()
 	warmup.at = Vector3(spawn.x, vehicle.state.y, spawn.y)
+	warmup.rules = rules
+	warmup.vehicle = vehicle
+	warmup.query = query
+	warmup.terrain = terrain
+	warmup.pickups = pickups
+	warmup.noise = fauna.noise
 	add_child(warmup)
 
 	var weather_fx := WeatherOverlay.new()

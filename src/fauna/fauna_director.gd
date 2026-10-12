@@ -3,8 +3,8 @@ extends Node3D
 ## Фауна забега (GDD §5.4, §5.6, §7.1). Существа появляются в кольце fauna_spawn_min…max вокруг машины —
 ## сколько и кто, решает уровень угрозы (T1 — скакуны, T2 — + черви на песке, илозубы в зыбуне,
 ## Несса в больших озёрах, T3 — + панцирники), и исчезают дальше fauna_despawn, если не гонятся.
-## Троеглазки лежат в мелкой воде по чанкам (как гнёзда) и уходят вместе с чанком. Слышат шум машины и посадок (NoiseField);
-## гнёзда (по чанкам) выпускают стаю, когда машина рядом. Поля путей видов (FlowField) строятся
+## Троеглазки лежат в мелкой воде по чанкам и уходят вместе с чанком. Существа слышат шум машины и
+## посадок (NoiseField). Поля путей видов (FlowField) строятся
 ## задачами JobScheduler вокруг машины, пока кто-то гонится. Урон машине — сигналом damaged.
 
 signal damaged(amount: int, source: StringName)
@@ -30,7 +30,6 @@ var stats := {"packs": 0, "worms": 0, "shellbacks": 0, "sharks": 0, "rays": 0, "
 
 var _rng: RandomNumberGenerator
 var _creatures: Array[Creature] = []
-var _nests: Dictionary[Vector2i, Nest] = {}
 var _rays: Dictionary[Vector2i, Array] = {}   ## чанк → его троеглазки
 var _fields: Dictionary = {}              ## FlowField.Mode → готовое поле
 var _field_busy: Dictionary = {}          ## FlowField.Mode → идёт построение
@@ -79,14 +78,6 @@ func scare(at: Vector2, radius: float) -> void:
 
 func on_chunk_built(coord: Vector2i) -> void:
 	_place_rays(coord)
-	var o := Grid.chunk_origin(coord)
-	for t in generator.nests_in_rect(o.x, o.y, o.x + Grid.CHUNK - 1, o.y + Grid.CHUNK - 1):
-		if _nests.has(t):
-			continue
-		var nest := Nest.new(t)
-		add_child(nest)
-		nest.build(query)
-		_nests[t] = nest
 
 
 func on_chunk_removed(coord: Vector2i) -> void:
@@ -94,10 +85,6 @@ func on_chunk_removed(coord: Vector2i) -> void:
 		_creatures.erase(c)
 		c.queue_free()
 	_rays.erase(coord)
-	for t: Vector2i in _nests.keys():
-		if Grid.chunk_of_tile(t.x, t.y) == coord:
-			_nests[t].queue_free()
-			_nests.erase(t)
 
 
 func step(dt: float) -> void:
@@ -112,7 +99,6 @@ func step(dt: float) -> void:
 			_force(forced[i]["kind"])
 			forced.remove_at(i)
 	_update_fields(dt)
-	_check_nests(dt)
 	if _worm_wait < 0.0:
 		_worm_wait = rules.worm_first_s
 	_worm_wait = maxf(_worm_wait - dt, 0.0)
@@ -160,16 +146,6 @@ func _update_fields(dt: float) -> void:
 func _on_field_ready(f: FlowField) -> void:
 	_fields[f.mode] = f
 	_field_busy[f.mode] = false
-
-
-func _check_nests(dt: float) -> void:
-	var wake_r := rules.nest_wake_r + (4.0 if level >= 3 else 0.0)
-	for nest: Nest in _nests.values():
-		nest.cooldown = maxf(nest.cooldown - dt, 0.0)
-		if nest.cooldown <= 0.0 and nest.center().distance_to(vehicle.state.pos) < wake_r:
-			nest.cooldown = rules.nest_cooldown_s * (0.6 if level >= 3 else 1.0)
-			var pack := _spawn_pack(nest.center(), rules.pack_max)
-			pack.wake()
 
 
 ## Сколько кого держать вокруг машины при текущем уровне угрозы.

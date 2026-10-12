@@ -4,7 +4,7 @@ extends CanvasLayer
 ## стены; выбранная — под прожектором и медленно поворачивается, остальные — тёмные силуэты.
 ## Под выбранной — характеристики значками (1–5); ни названий классов, ни текстовых описаний.
 ## Выбор: A / D, стрелки, тап по машине или кнопкам; старт — F / Enter / кнопка: люк раскрывается,
-## машина уходит вниз — дальше сцена десанта. Нужен и вебу: звук включается после действия игрока.
+## машина уходит вниз по шахте — дальше сцена десанта. Нужен и вебу: звук включается после действия игрока.
 ## Трюм — отдельный мир в SubViewport: свой свет и окружение, игровой мир под экраном не трогаем.
 
 signal started
@@ -32,6 +32,15 @@ const CAPTION := "выбор машины"
 const DISPLAY_ORDER: Array[StringName] = [&"tank", &"rover", &"hover"]   ## универсал — в центре
 const DEFAULT_ID := &"rover"             ## выбран при открытии трюма
 const CAPTION_Y := 52.0                  ## строка «выбор машины» между кнопками «<» и «>»
+const HOLE_R := 0.57                     ## проём в полу под створкой: чуть меньше её — без щелей по краю
+const SHAFT_SIDES := 8                   ## шахта под люком — восьмигранный колодец
+const SHAFT_R := 0.6                     ## радиус, вписанный в грани
+const SHAFT_DEPTH := 2.6                 ## дна не видно: сквозь люк глубже ~0,9 не заглянуть
+const SHAFT_STEP := 0.25                 ## шаг колец-уступов; огни на направляющих — между ними
+const RING_IN := 0.07                    ## уступ кольца внутрь (машины — до 0,53 от оси: не задевают)
+const RAIL_IN := 0.04                    ## направляющие на гранях по бокам от дальней
+const COLOR_GLOW := Color(1.0, 0.42, 0.12)   ## зарево снизу: там отсек сброса и вход в атмосферу
+const GLOW_ON := 1.6
 
 const BEAM_SHADER := """
 shader_type spatial;
@@ -47,13 +56,19 @@ void fragment() {
 	ALPHA = intensity * tint.a * mix(1.0, 0.25, k) * edge * edge;
 }
 """
+## Пол с круглыми проёмами под люками (по z = 0, в ряд с шагом hole_step): под створками — шахты.
 const FLOOR_SHADER := """
 shader_type spatial;
 uniform vec3 base : source_color = vec3(0.12, 0.11, 0.15);
 uniform vec3 seam : source_color = vec3(0.07, 0.06, 0.09);
+uniform float hole_r = 0.0;
+uniform float hole_step = 1.0;
+uniform float hole_n = 1.0;
 varying vec3 wp;
 void vertex() { wp = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz; }
 void fragment() {
+	float c = clamp(round(wp.x / hole_step + (hole_n - 1.0) * 0.5), 0.0, hole_n - 1.0);
+	if (length(vec2(wp.x - (c - (hole_n - 1.0) * 0.5) * hole_step, wp.z)) < hole_r) discard;
 	vec2 g = abs(fract(wp.xz * 0.5 + 0.5) - 0.5);
 	float line = step(0.485, max(g.x, g.y));
 	vec2 r = abs(fract(wp.xz * 2.0) - 0.5);
@@ -62,6 +77,49 @@ void fragment() {
 	ALBEDO = mix(base * tone, seam, max(line, rivet * 0.6));
 	ROUGHNESS = 0.45;
 	METALLIC = 0.5;
+}
+"""
+## Стены шахты: UV.x — метры по периметру, UV.y — глубина. Листы со швами, по верху — жёлтые полосы
+## кромки люка; вглубь темнеет, а при спуске снизу разгорается зарево (heat 0..1).
+const SHAFT_SHADER := """
+shader_type spatial;
+uniform vec3 base : source_color = vec3(0.17, 0.16, 0.22);
+uniform vec3 seam : source_color = vec3(0.05, 0.045, 0.07);
+uniform vec3 hazard : source_color = vec3(0.95, 0.72, 0.15);
+uniform vec3 glow : source_color = vec3(1.0, 0.42, 0.12);
+uniform float panel = 0.25;
+uniform float step_y = 0.25;
+uniform float heat = 0.0;
+void fragment() {
+	float d = UV.y;
+	float vx = abs(fract(UV.x / panel) - 0.5);
+	float hy = fract(d / step_y + 0.5);
+	float line = max(step(0.44, vx), step(0.92, hy));
+	vec3 col = mix(base, seam, line);
+	float band = step(d, 0.11) * step(0.5, fract((UV.x + d) * 6.0));
+	col = mix(col, seam, step(d, 0.11));
+	col = mix(col, hazard * 0.7, band);
+	float deep = smoothstep(0.05, 1.0, d);
+	ALBEDO = col * (1.0 - 0.8 * deep);
+	EMISSION = vec3(0.07, 0.075, 0.13) * (1.0 - deep) + hazard * 0.2 * band + glow * heat * deep * deep * 0.45;
+	ROUGHNESS = 0.6;
+	METALLIC = 0.5;
+}
+"""
+## Огни на направляющих: при старте (run — секунды с нажатия) загораются сверху вниз со вспышкой, по ним
+## бежит вниз волна; до старта погашены. Уровень огня — по глубине (UV.y), огни целиком между кольцами.
+const SHAFT_LAMP_SHADER := """
+shader_type spatial;
+render_mode unshaded, shadows_disabled;
+uniform vec3 tint : source_color = vec3(0.35, 0.6, 1.0);
+uniform float step_y = 0.25;
+uniform float run = -1.0;
+void fragment() {
+	float lvl = floor(UV.y / step_y);
+	float t = run - 0.1 - lvl * 0.07;
+	float on = step(0.0, t) * step(0.0, run);
+	float chase = step(fract(run * 2.2 - lvl * 0.3), 0.3);
+	ALBEDO = tint * (0.1 + on * (0.45 + 0.55 * chase)) + vec3(0.8) * on * exp(-max(t, 0.0) * 12.0);
 }
 """
 
@@ -74,6 +132,10 @@ var _models: Array[VehicleModels.Model] = []
 var _spots: Array[SpotLight3D] = []
 var _beams: Array[ShaderMaterial] = []
 var _doors: Array[Node3D] = []
+var _blobs: Array[Node3D] = []           ## пятна-тени на створках: уходят вместе со створкой
+var _shaft_wall: ShaderMaterial          ## общие на все шахты: открывается только люк выбранной
+var _shaft_lamps: ShaderMaterial
+var _shaft_glow: OmniLight3D             ## зарево снизу в шахте выбранной — подсвечивает машину на спуске
 var _light_k: PackedFloat32Array = []    ## яркость прожектора над каждой машиной 0..1
 var _ui: Control
 var _fade: ColorRect
@@ -153,10 +215,25 @@ func _build_hold() -> void:
 
 	_build_room()
 
+	# Под каждым люком — шахта (сетка общая); зарево в ней загорается при старте — под выбранной.
+	var shaft := _shaft_mesh()
+	_shaft_glow = OmniLight3D.new()
+	_shaft_glow.light_color = COLOR_GLOW
+	_shaft_glow.omni_range = 1.8                       # до пола и стен трюма не достаёт
+	_shaft_glow.shadow_enabled = false
+	_shaft_glow.visible = false
+	_vp.add_child(_shaft_glow)
+
 	var toward := Vector3(dir.x, 0, dir.z).normalized()
 	for i in vehicle_ids.size():
 		var at := Vector3(SPACING * (i - (vehicle_ids.size() - 1) * 0.5), 0, 0)
 		_build_bay(at)
+		var well := MeshInstance3D.new()
+		well.mesh = shaft
+		well.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		well.position = at
+		well.rotation.y = yaw                          # дальняя грань — прямо к камере
+		_vp.add_child(well)
 		var m := VehicleModels.build_plain(vehicle_ids[i])
 		m.root.position = at + Vector3(0, m.hover_height, 0)
 		var face := toward + Vector3(0.6, 0, 0)        # три четверти: нос к зрителю и чуть вправо
@@ -170,6 +247,10 @@ func _build_hold() -> void:
 func _build_room() -> void:
 	var floor_mat := ShaderMaterial.new()
 	floor_mat.shader = _shader(FLOOR_SHADER)
+	if not vehicle_ids.is_empty():
+		floor_mat.set_shader_parameter("hole_r", HOLE_R)
+		floor_mat.set_shader_parameter("hole_step", SPACING)
+		floor_mat.set_shader_parameter("hole_n", float(vehicle_ids.size()))
 	_box(Vector3(12, 0.2, 10), Vector3(1.0, -0.1, 3.0), floor_mat)
 
 	var wall := StandardMaterial3D.new()
@@ -218,14 +299,10 @@ func _build_room() -> void:
 	_box(Vector3(0.4, 0.3, 0.4), Vector3(cx + 0.1, 0.15, BACK_Z + 0.85), crate, Vector3(0, -0.2, 0))
 
 
-## Люк под машиной: жёлтое кольцо, створка (уходит при старте), под ней — темнота шахты; пятно тени,
-## прожектор сверху (без теней — они давали артефакты на гранях) и видимый конус луча; над люком на
-## задней стене — лампа отсека: у выбранной горит зелёным.
+## Люк под машиной: жёлтое кольцо, створка над проёмом в полу (уходит при старте, под ней — шахта,
+## см. _shaft_mesh); пятно тени, прожектор сверху (без теней — они давали артефакты на гранях) и видимый
+## конус луча; над люком на задней стене — лампа отсека: у выбранной горит зелёным.
 func _build_bay(at: Vector3) -> void:
-	var hole := StandardMaterial3D.new()
-	hole.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	hole.albedo_color = Color(0.01, 0.01, 0.02)
-	_disc(0.58, at + Vector3(0, 0.004, 0), hole)
 	var door := StandardMaterial3D.new()
 	door.albedo_color = Color(0.22, 0.21, 0.27)
 	door.roughness = 0.5
@@ -235,7 +312,7 @@ func _build_bay(at: Vector3) -> void:
 	blob.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	blob.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	blob.albedo_color = Color(0, 0, 0, 0.55)
-	_disc(0.42, at + Vector3(0, 0.012, 0), blob)
+	_blobs.append(_disc(0.42, at + Vector3(0, 0.012, 0), blob))
 	var ring := TorusMesh.new()
 	ring.inner_radius = 0.58
 	ring.outer_radius = 0.7
@@ -317,6 +394,111 @@ func _disc(radius: float, pos: Vector3, mat: Material) -> MeshInstance3D:
 	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	_vp.add_child(mi)
 	return mi
+
+
+## Шахта под люком — одна сетка на все люки (и материалы общие: открывается только люк выбранной).
+## Восьмигранный колодец глубиной SHAFT_DEPTH, дальняя грань (−Z) — к камере. Стены — листы со швами
+## и жёлтой кромкой поверху (SHAFT_SHADER); кольца-уступы с шагом SHAFT_STEP ловят свет прожектора
+## сверху и зарево снизу; на гранях по бокам от дальней — направляющие с огнями между кольцами.
+func _shaft_mesh() -> ArrayMesh:
+	var mesh := ArrayMesh.new()
+	var down := Vector3(0, -SHAFT_DEPTH, 0)
+	var w := 2.0 * SHAFT_R * tan(PI / SHAFT_SIDES)    # ширина грани
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	for k in range(-SHAFT_SIDES / 2, SHAFT_SIDES / 2):  # развёртка UV.x без шва на видной стороне
+		var a := _corner(k, -1.0, SHAFT_R)
+		var b := _corner(k, 1.0, SHAFT_R)
+		_quad(st, a, b, b + down, a + down, -_face(k), k * w, (k + 1) * w)
+	st.commit(mesh)
+	_shaft_wall = ShaderMaterial.new()
+	_shaft_wall.shader = _shader(SHAFT_SHADER)
+	_shaft_wall.set_shader_parameter("panel", w * 0.5)
+	_shaft_wall.set_shader_parameter("step_y", SHAFT_STEP)
+	_shaft_wall.set_shader_parameter("glow", COLOR_GLOW)
+	mesh.surface_set_material(0, _shaft_wall)
+
+	# Кольца и направляющие — кусками по шагу колец: цвет вершин темнеет вглубь, как стены.
+	var rings := int(SHAFT_DEPTH / SHAFT_STEP)
+	st = SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	for j in range(1, rings + 1):
+		var top := Vector3(0, -SHAFT_STEP * j, 0)
+		var bot := top - Vector3(0, 0.04, 0)
+		for k in SHAFT_SIDES:
+			var oa := _corner(k, -1.0, SHAFT_R)
+			var ob := _corner(k, 1.0, SHAFT_R)
+			var ia := _corner(k, -1.0, SHAFT_R - RING_IN)
+			var ib := _corner(k, 1.0, SHAFT_R - RING_IN)
+			_quad(st, oa + top, ob + top, ib + top, ia + top, Vector3.UP)
+			_quad(st, ia + top, ib + top, ib + bot, ia + bot, -_face(k))
+			_quad(st, ia + bot, ib + bot, ob + bot, oa + bot, Vector3.DOWN)
+	const RAIL_HW := 0.035
+	for k: int in [1, SHAFT_SIDES - 1]:
+		var n := _face(k)
+		var t := Vector3.UP.cross(n) * RAIL_HW
+		var back := n * SHAFT_R
+		var front := n * (SHAFT_R - RAIL_IN)
+		for j in rings + 1:
+			var y0 := Vector3(0, -SHAFT_STEP * j, 0)
+			var y1 := Vector3(0, -minf(SHAFT_STEP * (j + 1), SHAFT_DEPTH), 0)
+			_quad(st, front - t + y0, front + t + y0, front + t + y1, front - t + y1, -n)
+			_quad(st, back + t + y0, front + t + y0, front + t + y1, back + t + y1, t.normalized())
+			_quad(st, front - t + y0, back - t + y0, back - t + y1, front - t + y1, -t.normalized())
+	st.commit(mesh)
+	var rib := StandardMaterial3D.new()
+	rib.albedo_color = Color(0.26, 0.25, 0.32)
+	rib.roughness = 0.5
+	rib.metallic = 0.4
+	rib.vertex_color_use_as_albedo = true
+	mesh.surface_set_material(1, rib)
+
+	# Огни — на направляющих, посередине между кольцами.
+	st = SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	for k: int in [1, SHAFT_SIDES - 1]:
+		var n := _face(k)
+		var t := Vector3.UP.cross(n) * 0.026
+		var up := Vector3(0, 0.035, 0)
+		for j in rings:
+			var c := n * (SHAFT_R - RAIL_IN - 0.004) + Vector3(0, -SHAFT_STEP * (j + 0.5), 0)
+			_quad(st, c - t + up, c + t + up, c + t - up, c - t - up, -n)
+	st.commit(mesh)
+	_shaft_lamps = ShaderMaterial.new()
+	_shaft_lamps.shader = _shader(SHAFT_LAMP_SHADER)
+	_shaft_lamps.set_shader_parameter("tint", COLOR_STRIP)
+	_shaft_lamps.set_shader_parameter("step_y", SHAFT_STEP)
+	mesh.surface_set_material(2, _shaft_lamps)
+	return mesh
+
+
+## Направление на середину грани k шахты: 0 — дальняя (−Z), дальше — вправо (к +X).
+static func _face(k: float) -> Vector3:
+	var a := k * TAU / SHAFT_SIDES
+	return Vector3(sin(a), 0, -cos(a))
+
+
+## Угол грани k: side −1 — левый, +1 — правый (если смотреть на грань изнутри); r — до середины грани.
+static func _corner(k: int, side: float, r: float) -> Vector3:
+	return _face(k + side * 0.5) * (r / cos(PI / SHAFT_SIDES))
+
+
+## Четырёхугольник a-b-c-d с нормалью n; лицевая сторона в Godot — обход по часовой, порядок треугольников
+## подбирается по нормали. UV.x — от u0 (a, d) до u1 (b, c), UV.y — глубина; цвет вершины — затемнение
+## вглубь (как у стен в SHAFT_SHADER).
+static func _quad(st: SurfaceTool, a: Vector3, b: Vector3, c: Vector3, d: Vector3, n: Vector3,
+		u0: float = 0.0, u1: float = 0.0) -> void:
+	var pts := PackedVector3Array([a, b, c, d])
+	var us := PackedFloat32Array([u0, u1, u1, u0])
+	var cw := (b - a).cross(c - a).dot(n) < 0.0
+	var order := PackedInt32Array([0, 1, 2, 0, 2, 3] if cw else [0, 2, 1, 0, 3, 2])
+	st.set_normal(n)
+	for i in order:
+		var depth := -pts[i].y
+		var dim := 1.0 - 0.8 * smoothstep(0.05, 1.0, depth)
+		st.set_color(Color(dim, dim, dim))
+		st.set_uv(Vector2(us[i], depth))
+		st.add_vertex(pts[i])
 
 
 static func _shader(code: String) -> Shader:
@@ -457,6 +639,9 @@ func _start() -> void:
 		return
 	_leave_t = 0.0
 	_clunk.play()
+	_shaft_glow.position = Vector3(_doors[selected].position.x, -1.5, 0)
+	_shaft_glow.light_energy = 0.0
+	_shaft_glow.visible = true
 
 
 func _open_help() -> void:
@@ -465,11 +650,17 @@ func _open_help() -> void:
 		help.open()
 
 
-## Старт: створка люка уходит, машина опускается в шахту, затемнение, сигнал, проявление мира.
+## Старт: створка люка уходит (с ней — пятно тени), огни шахты загораются сверху вниз, снизу разгорается
+## зарево, машина опускается мимо колец и огней; затемнение, сигнал, проявление мира.
 func _leave(dt: float) -> void:
 	_leave_t += dt
 	var door := _doors[selected]
 	door.scale = Vector3.ONE * maxf(1.0 - _leave_t / 0.25, 0.0)
+	_blobs[selected].scale = door.scale
+	_shaft_lamps.set_shader_parameter("run", _leave_t)
+	var heat := clampf(_leave_t / (0.2 + SINK_S), 0.0, 1.0)
+	_shaft_wall.set_shader_parameter("heat", heat)
+	_shaft_glow.light_energy = GLOW_ON * heat
 	var m := _models[selected]
 	var k := clampf((_leave_t - 0.2) / SINK_S, 0.0, 1.0)
 	m.root.position.y = m.hover_height - 1.0 * k * k

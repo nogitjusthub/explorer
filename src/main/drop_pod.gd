@@ -68,6 +68,14 @@ static func total_s() -> float:
 	return FREE_FALL_S + burn_s()
 
 
+## Прогрев шейдеров (Warmup): капсула стоит на земле с работающими двигателями, сцена не идёт.
+func preview() -> void:
+	set_process(false)
+	_pod.position = _ground
+	_burn(1.0)
+	_blast.emitting = true
+
+
 func _process(dt: float) -> void:
 	if _phase == 2:
 		return

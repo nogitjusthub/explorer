@@ -2,11 +2,11 @@ class_name PickupGenerator
 extends RefCounted
 ## Расстановка находок в чанке (GDD §6) — чистая функция от seed и данных чанка.
 ## Не на воде, не на площадке челнока, не под деревом; не больше одной находки на тайл.
-## У гнёзд — дополнительные образцы и ядра.
+## В местах скопления (бывшие гнёзда, флаг FLAG_NEST) — образец и иногда ядро.
 ## Канистры здесь не ставятся: их плотность зависит от времени забега (PickupField).
 
 
-const NEST_CORE_CHANCE := 0.35
+const NEST_CORE_CHANCE := 0.2
 
 
 ## Список находок чанка: [{tile: Vector2i, kind: StringName}, ...].
@@ -74,7 +74,7 @@ static func _tile_kind(data: ChunkData, i: int, roll: float, rules: BalanceRules
 	return &""
 
 
-## У гнезда (тайлы с FLAG_NEST в этом чанке) — пара образцов и иногда ядро, в 2–5 тайлах от него.
+## Место скопления (тайлы с FLAG_NEST в этом чанке) — образец и иногда ядро, в 2–5 тайлах от центра.
 static func _add_nest_loot(data: ChunkData, run_seed: int, result: Array[Dictionary]) -> void:
 	var origin := Grid.chunk_origin(data.coord)
 	var sum := Vector2.ZERO
@@ -88,7 +88,7 @@ static func _add_nest_loot(data: ChunkData, run_seed: int, result: Array[Diction
 		return
 	var c := Vector2i((sum / count).round())
 	var rng := DetRng.rng_for(run_seed, data.coord.x, data.coord.y, 640)
-	var kinds: Array[StringName] = [&"sample", &"sample"]
+	var kinds: Array[StringName] = [&"sample"]
 	if rng.randf() < NEST_CORE_CHANCE:
 		kinds.append(&"core")
 	for kind in kinds:

@@ -74,3 +74,90 @@ func test_creature_loses_interest_without_progress() -> void:
 		assert_true(t < c.rules.fauna_give_up_s + 1.0, "gives up in time")
 	assert_near(t, c.rules.fauna_give_up_s, 0.2, "gives up after fauna_give_up_s")
 	c.free()
+
+
+## Скакун — помесь «Чужого» и раптора (GDD §5.4): модель ростом 0,35–0,45, длиной около 0,5 (в игре × SIZE), хвост
+## короткий; модель лёгкая, меши общие на стаю. Стоя — ноги на земле; крик — на дыбах с разинутой пастью;
+## на бегу ноги ходят враз и корпус наклонён; укус — передний бросается вперёд.
+func test_hopper_model_and_poses() -> void:
+	var f := TerrainFixture.new(4)
+	var pack := HopperPack.new()
+	pack.rules = BalanceRules.new()
+	pack.query = f.query
+	pack.rng = RandomNumberGenerator.new()
+	pack.rng.seed = 3
+	pack.setup(Vector2(5.5, 5.5), 3)
+	var front: Dictionary = pack._members[0]
+	var m: Dictionary = pack._members[1]
+	var parts: Array[Node] = (m["node"] as Node).find_children("*", "MeshInstance3D", true, false)
+	assert_true(parts.size() <= 18, "light model: %d parts" % parts.size())
+	assert_true((m["body"] as MeshInstance3D).mesh == (front["body"] as MeshInstance3D).mesh, "meshes shared by the pack")
+	var box := _model_box(m["node"])
+	assert_near(box.position.y, 0.0, 0.02, "feet on the ground")
+	assert_true(box.end.y > 0.35 and box.end.y < 0.45, "height %.2f (model units, before SIZE)" % box.end.y)
+	assert_true(box.size.z > 0.4 and box.size.z < 0.6, "length %.2f (model units, before SIZE)" % box.size.z)
+	var tail: Node3D = m["tail"]
+	var tail_box := _part_box(tail, (m["body"] as Node3D).transform * tail.transform)
+	assert_true(tail_box.size.z < (box.size.z - tail_box.size.z) * 0.55, "short tail: %.2f" % tail_box.size.z)
+	var head_y := _head_y(m)
+
+	pack.state = HopperPack.State.ALERT
+	pack._timer = 0.3
+	for i in 30:
+		pack._place_all(1.0 / 60.0)
+	assert_true((m["jaw"] as Node3D).rotation.x < -0.5, "the scream: jaw open")
+	assert_true((m["throat"] as Node3D).visible, "red mouth shows")
+	assert_true(_head_y(m) > head_y + 0.05, "rears up")
+
+	pack.state = HopperPack.State.CHASE
+	pack._heading = Vector2(0.0, -1.0)
+	var gap := 0.0
+	var lean := 0.0
+	for i in 60:
+		pack.pos += Vector2(0.0, -1.0) * pack.rules.hopper_speed / 60.0
+		pack._moving = true
+		pack._place_all(1.0 / 60.0)
+		var feet: Array = m["feet"]
+		gap = maxf(gap, absf((feet[0] as Node3D).position.y - (feet[1] as Node3D).position.y))
+		lean = minf(lean, (m["body"] as Node3D).rotation.x)
+	assert_true(gap > 0.03, "legs alternate: %.3f" % gap)
+	assert_true(lean < -0.2, "leans forward in the chase")
+
+	pack._moving = false
+	for i in 60:
+		pack._place_all(1.0 / 60.0)
+	var at := (front["node"] as Node3D).position
+	pack._lunge = HopperPack.LUNGE_S
+	for i in 9:
+		pack._lunge -= 1.0 / 60.0
+		pack._place_all(1.0 / 60.0)
+	var thrown := (front["node"] as Node3D).position - at
+	assert_true(-thrown.z > HopperPack.LUNGE_LEN * 0.8, "the front one lunges: %.2f" % -thrown.z)
+	assert_true((front["jaw"] as Node3D).rotation.x < -0.4, "biting with the jaw open")
+	pack.free()
+
+
+## Габариты модели особи в её осях (от корня, без его разворота).
+func _model_box(root: Node3D) -> AABB:
+	var acc: Array = [null]
+	for c in root.get_children():
+		_gather_box(c, (c as Node3D).transform, acc)
+	return acc[0]
+
+
+func _part_box(part: Node3D, xf: Transform3D) -> AABB:
+	var acc: Array = [null]
+	_gather_box(part, xf, acc)
+	return acc[0]
+
+
+func _gather_box(n: Node3D, xf: Transform3D, acc: Array) -> void:
+	if n is MeshInstance3D and n.visible:
+		var b := xf * (n as MeshInstance3D).get_aabb()
+		acc[0] = b if acc[0] == null else (acc[0] as AABB).merge(b)
+	for c in n.get_children():
+		_gather_box(c, xf * (c as Node3D).transform, acc)
+
+
+func _head_y(m: Dictionary) -> float:
+	return ((m["body"] as Node3D).transform * (m["head"] as Node3D).transform).origin.y
