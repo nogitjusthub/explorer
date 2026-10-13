@@ -1,5 +1,6 @@
 ﻿# Публикует веб-версию на GitHub Pages: собирает build/web (export_web.ps1), кладёт её в ветку gh-pages
-# (отдельный worktree в build/gh-pages) и отправляет на GitHub. Страница: https://<логин>.github.io/<репозиторий>/
+# (отдельный worktree в build/gh-pages) одним коммитом без истории и отправляет на GitHub (принудительно).
+# Страница: https://<логин>.github.io/<репозиторий>/
 # Запуск (из корня репозитория, remote origin уже настроен):
 #   powershell -ExecutionPolicy Bypass -File tools\scripts\publish_web.ps1
 #   (в PowerShell 7: pwsh -File tools\scripts\publish_web.ps1)
@@ -32,10 +33,15 @@ Get-ChildItem $pages -Force | Where-Object { $_.Name -ne ".git" } | Remove-Item 
 Copy-Item (Join-Path $root "build\web\*") $pages -Recurse
 New-Item -ItemType File -Force (Join-Path $pages ".nojekyll") | Out-Null
 
+# Ветка gh-pages — всегда один коммит без истории: в каждой сборке ~22 МБ wasm, история выкладок не нужна
+# и только раздувает репозиторий. Коммит без родителя на свежем дереве, ветка переставляется на него,
+# на GitHub — принудительно (история main не трогается).
 $rev = git rev-parse --short HEAD
 git -C $pages add -A
-git -C $pages commit -q -m "Веб-версия игры ($rev)"
-if ($LASTEXITCODE -ne 0) { Write-Host "Nothing changed" }
+$tree = git -C $pages write-tree
+$commit = git -C $pages commit-tree $tree -m "Веб-версия игры ($rev)"
+if ($LASTEXITCODE -ne 0 -or -not $commit) { Write-Host "Commit failed"; exit 1 }
+git -C $pages reset -q --soft $commit
 if (-not $NoPush) {
-    git -C $pages push -u origin gh-pages
+    git -C $pages push -f -u origin gh-pages
 }
