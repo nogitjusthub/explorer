@@ -16,7 +16,7 @@ const SHUTTLE_HEAR_TILES := 45.0       ## челнок слышно издале
 const SYNTH_BUDGET_USEC := 3000        ## фоновый синтез звуков за кадр, мкс
 const SOUNDS: Array[StringName] = [&"hit", &"rumble_hit", &"pager", &"chime", &"crackle", &"thunder", &"screech",
 		&"buzz", &"rumble_build", &"dust", &"wind", &"bellow", &"bellow_low", &"stomp", &"thrust", &"tractor",
-		&"howl"]
+		&"howl", &"ground_hum"]
 const DUST_DB := -6.0                  ## гул пылевой бури в массе; вдали — тише (lerp от 0,12 по амплитуде)
 
 var vehicle: Vehicle

@@ -220,6 +220,7 @@ static func _recipe(key: StringName) -> Callable:
 		&"wind": return _wind_loop.bind(2.0)      # гул водоворота
 		&"howl": return _howl_loop.bind(6.0)      # вой смерча
 		&"dust": return _dust_loop.bind(3.0)      # ровный гул пылевой бури
+		&"ground_hum": return _ground_hum_loop.bind(3.0)   # червь идёт под песком
 		&"screech": return _screech.bind(0.75)
 		&"buzz": return _buzz.bind(1.2)
 		&"bellow": return _bellow.bind(1.1, false)
@@ -311,6 +312,33 @@ static func _rumble(s: Synth, seconds: float, rising: bool) -> void:
 		var env := pow(k, 1.4) if rising else minf(t / 0.04, 1.0) * exp(-t * 1.6)
 		data[i] = body * env
 	s.output(data)
+
+
+## Подземный гул — бесшовная петля: тот же гул, что у землетрясения (низ до ~100 Гц, тон ~38 Гц с дрожью
+## и дребезг 150–500 Гц), но ровный, без нарастания и спада — червь идёт под песком.
+static func _ground_hum_loop(s: Synth, seconds: float) -> void:
+	var n := int(seconds * RATE)
+	var m := RATE / 4                      # перекрытие для бесшовной петли
+	var raw := PackedFloat32Array()
+	raw.resize(n + m)
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 406
+	var lp1 := 0.0
+	var lp2 := 0.0
+	var mid := 0.0
+	var phase := 0.0
+	for i in n + m:
+		if i % CHUNK == 0 and s.chunked:
+			await s.resume
+		var t := float(i) / RATE
+		var noise := rng.randf_range(-1.0, 1.0)
+		lp1 = lerpf(lp1, noise, 0.03)
+		lp2 = lerpf(lp2, lp1, 0.05)
+		mid = lerpf(mid, noise, 0.15)
+		phase += TAU * (38.0 + 6.0 * sin(t * 3.1)) / RATE
+		var rattle := (mid - lp1) * (0.5 + 0.5 * sin(t * 13.0 + sin(t * 4.0) * 2.0))
+		raw[i] = lp2 * 14.0 + sin(phase) * 0.35 * (0.7 + 0.3 * sin(t * 9.0)) + rattle * 0.9
+	s.output_loop(raw, n, m)
 
 
 ## Гул ветра — бесшовная петля: шумовой «вой», который то нарастает, то стихает (водоворот играет его

@@ -44,6 +44,9 @@ const JAW_LEN := 2.1                     ## длина челюсти: сомк�
 const TOSS_TILT := 0.55                  ## рад — наклон машины в полёте после броска
 const LEAN := 0.12                       ## рад — бросок не строго вверх
 const RIDGE_EVERY_S := 0.25
+const HUM_DB := -14.0                    ## гул под песком — заметно тише гула землетрясения (−2 дБ)
+const HUM_HEAR_TILES := 14.0             ## дальше — не слышно (как остальную фауну)
+const HUM_FADE_S := 0.4                  ## гул нарастает и стихает за столько
 const RIDGE_HALF_W := 0.7
 const RIDGE_KEEP := 3.5                  ## дальше позади вал оседает
 
@@ -60,6 +63,8 @@ var _wake: CPUParticles3D
 var _ridge_from := Vector2.ZERO
 var _ridge_timer := 0.0
 var _raised: Dictionary = {}             ## поднятые углы: Vector3i(tx, tz, угол) → исходный ярус
+var _hum: AudioStreamPlayer               ## гул под песком (петля Sfx ground_hum)
+var _hum_level := 0.0
 var _ring: Node3D
 var _ring_mat: StandardMaterial3D
 var _burst: CPUParticles3D
@@ -164,6 +169,7 @@ func step(dt: float) -> void:
 				else:
 					_leave()
 	var underground := state == State.HUNT or state == State.TELEGRAPH
+	_update_hum(dt, underground)
 	if not underground:
 		_settle(-1.0)            # ушёл в глубину — вал оседает целиком
 	_wake.emitting = underground
@@ -171,6 +177,21 @@ func step(dt: float) -> void:
 		_tint_dust()
 		_wake.position = Vector3(pos.x, ground_y(pos) + 0.1, pos.y)
 		_wake.rotation.y = atan2(-_heading.x, -_heading.y)
+
+
+## Гул под песком: ровная петля, пока червь идёт под землёй (охота, телеграф), — тише гула землетрясения,
+## громкость по расстоянию до машины; бросок и уход — стихает за HUM_FADE_S.
+func _update_hum(dt: float, underground: bool) -> void:
+	_hum_level = move_toward(_hum_level, 1.0 if underground else 0.0, dt / HUM_FADE_S)
+	if _hum_level <= 0.0:
+		if _hum.playing:
+			_hum.stop()
+		return
+	if not _hum.playing:
+		_hum.stream = Sfx.named(&"ground_hum")
+		_hum.play()
+	var near := clampf(1.0 - vehicle.state.pos.distance_to(pos) / HUM_HEAR_TILES, 0.0, 1.0)
+	_hum.volume_db = linear_to_db(maxf(_hum_level * near, 0.001)) + HUM_DB
 
 
 ## Вал за червём: песок поднимается на ярус вдоль пройденного отрезка, деревья рядом валятся.
@@ -305,6 +326,9 @@ static func _ease_out(k: float) -> float:
 
 
 func _build() -> void:
+	_hum = AudioStreamPlayer.new()
+	_hum.volume_db = -80.0
+	add_child(_hum)
 	_wake = _dust(SAND_COLOR.darkened(0.2), 70, 1.2, Vector3.UP, 60.0, 0.8, 2.4, 2)
 	_wake.emission_shape = CPUParticles3D.EMISSION_SHAPE_BOX
 	_wake.emission_box_extents = Vector3(0.8, 0.05, 1.4)
