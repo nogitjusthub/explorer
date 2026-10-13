@@ -20,13 +20,21 @@ $ErrorActionPreference = "Continue"
 
 $out = Join-Path $root "build\web"
 New-Item -ItemType Directory -Force $out | Out-Null
-# Импорт ресурсов перед экспортом. Godot изредка падает на нём (access violation) — до трёх попыток;
-# не вышло — экспорт не запускаем: он собрал бы сборку на устаревших или неполных ресурсах.
+# Импорт ресурсов перед экспортом — до трёх попыток; не вышло — экспорт не запускаем: он собрал бы
+# сборку на устаревших или неполных ресурсах. Headless Godot часто падает уже при выходе, после
+# законченного импорта (access violation, 0xC0000005): это не ошибка импорта, если в выводе нет ERROR.
 $imported = $false
 for ($try = 1; $try -le 3 -and -not $imported; $try++) {
-    & $godot --headless --path $root --import 2>&1 | Out-Null
-    $imported = ($LASTEXITCODE -eq 0)
-    if (-not $imported) { Write-Host "Import failed (exit code $LASTEXITCODE), attempt $try of 3" }
+    $importLog = & $godot --headless --path $root --import 2>&1 | ForEach-Object { "$_" }
+    $code = $LASTEXITCODE
+    $errors = @($importLog | Where-Object { $_ -match '(^|\s)(SCRIPT )?ERROR:' })
+    $crashOnExit = ($code -eq -1073741819) -and ($errors.Count -eq 0)
+    $imported = ($code -eq 0) -or $crashOnExit
+    if ($crashOnExit) { Write-Host "Import done (Godot crashed on exit, ignored)" }
+    if (-not $imported) {
+        Write-Host "Import failed (exit code $code), attempt $try of 3"
+        $errors | Select-Object -First 5 | ForEach-Object { Write-Host "  $_" }
+    }
 }
 if (-not $imported) {
     Write-Host "Import failed - export aborted"
