@@ -569,6 +569,8 @@ func _on_run_ended(cause: StringName) -> void:
 		if not vehicle.wrecked:
 			vehicle.wreck()
 		hud.banner("МАШИНА РАЗБИТА", Hud.COLOR_DAMAGE)
+	if cause != RunState.CAUSE_EVACUATED:
+		vehicle.sink_on_water()        # разбитая или затянутая на воде — идёт ко дну
 	_over_timer = EVAC_SCENE_S if cause == RunState.CAUSE_EVACUATED else rules.death_delay_s
 
 

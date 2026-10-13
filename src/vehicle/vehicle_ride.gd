@@ -23,7 +23,7 @@ const SHAKE_FOLLOW := 8.0                 ## 1/с — сила тряски до
 ## Зыбучий грунт: осадка и медленное покачивание вместо тряски.
 const MIRE_SINK := 0.06                   ## тайла — колёса и гусеницы уходят в грунт…
 const MIRE_STUCK_SINK := 0.05             ## …и ещё глубже, пока машину засасывает (VehicleState.mire_stuck)
-const PULL_SINK := 0.3                    ## тайла — ядро водоворота затягивает машину в воду (VehicleState.pull_under)
+const PULL_SINK := 0.45                   ## тайла — ядро водоворота затягивает машину в воду (VehicleState.pull_under)
 const MIRE_TILT := 0.05                   ## рад
 const MIRE_HZ := 0.6
 const MIRE_FOLLOW := 2.0                  ## 1/с — оседает и выбирается не сразу

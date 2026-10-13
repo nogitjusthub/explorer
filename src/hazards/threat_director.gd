@@ -155,7 +155,7 @@ func step(dt: float) -> void:
 		if _whirl_left <= 0.0 and _whirl_check <= 0.0 and not in_calm():
 			_whirl_check = 2.0
 			if _over_deep_water() and _rng.randf() < rules.whirlpool_chance:
-				if _spawn_whirlpool(4.0, 9.0):
+				if _spawn_whirlpool(Whirlpool.SPAWN_MIN, Whirlpool.SPAWN_MAX):
 					_whirl_left = rules.whirlpool_interval_s * lerpf(0.75, 1.25, _rng.randf())
 	if _whirlpool != null:
 		_whirlpool.step(dt)
@@ -230,7 +230,7 @@ func _start(kind: StringName) -> bool:
 	return false
 
 
-## Водоворот по курсу машины в r_min…r_max тайлах на глубокой воде 2×2. Один за раз.
+## Водоворот по курсу машины в r_min…r_max тайлах на глубокой воде 2×2 (в игре — за кадром). Один за раз.
 func _spawn_whirlpool(r_min: float, r_max: float) -> bool:
 	if _whirlpool != null:
 		return false

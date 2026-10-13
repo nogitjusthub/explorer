@@ -273,6 +273,19 @@ func _physics_process(dt: float) -> void:
 			engine.stop()
 
 
+## Гибель над водой (ховер на воде, машина в воде): корпус идёт ко дну, как тонущая. Уже на дне или тонет —
+## ничего.
+func sink_on_water() -> void:
+	var t := state.tile
+	if state.drowning or state.falling or not query.is_loaded(t.x, t.y):
+		return
+	if query.water_tier(t.x, t.y) == TerrainQuery.NO_WATER:
+		return
+	if state.y <= query.surface_y(state.pos.x, state.pos.y) + 0.01:
+		return
+	VehicleKinematics.sink_wreck(state)
+
+
 ## Машина разбита: управление отключено, корпус темнеет, двигатель стихает.
 func wreck() -> void:
 	wrecked = true

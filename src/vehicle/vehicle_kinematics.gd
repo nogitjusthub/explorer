@@ -325,6 +325,13 @@ static func _too_deep(s: VehicleState, cls: VehicleClass, q: TerrainQuery) -> bo
 	return q.water_depth(s.pos.x, s.pos.y) > cls.max_water_depth + DEEP_MARGIN
 
 
+## Разбитая на воде машина (ховер над водой — тоже) идёт ко дну, как тонущая, но без новой гибели: забег
+## уже кончен.
+static func sink_wreck(s: VehicleState) -> void:
+	_start_drowning(s, s.y)
+	s.drowned = true
+
+
 static func _start_drowning(s: VehicleState, start_y: float) -> void:
 	s.drowning = true
 	s.drown_time = 0.0
