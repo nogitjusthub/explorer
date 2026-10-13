@@ -62,7 +62,7 @@ const ARCS := 2
 const ARC_SEGS := 4
 const ARC_S := 0.32
 const ARC_JAG_S := 0.05                  ## дуги перескакивают
-const ARC_W := 0.05
+const ARC_W := Grid.ART_PX               ## толщина дуги разряда — пиксель мира
 const LIGHT_S := 0.12
 const RING_S := 0.55
 const RING_INNER := 0.86                 ## доля внутреннего радиуса кольца
@@ -462,7 +462,7 @@ func _segment(i: int, a: Vector3, b: Vector3, shown: bool) -> void:
 	var rot := Basis(Quaternion(Vector3.UP, d / l)) if l > 0.001 else Basis()
 	var mid := (a + b) * 0.5
 	core.transform = Transform3D(rot * Basis.from_scale(Vector3(ARC_W, l + ARC_W, ARC_W)), mid)
-	glow.transform = Transform3D(rot * Basis.from_scale(Vector3(ARC_W * 3.2, l + ARC_W, ARC_W * 3.2)), mid)
+	glow.transform = Transform3D(rot * Basis.from_scale(Vector3(ARC_W * 3.0, l + ARC_W, ARC_W * 3.0)), mid)   # ореол — пиксель вокруг
 
 
 ## Тело на дне: наклон по нормали дна; зарыто глубже, если иначе веки высунутся из мелкой воды.
@@ -488,12 +488,12 @@ func _build() -> void:
 	_root = Node3D.new()
 	add_child(_root)
 	_mesh_off(MeshKit.prism(_root, MeshKit.ngon(3, R_RIM, _phase), LID_TOP - 0.03, 0.02,
-			Creature.skin(RIM_COLOR, BodyMaterial.Pattern.PEBBLE, 0.03)))
+			Creature.skin(RIM_COLOR, BodyMaterial.Pattern.PEBBLE, Grid.ART_PX / 2.0)))   # галька — 2×2 px узора
 	_lid = Node3D.new()
 	_root.add_child(_lid)
 	_mesh_off(MeshKit.prism(_lid, MeshKit.ngon(3, R_LID, _phase), LID_TOP - LID_H, LID_H,
-			Creature.skin(LID_COLOR, BodyMaterial.Pattern.PEBBLE, 0.03)))
-	var pebble := Creature.skin(LID_COLOR.lightened(0.15), BodyMaterial.Pattern.PEBBLE, 0.03)
+			Creature.skin(LID_COLOR, BodyMaterial.Pattern.PEBBLE, Grid.ART_PX / 2.0)))
+	var pebble := Creature.skin(LID_COLOR.lightened(0.15), BodyMaterial.Pattern.PEBBLE, Grid.ART_PX / 2.0)
 	var lid_box := BoxMesh.new()
 	lid_box.size = Vector3(0.1, 0.02, 0.09)
 	for i in 3:
@@ -583,15 +583,9 @@ func _ensure_fx() -> void:
 	_puff.damping_max = 2.5
 	_puff.gravity = Vector3.ZERO
 	_puff.local_coords = false
-	var q := QuadMesh.new()
-	q.size = Vector2(0.1, 0.1)
-	var pm := _unshaded(SAND_PUFF)
-	pm.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
 	var t := Grid.tile_of_world(pos.x, pos.y)
-	if query.is_loaded(t.x, t.y) and query.material(t.x, t.y) != ChunkData.Mat.SAND:
-		pm.albedo_color = GROUND_PUFF
-	q.material = pm
-	_puff.mesh = q
+	var sand := not query.is_loaded(t.x, t.y) or query.material(t.x, t.y) == ChunkData.Mat.SAND
+	_puff.mesh = PixelFx.quad(2, SAND_PUFF if sand else GROUND_PUFF)
 	_fx.add_child(_puff)
 
 

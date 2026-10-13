@@ -231,12 +231,7 @@ func _build() -> void:
 	dust.gravity = Vector3(0, -1.0, 0)
 	dust.tangential_accel_min = 5.0
 	dust.tangential_accel_max = 8.0
-	var quad := QuadMesh.new()
-	quad.size = Vector2(0.25, 0.25)
-	var dust_mat := mat.duplicate() as StandardMaterial3D
-	dust_mat.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
-	quad.material = dust_mat
-	dust.mesh = quad
+	dust.mesh = PixelFx.quad(4, Color(COLOR_FUNNEL, 1.0))
 	add_child(dust)
 	_audio = AudioStreamPlayer.new()
 	_audio.stream = Sfx.howl_loop(6.0)

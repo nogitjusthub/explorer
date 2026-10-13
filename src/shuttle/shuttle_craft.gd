@@ -55,7 +55,7 @@ const EM_NOSE_SECTIONS := [[-0.66, 0.16, 0.12, 0.2, 0.12], [-0.48, 0.3, 0.24, 0.
 const EM_HULL_SECTIONS := [[-0.48, 0.3, 0.24, 0.14, 0.26], [-0.3, 0.36, 0.28, 0.13, 0.36],
 		[0.42, 0.36, 0.28, 0.13, 0.36], [0.56, 0.32, 0.25, 0.15, 0.32]]
 const EM_CHAMFER := 0.04
-const PX := 0.035                  ## тексель обшивки — как у машин
+const PX := Grid.ART_PX            ## пиксель обшивки — как у рельефа и машин
 
 
 var kind: Kind
@@ -171,15 +171,7 @@ func dust(radius: float) -> void:
 	p.initial_velocity_min = 1.5
 	p.initial_velocity_max = 4.0
 	p.gravity = Vector3(0, -3.0, 0)
-	var q := QuadMesh.new()
-	q.size = Vector2(0.22, 0.22)
-	var m := StandardMaterial3D.new()
-	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	m.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
-	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	m.albedo_color = Color(0.7, 0.58, 0.5, 0.7)
-	q.material = m
-	p.mesh = q
+	p.mesh = PixelFx.quad(4, Color(0.7, 0.58, 0.5))
 	p.position = Vector3(0, 0.1, 0)
 	add_child(p)
 	p.emitting = true
@@ -557,6 +549,7 @@ func _build_common() -> void:
 	_hazard_mat = ShaderMaterial.new()
 	_hazard_mat.shader = HAZARD_SHADER
 	_hazard_mat.set_shader_parameter(&"color", COLOR_HAZARD)
+	_hazard_mat.set_shader_parameter(&"size", hull_r * 2.0)
 	var plane := PlaneMesh.new()
 	plane.size = Vector2.ONE * hull_r * 2.0
 	_hazard = _mesh(self, plane, Vector3(0, 0.04, 0), _hazard_mat)

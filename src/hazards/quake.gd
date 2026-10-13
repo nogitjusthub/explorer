@@ -253,16 +253,6 @@ func _build_telegraph() -> void:
 	_dust.initial_velocity_min = 0.4
 	_dust.initial_velocity_max = 1.2
 	_dust.gravity = Vector3(0, -0.6, 0)
-	_dust.scale_amount_min = 0.5
-	_dust.scale_amount_max = 1.0
-	var quad := QuadMesh.new()
-	quad.size = Vector2(0.22, 0.22)
-	var dust_mat := StandardMaterial3D.new()
-	dust_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	dust_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	dust_mat.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
-	dust_mat.albedo_color = COLOR_DUST
-	quad.material = dust_mat
-	_dust.mesh = quad
+	_dust.mesh = PixelFx.quad(3, Color(COLOR_DUST, 1.0))
 	_dust.emitting = false
 	add_child(_dust)

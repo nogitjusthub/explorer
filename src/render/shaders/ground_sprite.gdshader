@@ -1,6 +1,7 @@
 // Мелочь на земле (M5): пиксельные спрайты травы, кустиков, камней, осколков (MultiMesh на чанк).
-// Квад стоит вертикально и разворачивается к камере вокруг Y (цилиндрический билборд) — пиксели не
-// заваливаются. Спрайт из атласа по INSTANCE_CUSTOM.x, зеркалится по INSTANCE_CUSTOM.y; цвет — цвет
+// Квад смотрит прямо в камеру, низом на земле (наклонён назад): пиксель спрайта на экране квадратный и
+// одного размера с пикселем мира (Grid.ART_PX), как у частиц; стоя вертикально, он был бы сжат по высоте
+// и мельче остального. Основание привязано к пиксельной сетке экрана — пиксели не дрожат. Спрайт из атласа по INSTANCE_CUSTOM.x, зеркалится по INSTANCE_CUSTOM.y; цвет — цвет
 // экземпляра × оттенок спрайта (серый × GAIN). Прозрачность — отсечением (непрозрачный проход).
 // Свет — как у земли (нормаль вверх), погода и туман войны — как у рельефа. Теней не отбрасывает:
 // тень у основания нарисована в самом спрайте.
@@ -21,8 +22,12 @@ varying flat float flip;
 void vertex() {
 	vec3 origin = MODEL_MATRIX[3].xyz;
 	vec3 local = VERTEX - origin;                         // квад без поворота: смещение = локальные x, y
-	vec3 right = normalize(vec3(INV_VIEW_MATRIX[0].x, 0.0, INV_VIEW_MATRIX[0].z));
-	VERTEX = origin + right * local.x + vec3(0.0, local.y, 0.0);
+	// Основание — в центр пикселя экрана (орто-камера: пиксель = 2 / (P[1][1] · высота кадра)).
+	vec3 o_view = (VIEW_MATRIX * vec4(origin, 1.0)).xyz;
+	float pix = 2.0 / (PROJECTION_MATRIX[1][1] * VIEWPORT_SIZE.y);
+	o_view.xy = round(o_view.xy / pix) * pix;
+	origin = (INV_VIEW_MATRIX * vec4(o_view, 1.0)).xyz;
+	VERTEX = origin + INV_VIEW_MATRIX[0].xyz * local.x + INV_VIEW_MATRIX[1].xyz * local.y;
 	world_pos = VERTEX;
 	NORMAL = vec3(0.0, 1.0, 0.0);
 	idx = INSTANCE_CUSTOM.x;

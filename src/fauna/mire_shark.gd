@@ -810,8 +810,8 @@ const JAW: Array[Vector4] = [Vector4(0.04, 0.14, 0.085, -0.035), Vector4(-0.07, 
 ## Илозуб из 21 детали: туловище и голова — низкополигональные лофты, плавники — клинья и веера, гребень —
 ## лучи с перепонкой. Перед — по −Z.
 func _build() -> void:
-	_mud_mat = Creature.skin(_mud, BodyMaterial.Pattern.MUD, 0.03, 0.45)    # мокрый — чуть блестит
-	_fin_mat = Creature.skin(_mud.darkened(0.25), BodyMaterial.Pattern.MUD, 0.03, 0.45)
+	_mud_mat = Creature.skin(_mud, BodyMaterial.Pattern.MUD, Grid.ART_PX, 0.45)    # мокрый — чуть блестит
+	_fin_mat = Creature.skin(_mud.darkened(0.25), BodyMaterial.Pattern.MUD, Grid.ART_PX, 0.45)
 	_throat_mat = Creature.material(THROAT_COLOR)
 	_throat_mat.emission_enabled = true
 	_throat_mat.emission = THREAT_COLOR
@@ -904,9 +904,9 @@ func _build() -> void:
 		_mesh(pec, _hull_mesh(fan), _fin_mat)
 		_pecs.append(pec)
 
-	_wake = _particles(12, 0.5, 0.07, 0.6, 1.4, 35.0)
+	_wake = _particles(12, 0.5, 1, 0.6, 1.4, 35.0)
 	_ripples = _ripple_trail()
-	_splash = _particles(30, 0.7, 0.09, 1.5, 3.0, 55.0)
+	_splash = _particles(30, 0.7, 2, 1.5, 3.0, 55.0)
 	_splash.one_shot = true
 	_splash.explosiveness = 0.9
 	_splash.emitting = false
@@ -1076,7 +1076,7 @@ static func _hull(st: SurfaceTool, pts: Array[Vector3]) -> void:
 				MeshKit.tri(st, pts[i], pts[j], pts[k], -nrm if above else nrm)
 
 
-func _particles(amount: int, lifetime: float, size: float, v_min: float, v_max: float, spread: float) -> CPUParticles3D:
+func _particles(amount: int, lifetime: float, texels: int, v_min: float, v_max: float, spread: float) -> CPUParticles3D:
 	var p := CPUParticles3D.new()
 	p.amount = amount
 	p.lifetime = lifetime
@@ -1086,14 +1086,7 @@ func _particles(amount: int, lifetime: float, size: float, v_min: float, v_max: 
 	p.initial_velocity_max = v_max
 	p.gravity = Vector3(0, -9.0, 0)
 	p.local_coords = false
-	var q := QuadMesh.new()
-	q.size = Vector2(size, size)
-	var m := StandardMaterial3D.new()
-	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	m.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
-	m.albedo_color = _mud
-	q.material = m
-	p.mesh = q
+	p.mesh = PixelFx.quad(texels, _mud)
 	add_child(p)
 	return p
 

@@ -3,21 +3,21 @@ extends Node3D
 ## Следы и пыль от езды. Колёса ровера и гусеницы танка оставляют на земле колею — отпечатки-квады в
 ## одном MultiMesh (кольцом по MAX_MARKS), шейдер track_mark затемняет ими землю в пикселях её текстуры и
 ## гасит их за MARK_S секунд или дальше MARK_FAR тайлов от машины (за краем экрана). На ходу из-под колёс
-## летят пыль (облачка 4×4 текселя) и комья (тексель) цвета грунта; ховер колеи не оставляет — поднимает
+## летят пыль (облачка 4×4 пикселя, PixelFx) и комья (пиксель) цвета грунта; ховер колеи не оставляет — поднимает
 ## пыль кольцом вокруг юбки. Сила следа и пыли — по материалу: песок сильнее всего, камень и кристалл —
 ## едва, зыбун — колея и комья грязи без пыли, вода — ничего.
 
 const MAX_MARKS := 900
-const TEXEL := 1.0 / 16.0                ## тексель рельефа — пиксельный шаг следов и пыли
+const TEXEL := Grid.ART_PX              ## пиксель — шаг следов и пыли
 const STEP := TEXEL * 2.0                ## новый отпечаток — каждые 2 текселя пути колеи
 const MARK_S := 16.0
 const MARK_FAR := 13.0
 const LIFT := 0.012                      ## отпечаток чуть над землёй
 const DUST_SPEED := 1.2                  ## тайл/с — с этой скорости колёса пылят
-## Колеи класса: смещения колей от оси вбок, ширина колеи, вид рисунка (0 — колесо, 1 — гусеница).
+## Колеи класса: смещения колей от оси вбок и ширина колеи; рисунок у всех один — траки.
 const LINES := {
-	&"rover": {"offsets": [-0.25, 0.25], "width": TEXEL * 2.0, "kind": 0},
-	&"tank": {"offsets": [-0.245, 0.245], "width": TEXEL * 3.0, "kind": 1},
+	&"rover": {"offsets": [-0.25, 0.25], "width": TEXEL * 2.0},
+	&"tank": {"offsets": [-0.245, 0.245], "width": TEXEL * 3.0},
 }
 
 var cls: VehicleClass
@@ -29,7 +29,7 @@ var _count := 0                          ## поставлено отпечат�
 var _head := 0                           ## куда ляжет следующий (кольцо)
 var _time := 0.0
 var _last: Array[Variant] = []           ## последняя точка каждой колеи (Vector3) или null — колея прервана
-var _dist: Array[float] = []             ## путь вдоль колеи — непрерывный рисунок протектора
+var _dist: Array[float] = []             ## путь вдоль колеи — непрерывный рисунок траков
 var _dust: CPUParticles3D
 var _dirt: CPUParticles3D
 
@@ -58,8 +58,8 @@ func setup(vehicle_class: VehicleClass, terrain_query: TerrainQuery) -> void:
 	marks.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	marks.custom_aabb = AABB(Vector3(-1e5, -1e3, -1e5), Vector3(2e5, 2e3, 2e5))
 	add_child(marks)
-	_dust = _particles(14, 0.8, TEXEL * 4.0, _puff_texture())
-	_dirt = _particles(10, 0.5, TEXEL, null)
+	_dust = _particles(14, 0.8, 4)
+	_dirt = _particles(10, 0.5, 1)
 	_dirt.gravity = Vector3(0, -9.0, 0)
 	_dirt.initial_velocity_min = 1.0
 	_dirt.initial_velocity_max = 2.0
@@ -135,7 +135,7 @@ func track(state: VehicleState, on_ground: bool, dt: float) -> void:
 	var base: Color = ChunkMesher.MATERIAL_COLORS[clampi(mat, 0, 3)]
 	var dusty := dust_amount(mat, flags) if ground else 0.0
 	_dust.emitting = dusty > 0.0 and speed > DUST_SPEED * (0.5 if cls.hovers else 1.0)
-	_dust.color = Color(base.lightened(0.18), clampf(0.45 + 0.4 * dusty, 0.0, 0.85))
+	_dust.color = Color(base.lightened(0.18), 1.0)
 	_dirt.emitting = ground and not cls.hovers and speed > DUST_SPEED and (mat <= 1 or (flags & ChunkData.FLAG_MIRE) != 0)
 	_dirt.color = base.darkened(0.45 if (flags & ChunkData.FLAG_MIRE) != 0 else 0.3)
 
@@ -169,12 +169,12 @@ func _lay_marks(state: VehicleState, ground: bool) -> void:
 			continue
 		var tile := Grid.tile_of_world(p2.x, p2.y)
 		var s := strength(query.material(tile.x, tile.y), query.flags(tile.x, tile.y))
-		_add_mark(a, p, float(spec["width"]), int(spec["kind"]), _dist[i], s)
+		_add_mark(a, p, float(spec["width"]), _dist[i], s)
 		_dist[i] += d
 		_last[i] = p
 
 
-func _add_mark(a: Vector3, b: Vector3, width: float, kind: int, dist: float, s: float) -> void:
+func _add_mark(a: Vector3, b: Vector3, width: float, dist: float, s: float) -> void:
 	var mid := (a + b) * 0.5
 	var n := query.normal_at(mid.x, mid.z)
 	var fwd := b - a
@@ -184,13 +184,13 @@ func _add_mark(a: Vector3, b: Vector3, width: float, kind: int, dist: float, s: 
 	var basis := Basis(right * width, n, fwd * length)
 	_mm.set_instance_transform(_head, Transform3D(basis, mid + n * LIFT))
 	_mm.set_instance_color(_head, Color(1, 1, 1, s))
-	_mm.set_instance_custom_data(_head, Color(kind, dist, length, _time))
+	_mm.set_instance_custom_data(_head, Color(0.0, dist, length, _time))
 	_head = (_head + 1) % MAX_MARKS
 	_count = mini(_count + 1, MAX_MARKS)
 	_mm.visible_instance_count = _count
 
 
-func _particles(amount: int, lifetime: float, size: float, tex: Texture2D) -> CPUParticles3D:
+func _particles(amount: int, lifetime: float, texels: int) -> CPUParticles3D:
 	var p := CPUParticles3D.new()
 	p.amount = amount
 	p.lifetime = lifetime
@@ -205,38 +205,16 @@ func _particles(amount: int, lifetime: float, size: float, tex: Texture2D) -> CP
 	ramp.set_color(0, Color(1, 1, 1, 1))
 	ramp.set_color(1, Color(1, 1, 1, 0))
 	p.color_ramp = ramp
-	var q := QuadMesh.new()
-	q.size = Vector2(size, size)
-	var m := StandardMaterial3D.new()
-	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	m.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
-	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	m.vertex_color_use_as_albedo = true
-	m.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST
-	if tex != null:
-		m.albedo_texture = tex
-	q.material = m
-	p.mesh = q
+	p.mesh = PixelFx.quad(texels, Color.WHITE, true)
 	p.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	add_child(p)
 	return p
 
 
-## Облачко пыли 4×4 текселя: круг без углов, середина плотнее.
-static func _puff_texture() -> ImageTexture:
-	var img := Image.create(4, 4, false, Image.FORMAT_RGBA8)
-	for y in 4:
-		for x in 4:
-			var corner := (x == 0 or x == 3) and (y == 0 or y == 3)
-			var inner := x >= 1 and x <= 2 and y >= 1 and y <= 2
-			img.set_pixel(x, y, Color(1, 1, 1, 0.0 if corner else (1.0 if inner else 0.6)))
-	return ImageTexture.create_from_image(img)
-
-
 ## Образец для прогрева шейдеров: один отпечаток (в начале координат узла отпечатков — прогрев переносит
 ## его к своей камере) и летящие пыль с комьями.
 func preview(at: Vector3) -> void:
-	_add_mark(Vector3.ZERO, Vector3(0, 0, STEP), TEXEL * 2.0, 0, 0.0, 1.0)
+	_add_mark(Vector3.ZERO, Vector3(0, 0, STEP), TEXEL * 2.0, 0.0, 1.0)
 	for p in [_dust, _dirt]:
 		p.global_position = at
 		p.emitting = true

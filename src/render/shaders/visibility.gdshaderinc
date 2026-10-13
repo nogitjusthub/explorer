@@ -18,6 +18,20 @@ global uniform vec3 storm_center;
 global uniform float storm_radius;
 global uniform float storm_dark;
 
+// Пиксель мира (Grid.ART_PX) — тексель рельефа: плавные поля (туман, тень туч, пелена) считаются в центрах
+// этих пикселей и ступенями — пиксель-арт без плавных градиентов.
+const float ART_PX = 0.0625;
+
+vec3 art_snap(vec3 p) {
+	return vec3((floor(p.x / ART_PX) + 0.5) * ART_PX, p.y, (floor(p.z / ART_PX) + 0.5) * ART_PX);
+}
+
+// Уровень v (0…1) — ступенями (levels): плоские полосы с краем по пикселям мира, без полутонов. Дизеринг
+// не берём — слои тумана в шахматку по пикселю складываются в мелкую сетку. p — на будущее (узор ступеней).
+float art_steps(float v, float levels, vec3 p) {
+	return clamp(floor(v * levels + 0.5) / levels, 0.0, 1.0);
+}
+
 // Шум для облаков и разводов: дешёвый value noise и fbm из 4 октав (≈ 0…0.94).
 float vhash(vec2 p) {
 	return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
@@ -52,9 +66,10 @@ float storm_shade(vec3 world_pos) {
 	if (storm_radius <= 0.0) {
 		return 0.0;
 	}
-	float wob = (vfbm(world_pos.xz * 0.045 + storm_center.xz * 0.01) - 0.47) * 14.0;
-	float d = length(world_pos.xz - storm_center.xz) + wob;
-	return storm_dark * (1.0 - smoothstep(storm_radius - 8.0, storm_radius, d));
+	vec3 q = art_snap(world_pos);
+	float wob = (vfbm(q.xz * 0.045 + storm_center.xz * 0.01) - 0.47) * 14.0;
+	float d = length(q.xz - storm_center.xz) + wob;
+	return storm_dark * art_steps(1.0 - smoothstep(storm_radius - 8.0, storm_radius, d), 4.0, world_pos);
 }
 
 // Плотность массы плохой видимости в точке (0…1). CPU-копия — WeatherFront.density().
@@ -80,12 +95,13 @@ float weather_falloff(float r, float clear_r) {
 
 // Цвет пелены: не ровная заливка, а клубы — светлее и темнее, медленно текут.
 vec3 weather_color(vec3 p) {
-	float n = vfbm(p.xz * 0.07 + vec2(-TIME * 0.06, TIME * 0.045));
-	return vis_color.rgb * (0.7 + 0.42 * n);
+	float n = vfbm(art_snap(p).xz * 0.07 + vec2(-TIME * 0.06, TIME * 0.045));
+	return vis_color.rgb * (0.7 + 0.42 * art_steps(n, 4.0, p));
 }
 
 // 0 — видно, до weather_max — скрыто погодой.
-float vis_hidden(vec3 world_pos) {
+float vis_hidden(vec3 p_in) {
+	vec3 world_pos = art_snap(p_in);
 	float dens = weather_density(world_pos);
 	if (dens <= 0.0) {
 		return 0.0;
@@ -96,5 +112,5 @@ float vis_hidden(vec3 world_pos) {
 	float billow = 0.55 + 0.45 * smoothstep(0.22, 0.7, vfbm(world_pos.xz * 0.08 + vec2(TIME * 0.05, -TIME * 0.035)));
 	// Разводы — в переходной зоне; дальше пелена сплошная (переход широкий — без ступеньки).
 	float solid = smoothstep(weather_clear - 0.5, weather_clear + 5.0, r);
-	return clamp(dens * weather_max * mix(bubble * billow, 1.0, solid), 0.0, 1.0);
+	return art_steps(clamp(dens * weather_max * mix(bubble * billow, 1.0, solid), 0.0, 1.0), 6.0, p_in);
 }

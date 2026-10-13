@@ -754,8 +754,8 @@ func _hide_body() -> void:
 ## основание морды, глотка и три челюсти, как у червя; спина — дуга из таких же звеньев; пена: кольцо у основания, два гребня
 ## V-следа; пузыри и всплеск. 20 деталей и 2 системы частиц.
 func _build() -> void:
-	_bone = Creature.skin(BONE_COLOR, BodyMaterial.Pattern.SCALES, 0.035)
-	_narrow = Creature.skin(NARROW_COLOR, BodyMaterial.Pattern.SCALES, 0.035)
+	_bone = Creature.skin(BONE_COLOR, BodyMaterial.Pattern.SCALES, Grid.ART_PX)
+	_narrow = Creature.skin(NARROW_COLOR, BodyMaterial.Pattern.SCALES, Grid.ART_PX)
 	_hot = StandardMaterial3D.new()
 	_hot.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	_hot.albedo_color = HOT_COLOR
@@ -772,13 +772,11 @@ func _build() -> void:
 	_ring_mat = _foam_material()
 	_ring = _torus(0.32, 0.46, _ring_mat)
 	_build_wake()
-	_bubbles = _particles(28, 0.8, 0.07, 0.3, 0.8, -1.2)
+	_bubbles = _particles(28, 0.8, 1, 0.3, 0.8, -1.2)
 	_bubbles.emission_shape = CPUParticles3D.EMISSION_SHAPE_BOX
 	_bubbles.emission_box_extents = Vector3(0.4, 0.02, 0.4)
 	_bubbles.spread = 25.0
-	_bubbles.scale_amount_min = 0.6
-	_bubbles.scale_amount_max = 1.4
-	_splash = _particles(56, 0.9, 0.11, 2.5, 4.6, -9.0)
+	_splash = _particles(56, 0.9, 2, 2.5, 4.6, -9.0)
 	_splash.one_shot = true
 	_splash.explosiveness = 0.85
 	_splash.spread = 30.0
@@ -860,7 +858,7 @@ func _torus(inner: float, outer: float, mat: Material) -> MeshInstance3D:
 	return mi
 
 
-func _particles(amount: int, lifetime: float, size: float, v_min: float, v_max: float, gravity: float) -> CPUParticles3D:
+func _particles(amount: int, lifetime: float, texels: int, v_min: float, v_max: float, gravity: float) -> CPUParticles3D:
 	var p := CPUParticles3D.new()
 	p.amount = amount
 	p.lifetime = lifetime
@@ -870,14 +868,7 @@ func _particles(amount: int, lifetime: float, size: float, v_min: float, v_max: 
 	p.gravity = Vector3(0, gravity, 0)
 	p.local_coords = false
 	p.emitting = false
-	var q := QuadMesh.new()
-	q.size = Vector2(size, size)
-	var m := StandardMaterial3D.new()
-	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	m.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
-	m.albedo_color = FOAM_COLOR
-	q.material = m
-	p.mesh = q
+	p.mesh = PixelFx.quad(texels, FOAM_COLOR)
 	add_child(p)
 	return p
 

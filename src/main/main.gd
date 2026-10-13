@@ -107,8 +107,11 @@ func _build_world(args: Dictionary) -> void:
 	# берётся из вершинных нормалей меша (ChunkMesher их пишет), иначе грани затеняют сами себя.
 	sun.directional_shadow_mode = DirectionalLight3D.SHADOW_ORTHOGONAL
 	sun.directional_shadow_max_distance = 40.0
-	sun.shadow_bias = 0.1
-	sun.shadow_normal_bias = 2.0
+	sun.shadow_bias = 0.04
+	sun.shadow_normal_bias = 0.8
+	# Пиксель-арт: тени жёсткие и крупные (без размытия, карта 1024 — тексель тени около пикселя рендера,
+	# project.godot: directional_shadow/size, soft_shadow_filter_quality = 0).
+	sun.shadow_blur = 0.0
 	add_child(sun)
 	_sun = sun
 	EventBus.weather_changed.connect(_on_weather_changed)

@@ -210,14 +210,7 @@ func _telegraph(p: Vector2) -> void:
 	sparks.initial_velocity_min = 0.4
 	sparks.initial_velocity_max = 1.4
 	sparks.gravity = Vector3.ZERO
-	var sq := QuadMesh.new()
-	sq.size = Vector2(0.05, 0.05)
-	var sm := StandardMaterial3D.new()
-	sm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	sm.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
-	sm.albedo_color = Color(0.75, 0.85, 1.0)
-	sq.material = sm
-	sparks.mesh = sq
+	sparks.mesh = PixelFx.quad(1, Color(0.75, 0.85, 1.0))
 	node.add_child(sparks)
 	var glow := OmniLight3D.new()
 	glow.light_color = Color(0.6, 0.7, 1.0)
@@ -294,15 +287,15 @@ func _spawn_bolt(ground: Vector3) -> void:
 			p += Vector3(rng.randf_range(-0.9, 0.9), 0.0, rng.randf_range(-0.9, 0.9))
 		points.append(p)
 	for i in range(1, points.size()):
-		_bolt_segment(node, points[i - 1], points[i], 0.16, core, glow)
+		_bolt_segment(node, points[i - 1], points[i], Grid.ART_PX * 2.0, core, glow)
 	# Ответвления от средних изломов — короткие, вниз и в сторону.
 	for j in [2, 3]:
 		var from: Vector3 = points[j]
 		var side := Vector3(rng.randf_range(-1.0, 1.0), 0.0, rng.randf_range(-1.0, 1.0)).normalized()
 		var a := from + side * 1.4 + Vector3(0, -1.6, 0)
 		var b := a + side * 1.0 + Vector3(rng.randf_range(-0.4, 0.4), -1.4, rng.randf_range(-0.4, 0.4))
-		_bolt_segment(node, from, a, 0.08, core, glow)
-		_bolt_segment(node, a, b, 0.06, core, glow)
+		_bolt_segment(node, from, a, Grid.ART_PX, core, glow)
+		_bolt_segment(node, a, b, Grid.ART_PX, core, glow)
 	add_child(node)
 	var light := OmniLight3D.new()
 	light.light_color = Color(0.75, 0.85, 1.0)
@@ -316,7 +309,7 @@ func _spawn_bolt(ground: Vector3) -> void:
 
 
 func _bolt_segment(parent: Node3D, a: Vector3, b: Vector3, width: float, core: Material, glow: Material) -> void:
-	for layer in [[width, core], [width * 3.2, glow]]:
+	for layer in [[width, core], [width + Grid.ART_PX * 2.0, glow]]:    # ореол — пиксель мира с каждой стороны
 		var seg := MeshInstance3D.new()
 		var box := BoxMesh.new()
 		box.size = Vector3(layer[0], a.distance_to(b), layer[0])
@@ -341,14 +334,7 @@ func _spawn_sparks(ground: Vector3) -> void:
 	sparks.initial_velocity_min = 2.5
 	sparks.initial_velocity_max = 6.0
 	sparks.gravity = Vector3(0, -12.0, 0)
-	var quad := QuadMesh.new()
-	quad.size = Vector2(0.08, 0.08)
-	var mat := StandardMaterial3D.new()
-	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	mat.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
-	mat.albedo_color = Color(1.0, 0.95, 0.7)
-	quad.material = mat
-	sparks.mesh = quad
+	sparks.mesh = PixelFx.quad(1, Color(1.0, 0.95, 0.7))
 	add_child(sparks)
 	sparks.emitting = true
 	get_tree().create_timer(1.0).timeout.connect(sparks.queue_free)

@@ -203,6 +203,7 @@ func _build() -> void:
 	_mat.set_shader_parameter(&"deep", COLOR_DEEP)
 	var plane := PlaneMesh.new()
 	plane.size = Vector2.ONE * SIZE * 2.0
+	_mat.set_shader_parameter(&"size", SIZE * 2.0)
 	var disc := MeshInstance3D.new()
 	disc.mesh = plane
 	disc.material_override = _mat
@@ -225,14 +226,7 @@ func _build() -> void:
 	_foam.radial_accel_min = -1.6
 	_foam.radial_accel_max = -1.0
 	_foam.local_coords = true                # кольцо пены поворачивается вместе с узлом (step)
-	var q := QuadMesh.new()
-	q.size = Vector2(0.08, 0.08)
-	var m := StandardMaterial3D.new()
-	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	m.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
-	m.albedo_color = COLOR_FOAM_DOTS
-	q.material = m
-	_foam.mesh = q
+	_foam.mesh = PixelFx.quad(1, COLOR_FOAM_DOTS)
 	_foam.position = Vector3(0, 0.03, 0)
 	add_child(_foam)
 	_audio = AudioStreamPlayer.new()

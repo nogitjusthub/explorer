@@ -11,7 +11,8 @@
 
 uniform vec4 base_color : source_color = vec4(1.0);
 uniform int pattern = 0;
-uniform float px = 0.035;               // шаг пиксельной сетки узора (в единицах меша)
+uniform float px = 0.0625;              // шаг пиксельной сетки узора в единицах меша: пиксель мира (1/16 тайла)
+                                        // с поправкой на масштаб узла (BodyMaterial, Grid.ART_PX)
 uniform float roughness : hint_range(0.0, 1.0) = 0.8;
 uniform float metallic : hint_range(0.0, 1.0) = 0.0;
 
@@ -91,24 +92,25 @@ float face_detail(vec2 q, vec2 cnt, vec2 h, float code, vec4 rect) {
 	if (mod(code, 2.0) > 0.5) {
 		l.y = size.y - 1.0 - l.y;                     // петли — к +y грани
 	}
+	// Мелкие детали (пиксель узора — пиксель мира) — без петель, ручек и окон: только шов и крышка.
 	if (l.x == 0.0 || l.y == 0.0 || l.x == size.x - 1.0 || l.y == size.y - 1.0) {
-		if (kind == 2.0 && l.y == 0.0 && (l.x == 2.0 || l.x == size.x - 3.0)) {
+		if (kind == 2.0 && size.x >= 7.0 && l.y == 0.0 && (l.x == 2.0 || l.x == size.x - 3.0)) {
 			return 1.25;                              // петли
 		}
 		return 0.72;                                  // шов по контуру
 	}
 	if (kind == 1.0) {
 		float win = max(floor((size.y - 2.0) * 0.4), 1.0);
-		if (l.y >= size.y - 1.0 - win && l.x >= 2.0 && l.x <= size.x - 3.0) {
+		if (size.y >= 5.0 && size.x >= 5.0 && l.y >= size.y - 1.0 - win && l.x >= 2.0 && l.x <= size.x - 3.0) {
 			return 0.55;                              // окно
 		}
-		if (l.x == size.x - 2.0 && l.y == floor((size.y - 1.0) * 0.5)) {
+		if (size.x >= 4.0 && size.y >= 4.0 && l.x == size.x - 2.0 && l.y == floor((size.y - 1.0) * 0.5)) {
 			return 1.3;                               // ручка
 		}
 		return 1.0;
 	}
 	if (kind == 2.0) {
-		if (l.y == size.y - 2.0 && abs(l.x - (size.x - 1.0) * 0.5) < 0.6) {
+		if (size.y >= 5.0 && l.y == size.y - 2.0 && abs(l.x - (size.x - 1.0) * 0.5) < 0.6) {
 			return 1.3;                               // ручка
 		}
 		return 1.06;
@@ -209,7 +211,7 @@ float scales(vec3 p, vec3 n) {
 
 float mud(vec3 p) {
 	vec3 q = floor(p / px);
-	float clod = hash3(floor(q / 2.0));
+	float clod = hash3(q + 11.0);                     // комок — в пиксель, как и всё вокруг
 	float r = hash3(q);
 	if (r > 0.93) {
 		return 1.3;                                   // мокрая блёстка

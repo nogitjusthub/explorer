@@ -22,7 +22,7 @@ const FLAME_CORE := Color(1.0, 0.95, 0.8)
 const MARK_COLOR := Color(0.45, 1.0, 0.95, 0.8)
 const SHADOW_COLOR := Color(0.05, 0.03, 0.06, 0.5)
 const NOZZLES := 3
-const PX := 0.035 / POD_SCALE            ## тексель обшивки — как у машин (капсула уменьшена)
+const PX := Grid.ART_PX / POD_SCALE      ## пиксель обшивки — как у рельефа (капсула уменьшена — в меше крупнее)
 
 var _t := 0.0
 var _ground := Vector3.ZERO
@@ -294,7 +294,7 @@ func _build() -> void:
 		_marker.add_child(tick)
 
 	# Пыль из-под струй: по кольцу на земле, разлетается в стороны.
-	_blast = _particles(Color(0.66, 0.54, 0.48), 70, 0.9, Vector3.UP, 80.0, 1.5, 4.0, 0.2)
+	_blast = _particles(Color(0.66, 0.54, 0.48), 70, 0.9, Vector3.UP, 80.0, 1.5, 4.0, 3)
 	_blast.emission_shape = CPUParticles3D.EMISSION_SHAPE_RING
 	_blast.emission_ring_axis = Vector3.UP
 	_blast.emission_ring_radius = 1.0
@@ -305,7 +305,7 @@ func _build() -> void:
 	_blast.position = _ground + Vector3(0, 0.1, 0)
 	_blast.emitting = false
 
-	_dust = _particles(Color(0.62, 0.5, 0.45), 60, 1.2, Vector3.UP, 70.0, 1.5, 4.0, 0.2)
+	_dust = _particles(Color(0.62, 0.5, 0.45), 60, 1.2, Vector3.UP, 70.0, 1.5, 4.0, 4)
 	_dust.one_shot = true
 	_dust.explosiveness = 0.9
 	_dust.emission_shape = CPUParticles3D.EMISSION_SHAPE_RING
@@ -323,7 +323,7 @@ func _build() -> void:
 
 
 func _particles(color: Color, amount: int, lifetime: float, direction: Vector3, spread: float,
-		v_min: float, v_max: float, size: float) -> CPUParticles3D:
+		v_min: float, v_max: float, texels: int) -> CPUParticles3D:
 	var p := CPUParticles3D.new()
 	p.amount = amount
 	p.lifetime = lifetime
@@ -333,13 +333,6 @@ func _particles(color: Color, amount: int, lifetime: float, direction: Vector3, 
 	p.initial_velocity_max = v_max
 	p.gravity = Vector3(0, -6.0, 0)
 	p.local_coords = false
-	var q := QuadMesh.new()
-	q.size = Vector2(size, size)
-	var m := StandardMaterial3D.new()
-	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	m.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
-	m.albedo_color = color
-	q.material = m
-	p.mesh = q
+	p.mesh = PixelFx.quad(texels, color)
 	add_child(p)
 	return p

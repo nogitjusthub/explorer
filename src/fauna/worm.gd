@@ -305,12 +305,12 @@ static func _ease_out(k: float) -> float:
 
 
 func _build() -> void:
-	_wake = _dust(SAND_COLOR.darkened(0.2), 70, 1.2, Vector3.UP, 60.0, 0.8, 2.4, 0.12)
+	_wake = _dust(SAND_COLOR.darkened(0.2), 70, 1.2, Vector3.UP, 60.0, 0.8, 2.4, 2)
 	_wake.emission_shape = CPUParticles3D.EMISSION_SHAPE_BOX
 	_wake.emission_box_extents = Vector3(0.8, 0.05, 1.4)
 	_build_ring()
 	_build_body()
-	_burst = _dust(SAND_BURST, 90, 1.4, Vector3.UP, 30.0, 4.0, 9.0, 0.16)
+	_burst = _dust(SAND_BURST, 90, 1.4, Vector3.UP, 30.0, 4.0, 9.0, 3)
 	_burst.one_shot = true
 	_burst.explosiveness = 0.8
 	_burst.emission_shape = CPUParticles3D.EMISSION_SHAPE_RING
@@ -346,8 +346,8 @@ func _build_ring() -> void:
 func _build_body() -> void:
 	_body = Node3D.new()
 	add_child(_body)
-	var mat := Creature.skin(BODY_COLOR, BodyMaterial.Pattern.GROOVES, 0.05)
-	var ring := Creature.skin(RING_COLOR, BodyMaterial.Pattern.GROOVES, 0.05)
+	var mat := Creature.skin(BODY_COLOR, BodyMaterial.Pattern.GROOVES, Grid.ART_PX)
+	var ring := Creature.skin(RING_COLOR, BodyMaterial.Pattern.GROOVES, Grid.ART_PX)
 	for i in DISCS:
 		var big := i % 2 == 0
 		var disc := MeshKit.prism(_body, MeshKit.ngon(8 if big else 7, R * (1.0 if big else 0.84)),
@@ -451,7 +451,7 @@ func _tint_dust() -> void:
 
 
 func _dust(color: Color, amount: int, lifetime: float, direction: Vector3, spread: float,
-		v_min: float, v_max: float, size: float) -> CPUParticles3D:
+		v_min: float, v_max: float, texels: int) -> CPUParticles3D:
 	var p := CPUParticles3D.new()
 	p.amount = amount
 	p.lifetime = lifetime
@@ -461,13 +461,6 @@ func _dust(color: Color, amount: int, lifetime: float, direction: Vector3, sprea
 	p.initial_velocity_max = v_max
 	p.gravity = Vector3(0, -7.0, 0)
 	p.local_coords = false
-	var q := QuadMesh.new()
-	q.size = Vector2(size, size)
-	var m := StandardMaterial3D.new()
-	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	m.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
-	m.albedo_color = color
-	q.material = m
-	p.mesh = q
+	p.mesh = PixelFx.quad(texels, color)
 	add_child(p)
 	return p

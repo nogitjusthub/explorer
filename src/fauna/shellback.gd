@@ -212,7 +212,7 @@ func _build_model() -> Node3D:
 	sm.radial_segments = 10
 	sm.rings = 3
 	shell.mesh = sm
-	shell.material_override = Creature.skin(SHELL_COLOR, BodyMaterial.Pattern.SCUTES, 0.05)
+	shell.material_override = Creature.skin(SHELL_COLOR, BodyMaterial.Pattern.SCUTES, Grid.ART_PX / SIZE)
 	shell.position = Vector3(0, 0.12, 0)
 	shell.scale = Vector3(1.0, 0.85, 1.25)
 	root.add_child(shell)
@@ -229,7 +229,7 @@ func _build_model() -> Node3D:
 	var hb := BoxMesh.new()
 	hb.size = Vector3(0.24, 0.16, 0.18)
 	head.mesh = hb
-	var hide := Creature.skin(LEG_COLOR, BodyMaterial.Pattern.HIDE, 0.04)
+	var hide := Creature.skin(LEG_COLOR, BodyMaterial.Pattern.HIDE, Grid.ART_PX / SIZE)   # модель ужата SIZE
 	head.material_override = hide
 	head.position = Vector3(0, 0.14, -0.55)
 	root.add_child(head)
@@ -264,14 +264,7 @@ func _build_model() -> Node3D:
 	_dust.initial_velocity_min = 1.0
 	_dust.initial_velocity_max = 2.4
 	_dust.gravity = Vector3(0, -5.0, 0)
-	var q := QuadMesh.new()
-	q.size = Vector2(0.1, 0.1)
-	var dm := StandardMaterial3D.new()
-	dm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	dm.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
-	dm.albedo_color = Color(0.55, 0.42, 0.35)
-	q.material = dm
-	_dust.mesh = q
+	_dust.mesh = PixelFx.quad(2, Color(0.55, 0.42, 0.35))
 	_dust.local_coords = false
 	add_child(_dust)
 	return top
