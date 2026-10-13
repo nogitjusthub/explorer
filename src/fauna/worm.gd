@@ -139,9 +139,9 @@ func step(dt: float) -> void:
 		State.TELEGRAPH:
 			_timer -= dt
 			var k := 1.0 - _timer / rules.worm_telegraph_s
-			_ring.scale = Vector3.ONE * lerpf(0.5, 1.0, k)
+			_place_cracks(lerpf(0.5, 1.0, k))
 			_ring.rotation.y = sin(_time * 30.0) * 0.03 * k            # песок дрожит
-			_ring_mat.albedo_color.a = 0.3 + 0.6 * k
+			_ring_mat.albedo_color.a = 0.3 + 0.6 * minf(floorf(k * 4.0), 3.0) / 3.0   # ярче ступенями
 			if fmod(_time, 0.2) < dt:
 				EventBus.camera_shake_requested.emit(0.15 + 0.4 * k, 0.25)
 			if _timer <= 0.0:
@@ -332,13 +332,21 @@ func _build_ring() -> void:
 	for i in 12:
 		var crack := MeshInstance3D.new()
 		var cb := BoxMesh.new()
-		cb.size = Vector3(0.08, 0.02, 0.9)
+		cb.size = Vector3(Grid.ART_PX, 0.02, Grid.ART_PX * 14.0)     # трещина — пиксель мира шириной
 		crack.mesh = cb
 		crack.material_override = _ring_mat
-		var a := TAU * i / 12.0
-		crack.position = Vector3(cos(a), 0.0, sin(a)) * (R + 0.2)
-		crack.rotation.y = -a + PI * 0.5
+		crack.rotation.y = -TAU * i / 12.0 + PI * 0.5
 		_ring.add_child(crack)
+	_place_cracks(1.0)
+
+
+## Кольцо трещин расходится (k — доля полного радиуса): трещины разъезжаются от центра целыми пикселями мира,
+## сами не масштабируются — ширина остаётся пикселем.
+func _place_cracks(k: float) -> void:
+	var r := snappedf(k * (R + 0.2), Grid.ART_PX)
+	for i in _ring.get_child_count():
+		var a := TAU * i / 12.0
+		(_ring.get_child(i) as Node3D).position = Vector3(cos(a), 0.0, sin(a)) * r
 
 
 ## Тело — диски-«позвонки» (low-poly призмы), каждый повёрнут на свой угол; голова — три вытянутые

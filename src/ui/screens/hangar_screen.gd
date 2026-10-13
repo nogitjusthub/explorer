@@ -5,7 +5,7 @@ extends CanvasLayer
 ## Под выбранной — характеристики значками (1–5); ни названий классов, ни текстовых описаний.
 ## Выбор: A / D, стрелки, тап по машине или кнопкам; старт — F / Enter / кнопка: люк раскрывается,
 ## машина уходит вниз по шахте — дальше сцена десанта. Нужен и вебу: звук включается после действия игрока.
-## Выбор и старт щёлкают механическим тумблером. Справа от названия — версия; в правом верхнем углу —
+## Выбор и старт щёлкают механическим тумблером; на старте лязгает люк и гудит гидропривод подъёмника. Справа от названия — версия; в правом верхнем углу —
 ## кнопка-динамик с окошком громкости (VolumeSlider; пока открыто, A / D — громкость, Esc — закрыть).
 ## Трюм — отдельный мир в SubViewport: свой свет и окружение, игровой мир под экраном не трогаем; под ним —
 ## непрозрачная подложка, чтобы до первого кадра трюма не просвечивал мир.
@@ -149,6 +149,7 @@ var _vol_panel: Control                  ## окошко с регуляторо
 var _vol_slider: VolumeSlider
 var _fade: ColorRect
 var _toggle_snd: AudioStreamPlayer
+var _lift_snd: AudioStreamPlayer          ## старт: лязг люка и гул гидропривода подъёмника
 var _leave_t := -1.0
 var _emitted := false
 var _time := 0.0
@@ -187,6 +188,10 @@ func _ready() -> void:
 	_toggle_snd.stream = Sfx.toggle()                 # выбор машины — щелчок механического тумблера
 	_toggle_snd.volume_db = -10.0
 	add_child(_toggle_snd)
+	_lift_snd = AudioStreamPlayer.new()
+	_lift_snd.stream = Sfx.hatch_lift()
+	_lift_snd.volume_db = -6.0
+	add_child(_lift_snd)
 	_light_k.resize(vehicle_ids.size())
 	for i in _light_k.size():
 		_light_k[i] = 1.0 if i == selected else 0.0
@@ -722,6 +727,7 @@ func _start() -> void:
 		return
 	_leave_t = 0.0
 	_toggle_snd.play()
+	_lift_snd.play()
 	_shaft_glow.position = Vector3(_doors[selected].position.x, -1.5, 0)
 	_shaft_glow.light_energy = 0.0
 	_shaft_glow.visible = true

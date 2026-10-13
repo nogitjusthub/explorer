@@ -16,7 +16,8 @@ extends RefCounted
 ##   до STEP_TOLERANCE — не падение, машина просто съезжает.
 ## - В воду глубже допустимой для класса можно заехать или упасть, но машина тонет: управления
 ##   нет, за DROWN_TIME уходит на дно — гибель. Ховер не тонет.
-## - Деревья валятся на скорости от порога класса, иначе машина упирается.
+## - Деревья валятся на скорости от порога класса (fells), иначе машина упирается. Тот же порог и та же
+##   потеря скорости (after_felling) — у тарана фауны (FaunaDirector).
 ## - Внешние силы (ветер пылевой бури, тяга смерча) копятся в сносе push_vel, который затухает сам;
 ##   снос складывается со скоростью машины, стенки его гасят. Делить силу на массу — дело источника.
 ## - Разгон с места может быть сильнее обычного (launch_accel, танк): к LAUNCH_FADE·Vmax сходит к accel.
@@ -165,6 +166,16 @@ static func launch(s: VehicleState, target: Vector2, apex: float, cls: VehicleCl
 	s.fall_tile = Grid.tile_of_world(target.x, target.y)
 	s.vel = (target - s.pos) / maxf(t, 0.1)
 	s.uphill_tiles = 0
+
+
+## Скорость валки: с неё машина валит дерево — и таранит зверя (GDD §3.6, §5.4); порог — доля Vmax класса.
+static func fells(cls: VehicleClass, speed: float) -> bool:
+	return speed >= cls.tree_fell_speed_frac * cls.max_speed - 0.01
+
+
+## После валки дерева (и тарана зверя) скорость не выше доли Vmax класса.
+static func after_felling(s: VehicleState, cls: VehicleClass) -> void:
+	s.vel = s.vel.limit_length(cls.tree_speed_after_frac * cls.max_speed)
 
 
 ## Предел скорости на грунте тайла: неровный или зыбучий — по данным класса (ховеру — 1).
@@ -408,10 +419,9 @@ static func _collide_trees(s: VehicleState, cls: VehicleClass, q: TerrainQuery, 
 			var dist := delta.length()
 			if dist >= min_d:
 				continue
-			var speed := s.vel.length()
-			if speed >= cls.tree_fell_speed_frac * cls.max_speed - 0.01:
+			if fells(cls, s.vel.length()):
 				q.fell_tree(t.x, t.y)
-				s.vel = s.vel.limit_length(cls.tree_speed_after_frac * cls.max_speed)
+				after_felling(s, cls)
 				r.felled_tree = true
 				r.tree_damage += cls.tree_fell_damage
 			else:

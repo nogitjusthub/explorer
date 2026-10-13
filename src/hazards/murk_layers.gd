@@ -52,12 +52,12 @@ func update(viewer: Vector3, hole_r: float, fade: float) -> void:
 	var back := Vector2(0.0, 0.0)
 	if cam != null:
 		var z := cam.global_basis.z
-		back = Vector2(z.x, z.z).normalized()
+		back = Vector2(z.x, z.z) / maxf(z.y, 0.01)          # на единицу высоты — ctg наклона камеры
 	for l in _layers:
 		var y: float = l["h"] if l["absolute"] else viewer.y + l["h"]
 		(l["mi"] as MeshInstance3D).position = Vector3(viewer.x, y, viewer.z)
 		var mat: ShaderMaterial = l["mat"]
-		# Камера смотрит под 45°: точка на высоте h над землёй видна там же, где земля на h ближе к камере.
+		# Камера смотрит под углом φ: точка на высоте h над землёй видна там же, где земля на h·ctg φ ближе к камере.
 		mat.set_shader_parameter("hole_offset", back * (y - viewer.y))
 		mat.set_shader_parameter("hole_r", hole_r)
 		mat.set_shader_parameter("fade", fade)

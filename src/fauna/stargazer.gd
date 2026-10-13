@@ -6,8 +6,7 @@ extends Creature
 ## Машина ближе EYE1_R — открывается алый глаз (ближний к ней), ближе EYE2_R — второй: глаза — шкала
 ## дистанции. Машина в воде (или ховер над водой) ближе ray_shock_r — мгновенный разряд: открывается
 ## третий глаз, крышка откидывается на шарнире на 30° к машине, пластины за глазами вспыхивают янтарём,
-## голубые дуги бьют в машину (ховеру — в днище), по воде расходится алое кольцо зоны поражения, со дна
-## поднимается облачко песка; урон ray_damage и инверсия управления на shock_invert_s. Перезарядка
+## голубые дуги бьют в машину (ховеру — в днище), со дна поднимается облачко песка; урон ray_damage и инверсия управления на shock_invert_s. Перезарядка
 ## ray_cooldown_min_s…max_s от разряда: крышка ложится, глаза закрываются, пластины тлеют и гаснут; заряд
 ## готов — веки вспыхивают по очереди и снова поблёскивают. На суше, в полёте и тонущую машину не бьёт.
 ## Светящиеся части (глаза, блики, пластины) сдвинуты к камере вдоль луча зрения до зеркала воды: камера
@@ -64,8 +63,6 @@ const ARC_S := 0.32
 const ARC_JAG_S := 0.05                  ## дуги перескакивают
 const ARC_W := Grid.ART_PX               ## толщина дуги разряда — пиксель мира
 const LIGHT_S := 0.12
-const RING_S := 0.55
-const RING_INNER := 0.86                 ## доля внутреннего радиуса кольца
 const LID_UP_SPEED := 12.0               ## рад/с — крышка откидывается рывком…
 const LID_DOWN_SPEED := 0.9              ## …и ложится медленно
 const EMBER_S := 1.6
@@ -100,7 +97,6 @@ var _tilt := 0.0
 var _ember := 0.0
 var _arc_t := -1.0
 var _arc_jag := 0.0
-var _ring_t := -1.0
 
 var _root: Node3D                        ## тело на дне (наклон по дну)
 var _lid: Node3D                         ## крышка на шарнире
@@ -111,10 +107,9 @@ var _plates: Node3D
 var _eye_mat: StandardMaterial3D
 var _glint_mat: StandardMaterial3D
 var _plate_mat: StandardMaterial3D
-var _fx: Node3D                          ## дуги, кольцо, вспышка, муть — строятся, когда машина подъехала
+var _fx: Node3D                          ## дуги, вспышка, муть — строятся, когда машина подъехала
 var _arc_core: Array[MeshInstance3D] = []
 var _arc_glow: Array[MeshInstance3D] = []
-var _ring: MeshInstance3D
 var _light: OmniLight3D
 var _puff: CPUParticles3D
 
@@ -214,10 +209,10 @@ func step(dt: float) -> void:
 	_update_plates()
 	_update_fx(dt)
 	_idle = state == State.READY and _order.is_empty() and _tilt <= 0.0 and _ember <= 0.0 \
-			and _arc_t < 0.0 and _ring_t < 0.0 and _ready_seq < 0.0 and _eyes_shut()
+			and _arc_t < 0.0 and _ready_seq < 0.0 and _eyes_shut()
 
 
-## Разряд: урон и инверсия машине, третий глаз, крышка на шарнире, пластины, дуги, кольцо, муть.
+## Разряд: урон и инверсия машине, третий глаз, крышка на шарнире, пластины, дуги, муть.
 func _discharge() -> void:
 	state = State.DISCHARGE
 	_timer = DISCHARGE_S
@@ -240,8 +235,6 @@ func _discharge() -> void:
 	_ensure_fx()
 	_arc_t = 0.0
 	_arc_jag = 0.0
-	_ring_t = 0.0
-	_ring.visible = true
 	_light.visible = true
 	_puff.position = _root.position + Vector3(0, 0.05, 0)
 	_puff.restart()
@@ -396,7 +389,7 @@ func _update_plates() -> void:
 		_plates.visible = false
 
 
-## Дуги перескакивают за машиной, вспышка света, кольцо расходится по воде до края зоны и гаснет.
+## Дуги перескакивают за машиной, вспышка света.
 func _update_fx(dt: float) -> void:
 	if _arc_t >= 0.0:
 		_arc_t += dt
@@ -412,17 +405,6 @@ func _update_fx(dt: float) -> void:
 				_arc_jag = ARC_JAG_S
 				_pose_arcs()
 		_light.visible = _arc_t >= 0.0 and _arc_t < LIGHT_S
-	if _ring_t >= 0.0:
-		_ring_t += dt
-		var grow := RING_S * 0.6
-		var k := minf(_ring_t / grow, 1.0)
-		var r := lerpf(0.25, rules.ray_shock_r, 1.0 - (1.0 - k) * (1.0 - k))
-		_ring.position = Vector3(pos.x, _water_y + 0.012, pos.y)
-		_ring.scale = Vector3(r, 1.0, r)
-		_ring.visible = _ring_t < grow or fmod(_ring_t, 0.08) < 0.05
-		if _ring_t >= RING_S:
-			_ring_t = -1.0
-			_ring.visible = false
 
 
 ## Дуги — ломаные от пластин к машине: в борт у ватерлинии, ховеру — снизу в днище.
@@ -557,9 +539,6 @@ func _ensure_fx() -> void:
 	for i in ARCS * ARC_SEGS:
 		_arc_core.append(_fx_mesh(unit, core))
 		_arc_glow.append(_fx_mesh(unit, glow))
-	var ring_mat := _unshaded(EYE_COLOR)
-	ring_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
-	_ring = _fx_mesh(_ring_mesh(RING_INNER, 20), ring_mat)
 	_light = OmniLight3D.new()
 	_light.light_color = Color(0.75, 0.85, 1.0)
 	_light.light_energy = 0.7
@@ -597,22 +576,6 @@ func _fx_mesh(mesh: Mesh, mat: Material) -> MeshInstance3D:
 	_mesh_off(mi)
 	_fx.add_child(mi)
 	return mi
-
-
-## Кольцо (радиус 1, ширина 1 − inner) лицом вверх.
-static func _ring_mesh(inner: float, n: int) -> ArrayMesh:
-	var st := SurfaceTool.new()
-	st.begin(Mesh.PRIMITIVE_TRIANGLES)
-	for i in n:
-		var a := Vector2.from_angle(TAU * i / n)
-		var b := Vector2.from_angle(TAU * (i + 1) / n)
-		var a0 := Vector3(a.x * inner, 0.0, a.y * inner)
-		var a1 := Vector3(a.x, 0.0, a.y)
-		var b0 := Vector3(b.x * inner, 0.0, b.y * inner)
-		var b1 := Vector3(b.x, 0.0, b.y)
-		MeshKit.tri(st, a0, a1, b1, Vector3.UP)
-		MeshKit.tri(st, a0, b1, b0, Vector3.UP)
-	return st.commit()
 
 
 static func _unshaded(color: Color) -> StandardMaterial3D:

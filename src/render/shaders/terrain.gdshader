@@ -16,14 +16,15 @@ uniform vec4 strata_a : source_color = vec4(0.46, 0.36, 0.38, 1.0);
 uniform vec4 strata_b : source_color = vec4(0.58, 0.44, 0.36, 1.0);
 uniform vec4 strata_c : source_color = vec4(0.38, 0.36, 0.48, 1.0);
 uniform float grid_strength = 0.12;   // насколько темнее край тайла — ромбы сетки читаются
-uniform float grid_width = 0.05;      // ширина линии в долях тайла (~1 пиксель)
-uniform float tier_h = 0.65;          // высота яруса — ставит TerrainMaterials из Grid.TIER_H
+uniform float tier_h = 0.5625;          // высота яруса — ставит TerrainMaterials из Grid.TIER_H
 uniform sampler2D tops : hint_default_white, filter_nearest, repeat_disable;
 uniform sampler2D walls : hint_default_white, filter_nearest, repeat_disable;
 const float WALL_VARIANTS = 4.0;
 const float TOPS_ROWS = 6.0;             // строк (видов поверхности) в атласе
 const float TOPS_TILES = 4.0;            // клетка атласа накрывает 4×4 тайла
 const float TOPS_GAIN = 1.5;
+const float TILE_TEXELS = 16.0;          // текселей (пикселей мира, ART_PX) на сторону тайла
+const float RIPPLE_FPS = 6.0;            // рябь зыбучего грунта сдвигается столько раз в секунду
 
 varying vec3 world_pos;
 
@@ -34,10 +35,14 @@ float tops_detail(vec2 p, float row) {
 	return texture(tops, uv).r * TOPS_GAIN;
 }
 
-// Зыбучий грунт: темнее и холоднее (влажный), по нему медленно текут волнистые тёмные штрихи.
-vec3 mire_ripples(vec3 albedo, vec2 p) {
+// Зыбучий грунт: темнее и холоднее (влажный), по нему медленно текут волнистые тёмные штрихи. Узор
+// берётся в центре текселя, время — ступенями (RIPPLE_FPS в секунду): штрихи — из целых пикселей мира
+// и сдвигаются на целые пиксели, а не плывут.
+vec3 mire_ripples(vec3 albedo, vec2 p_in) {
 	vec3 wet = albedo * vec3(0.8, 0.82, 0.92);
-	float ph = (p.x + p.y) * 6.0 + sin((p.x - p.y) * 2.6) * 1.4 - TIME * 1.2;
+	vec2 p = (floor(p_in / ART_PX) + 0.5) * ART_PX;
+	float t = floor(TIME * RIPPLE_FPS) / RIPPLE_FPS;
+	float ph = (p.x + p.y) * 6.0 + sin((p.x - p.y) * 2.6) * 1.4 - t * 1.2;
 	float w = sin(ph);
 	return wet * (w > 0.8 ? 0.7 : (w < -0.9 ? 1.12 : 1.0));
 }
@@ -55,10 +60,11 @@ void fragment() {
 	NORMAL = n;
 	vec3 albedo = COLOR.rgb;
 	if (COLOR.a < 0.5) {
-		// Верх тайла: тонкая тёмная кромка по краям — изометрическая сетка ромбов.
-		vec2 f = fract(world_pos.xz);
-		float edge = min(min(f.x, 1.0 - f.x), min(f.y, 1.0 - f.y));
-		albedo *= 1.0 - grid_strength * (1.0 - step(grid_width, edge));
+		// Верх тайла: тёмная кромка — изометрическая сетка ромбов. Линия — ряд текселей №0 по x и по z
+		// (номер текселя в тайле, как у текстуры верха): на каждой границе тайлов ровно один пиксель мира,
+		// у всех тайлов одинаково, без полупокрытых текселей.
+		vec2 texel = mod(floor(world_pos.xz / ART_PX), TILE_TEXELS);
+		albedo *= 1.0 - grid_strength * step(min(texel.x, texel.y), 0.5);
 		albedo *= tops_detail(world_pos.xz, floor(UV.x + 0.5));
 		if (COLOR.a >= 0.18) {
 			albedo = mire_ripples(albedo, world_pos.xz);

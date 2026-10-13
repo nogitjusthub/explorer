@@ -193,10 +193,11 @@ func _process(dt: float) -> void:
 		_hazard_mat.set_shader_parameter(&"pulse", 0.7 + 0.3 * sin(_time * rate))
 		_hazard_mat.set_shader_parameter(&"flow", _time * 0.8)
 	if _zone.visible:
-		_zone.rotation.y += ZONE_SPIN * dt
-		_zone_mat.albedo_color.a = 0.65 + 0.3 * sin(_time * 4.0)
+		# Пунктир бежит шагом в пиксель мира по окружности, мерцает ступенями.
+		_zone.rotation.y = snappedf(_time * ZONE_SPIN, PX / zone_r)
+		_zone_mat.albedo_color.a = 0.65 + 0.3 * snappedf(sin(_time * 4.0), 0.5)
 	if _beam.visible:
-		_beam_mat.albedo_color.a = COLOR_BEAM.a + 0.2 * sin(_time * 30.0)
+		_beam_mat.albedo_color.a = COLOR_BEAM.a + 0.2 * signf(sin(_time * 30.0))
 		_update_beam()
 	match _anim:
 		Anim.DESCEND:
@@ -532,15 +533,15 @@ func _build_common() -> void:
 	_beam.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	_beam.visible = false
 
-	# Зона погрузки — пунктирное кольцо на земле.
+	# Зона погрузки — пунктирное кольцо на земле; штрих — два пикселя мира в ширину, длина — целое их число.
 	_zone = Node3D.new()
 	_zone.position = Vector3(0, 0.05, 0)
 	add_child(_zone)
 	_zone_mat = _unshaded(COLOR_RING)
-	var arc := TAU * zone_r / ZONE_DASHES
+	var dash_len := maxf(snappedf(TAU * zone_r / ZONE_DASHES * 0.55, PX), PX)
 	for i in ZONE_DASHES:
 		var a := TAU * i / ZONE_DASHES
-		var dash := _mesh(_zone, _box(Vector3(0.1, 0.03, arc * 0.55)), Vector3(cos(a), 0, sin(a)) * zone_r, _zone_mat)
+		var dash := _mesh(_zone, _box(Vector3(PX * 2.0, 0.03, dash_len)), Vector3(cos(a), 0, sin(a)) * zone_r, _zone_mat)
 		dash.rotation.y = -a
 		dash.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	_zone.visible = false

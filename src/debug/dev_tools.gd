@@ -9,6 +9,7 @@ extends Node
 ##     --spawn=X,Z        старт в точке мира вместо площадки
 ##     --no-drop          без сцены десанта: машина сразу на площадке старта
 ##     --fuel=N           топлива в начале забега, единиц
+##     --no-dunes         мир без дюнных полей (сравнить то же место с дюнами и без)
 ##   Камера и экран:
 ##     --zoom=N           камера в N раз крупнее (0.75 — мельче)
 ##     --no-shadows       без теней
@@ -31,6 +32,7 @@ extends Node
 ##   Автопилот, бенчмарк, снимки:
 ##     --autopilot        машина едет сама, гибель — возрождение
 ##     --course=D         автопилот строго по курсу D градусов, без объезда
+##     --hunt             автопилот таранит ближайшего зверя (скакуны, панцирник, илозуб), если он рядом
 ##     --bench=S          бенчмарк S секунд с автопилотом, отчёт и выход
 ##     --log-slow         печатать кадры дольше 20 мс: сколько заняли игра, генерация, отрисовка
 ##                          (в вебе — ?log-slow в адресе, строки в консоли браузера F12)
@@ -160,6 +162,8 @@ func make_autopilot() -> Autopilot:
 		course = deg_to_rad(float(args["course"]))
 	var pilot := Autopilot.new(course, query, vehicle.cls)
 	pilot.fixed_course = args.has("course")
+	if args.has("hunt") and fauna != null:
+		pilot.prey = fauna.nearest_prey
 	return pilot
 
 
@@ -326,8 +330,9 @@ func _print_bench() -> void:
 			st["whirlpool"]])
 	if fauna != null:
 		var fs := fauna.stats
-		_report("bench: fauna — packs %d, worms %d, shellbacks %d, mire sharks %d, stargazers %d, nessies %d, hits on the vehicle %d" % [
-			fs["packs"], fs["worms"], fs["shellbacks"], fs["sharks"], fs["rays"], fs["nessies"], fs["hits"]])
+		_report("bench: fauna — packs %d, worms %d, shellbacks %d, mire sharks %d, stargazers %d, nessies %d, hits on the vehicle %d, rams %d, killed %d" % [
+			fs["packs"], fs["worms"], fs["shellbacks"], fs["sharks"], fs["rays"], fs["nessies"], fs["hits"],
+			fs["rams"], fs["kills"]])
 		_report("bench: fauna alive now — %d nodes under the director" % fauna.get_child_count())
 	_report("bench: render — draw calls %d, primitives %d, objects in frame %d, video memory %.0f MB" % [
 		Performance.get_monitor(Performance.RENDER_TOTAL_DRAW_CALLS_IN_FRAME),

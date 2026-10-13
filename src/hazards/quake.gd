@@ -113,14 +113,14 @@ func step(dt: float) -> void:
 		if _shake_timer <= 0.0:
 			_shake_timer = 0.15
 			EventBus.camera_shake_requested.emit((0.1 + 0.7 * k * k) * (0.7 + 0.6 * strength), 0.25)
-		# За quake_line_s до сдвига — линия: вся сразу, цвет от белого к красному.
+		# За quake_line_s до сдвига — линия: вся сразу, цвет от белого к красному — четырьмя ступенями.
 		var line_k := 1.0 - _left / rules.quake_line_s
 		if line_k >= 0.0:
 			var crack := get_node(^"Crack") as Node3D
 			if not crack.visible:
 				crack.visible = true
 				_dust.emitting = true
-			_crack_mat.albedo_color = COLOR_LINE_FROM.lerp(COLOR_LINE_TO, clampf(line_k, 0.0, 1.0))
+			_crack_mat.albedo_color = COLOR_LINE_FROM.lerp(COLOR_LINE_TO, clampf(floorf(line_k * 4.0) / 3.0, 0.0, 1.0))
 		if _left <= 0.0:
 			_strike()
 		return
@@ -234,7 +234,8 @@ func _build_telegraph() -> void:
 			var d := p1 - p0
 			var seg := MeshInstance3D.new()
 			var box := BoxMesh.new()
-			box.size = Vector3(d.length() + 0.05, 0.03, 0.12)
+			# Ширина — два пикселя мира, длина — целое их число.
+			box.size = Vector3(ceilf((d.length() + 0.05) / Grid.ART_PX) * Grid.ART_PX, 0.03, Grid.ART_PX * 2.0)
 			seg.mesh = box
 			seg.material_override = _crack_mat
 			seg.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF

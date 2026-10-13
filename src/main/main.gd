@@ -9,6 +9,7 @@ const SUN_ENERGY := 1.25
 const AMBIENT_ENERGY := 0.5
 const EVAC_SCENE_S := 3.4         ## эвакуация: машину втягивает в челнок, он уходит вверх
 const LANDING_TRIES := 40
+const LANDING_DRY := 5            ## капсула садится не ближе 5 тайлов к воде (если такое место нашлось)
 const SPAWN_HEADING := -PI * 0.75
 const SPAWN_PAD_OFFSET := 2.0     ## без десанта машина стоит на краю площадки — в зоне погрузки, не под челноком
 const HANGAR_JOB_BUDGET_USEC := 12000   ## в трюме кадр почти пустой — мир догружается быстрее
@@ -117,7 +118,9 @@ func _build_world(args: Dictionary) -> void:
 	EventBus.weather_changed.connect(_on_weather_changed)
 
 	terrain = TerrainData.new()
-	generator = TerrainGenerator.new(run_seed, TerrainParams.new())
+	var terrain_params := TerrainParams.new()
+	terrain_params.dunes_enabled = not args.has("no-dunes")   # отладка: тот же мир без дюнных полей
+	generator = TerrainGenerator.new(run_seed, terrain_params)
 	query = TerrainQuery.new(terrain)
 	scheduler = JobScheduler.new()
 	scheduler.name = "JobScheduler"
@@ -304,9 +307,13 @@ func _on_weather_changed(kind: StringName, intensity: float) -> void:
 	_env.ambient_light_energy = AMBIENT_ENERGY * (1.0 - 0.35 * storm)
 
 
-## Точка высадки (GDD §2.1): рядом с площадкой старта, на сухом ровном тайле без стенок и деревьев. Детерминированно по seed; не нашлось — центр площадки.
+## Точка высадки (GDD §2.1): рядом с площадкой старта, на сухом ровном тайле без стенок и деревьев, не ближе
+## LANDING_DRY тайлов к воде; если такого нет — самый далёкий от воды из годных. Детерминированно по seed;
+## не нашлось ни одного — центр площадки.
 func _landing_point(pad: Vector2) -> Vector2:
 	var rng := DetRng.rng_for(run_seed, 0, 0, 950)
+	var best := pad
+	var best_dry := -1
 	for _i in LANDING_TRIES:
 		var p := pad + Vector2.from_angle(rng.randf() * TAU) * rng.randf_range(9.0, 16.0)
 		var t := Grid.tile_of_world(p.x, p.y)
@@ -320,9 +327,29 @@ func _landing_point(pad: Vector2) -> Vector2:
 		var walls := false
 		for dir in 4:
 			walls = walls or query.edge_rise(t.x, t.y, dir) != 0 or query.edge_drop(t.x, t.y, dir) != 0
-		if not walls:
+		if walls:
+			continue
+		var dry := _water_gap(t, LANDING_DRY)
+		if dry >= LANDING_DRY:
 			return Vector2(t.x + 0.5, t.y + 0.5)
-	return pad
+		if dry > best_dry:
+			best_dry = dry
+			best = Vector2(t.x + 0.5, t.y + 0.5)
+	return best
+
+
+## Расстояние (по Чебышёву) от тайла t до ближайшей воды, не больше limit.
+func _water_gap(t: Vector2i, limit: int) -> int:
+	for r in range(1, limit):
+		for dz in range(-r, r + 1):
+			for dx in range(-r, r + 1):
+				if maxi(absi(dx), absi(dz)) != r:
+					continue
+				var tx := t.x + dx
+				var tz := t.y + dz
+				if query.is_loaded(tx, tz) and query.water_tier(tx, tz) != TerrainQuery.NO_WATER:
+					return r
+	return limit
 
 
 ## Сцена десанта: в обычной игре да; отладочные сценарии без стартового экрана и --no-drop стартуют

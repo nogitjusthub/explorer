@@ -6,9 +6,12 @@ extends Creature
 ## (ближе shellback_territory_r), подбирается по полю путей; когда до неё прямой путь короче рывка —
 ## роет землю shellback_dig_s (телеграф) и бросается по прямой на shellback_charge_dist со скоростью
 ## shellback_charge_speed (медленнее ровера). Сдвинуть машину может только таран: урон, отброс и
-## раскачка корпуса; в стенку — оглушён. Отстаёт (shellback_calm_s не слышит машину и уходит к себе),
+## раскачка корпуса — только на одном с ней уровне (Creature.same_level); в стенку — оглушён. Машина за
+## уступом — подбирается в обход по полю путей. Отстаёт (shellback_calm_s не слышит машину и уходит к себе),
 ## если: протаранил её — прогнал; она ушла с его территории; не подобраться fauna_give_up_s; погоня
 ## дольше shellback_chase_s. Спасение — уйти с линии атаки или уехать от его места.
+## Машина на скорости валки деревьев таранит его (RamBody): удар — мигает, отлетает на ram_knockback по ходу
+## машины и оглушён, после — снова в погоне; ram_hits_shellback ударов — гибель.
 
 enum State { IDLE, APPROACH, DIG, CHARGE, STUN }
 
@@ -20,6 +23,9 @@ const CONTACT := 0.75
 const STUN_S := 1.5
 const WANDER_SPEED := 0.8
 const WANDER_R := 3.0                    ## бродит в стольких тайлах от своего места
+const RAM_R := 0.4                       ## радиус тела под тараном машины
+const KNOCK_S := 0.25                    ## удар тараном: отлетает за столько
+const PUFF_COLOR := Color(0.5, 0.6, 0.45)
 
 var state := State.IDLE
 
@@ -34,6 +40,8 @@ var _chase := 0.0                        ## сколько секунд гони
 var _rammed := false                     ## в этой погоне протаранил машину
 var _model: Node3D
 var _dust: CPUParticles3D
+var _knock := Vector2.ZERO               ## удар тараном: скорость отлёта
+var _knock_t := 0.0
 
 
 func _init() -> void:
@@ -46,11 +54,17 @@ func setup(at: Vector2) -> void:
 	_home = at
 	_model = _build_model()
 	add_child(_model)
+	add_body(rules.ram_hits_shellback, RAM_R, _model, PUFF_COLOR)
 	_place(0.0)
 	_model.reset_physics_interpolation()
 
 
 func step(dt: float) -> void:
+	tick_bodies(dt)
+	if dead:
+		_slide(dt)
+		_place(dt)
+		return
 	var vp := vehicle.state.pos
 	var d := pos.distance_to(vp)
 	match state:
@@ -103,7 +117,8 @@ func step(dt: float) -> void:
 			else:
 				pos = moved
 				_face(_charge_dir)
-			if not _hit and pos.distance_to(vp) < CONTACT and not vehicle.state.falling:
+			if not _hit and pos.distance_to(vp) < CONTACT and not vehicle.state.falling \
+					and Creature.same_level(query, pos, vp):                # с уступа на машину под ним не таранит
 				_hit = true
 				damaged.emit(rules.shellback_damage, &"shellback")
 				vehicle.state.push_vel += _charge_dir * 7.0 / vehicle.cls.mass
@@ -117,6 +132,7 @@ func step(dt: float) -> void:
 				_stun()
 		State.STUN:
 			_timer -= dt
+			_slide(dt)
 			if _timer <= 0.0:
 				state = State.APPROACH
 	if aggressive:
@@ -157,6 +173,37 @@ func _stun() -> void:
 	_timer = STUN_S
 
 
+## Таран машиной: отлетает по ходу машины на ram_knockback (убитый — тоже: мигает уже не под машиной);
+## удар без гибели — оглушён (рытьё и рывок сорваны) и зол — после оглушения гонит машину, как услышавший её.
+func _on_rammed(_b: RamBody, dir: Vector2, killed: bool) -> void:
+	_knock = dir * rules.ram_knockback / KNOCK_S
+	_knock_t = KNOCK_S
+	if killed:
+		return
+	_dust.emitting = false
+	_model.rotation.z = 0.0
+	_stun()
+	if not aggressive:
+		aggressive = true
+		_chase = 0.0
+		_rammed = false
+		_calm = 0.0
+		reset_interest()
+
+
+## Убит тараном: рытьё стихло, отлетает, мигает и пропадает облачком.
+func _on_died() -> void:
+	_dust.emitting = false
+	_model.rotation.z = 0.0
+
+
+## Отлёт от удара тараном — KNOCK_S, по рёбрам вида (в стенку не уходит).
+func _slide(dt: float) -> void:
+	if _knock_t > 0.0:
+		_knock_t -= dt
+		pos = Creature.move_on_grid(query, FlowField.Mode.SHELLBACK, pos, pos + _knock * dt)
+
+
 ## Прямой путь до цели проходим (рывок не упрётся в стенку).
 func _line_clear(a: Vector2, b: Vector2) -> bool:
 	var steps := ceili(a.distance_to(b) / 0.4)
@@ -195,6 +242,9 @@ func _fell_trees() -> void:
 func _place(_dt: float) -> void:
 	_model.position = Vector3(pos.x, ground_y(pos), pos.y)
 	_dust.position = _model.position + Vector3(0, 0.1, 0)
+	for b in bodies:
+		b.pos = pos
+		b.y = _model.position.y
 
 
 ## Панцирник: тёмный купол-панцирь с полосами, рог, шесть ног. По плоскости ужат до размера машины

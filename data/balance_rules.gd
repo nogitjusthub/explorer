@@ -168,9 +168,20 @@ extends Resource
 @export var shellback_chase_s: float = 20.0       ## дольше не гонится — устаёт
 @export var shellback_calm_s: float = 15.0        ## сдался или протаранил — столько не слышит машину, уходит к себе
 
+@export_group("Ram")
+## Таран фауны машиной (GDD §5.4): въехала в зверя на скорости валки деревьев своего класса — удар по нему;
+## машина теряет скорость, как после валки (tree_speed_after_frac), ховер платит tree_fell_damage.
+@export var ram_hits_shellback: int = 3          ## панцирник выдерживает столько ударов…
+@export var ram_hits_hopper: int = 1             ## …скакун (каждый в стае — сам по себе)…
+@export var ram_hits_shark: int = 1              ## …илозуб (таран достаёт его только над поверхностью)
+@export var ram_invuln_s: float = 0.5            ## после удара тело столько неуязвимо (один контакт — один удар)
+@export var ram_flash_s: float = 0.4             ## удар без гибели: зверь мигает столько
+@export var ram_death_s: float = 0.5             ## убитый мигает столько и пропадает облачком
+@export var ram_knockback: float = 1.0           ## панцирника удар отбрасывает на столько тайлов и оглушает
+
 @export_group("Water fauna")
 ## Водная и береговая фауна (GDD §5.6). Шокер-троеглазка — по чанкам, в мелкой воде; илозуб — в зыбучем
-## грунте и воде рядом с ним; Несса — редкая, в больших озёрах.
+## грунте и в воде у него; Несса — редкая, в больших озёрах.
 @export var ray_chance: float = 0.03             ## шанс троеглазки на тайле мелкой воды…
 @export var ray_per_chunk: int = 3               ## …но не больше стольких на чанк
 @export var ray_shock_r: float = 1.0             ## машина в воде ближе — мгновенный разряд
@@ -178,13 +189,15 @@ extends Resource
 @export var ray_cooldown_min_s: float = 5.0
 @export var ray_cooldown_max_s: float = 10.0
 @export var shark_min_level: int = 2
-@export var shark_speed: float = 2.5             ## подход медленный — танк легко уедет
+@export var shark_speed: float = 4.5             ## плывёт к машине: быстрее танка, медленнее ровера и ховера
 @export var shark_lunge_dist: float = 2.5        ## прыжок из зыбуна на столько тайлов…
 @export var shark_lunge_speed: float = 9.0       ## …с такой скоростью
 @export var shark_telegraph_s: float = 0.6       ## выныривает и разевает пасть перед прыжком
 @export var shark_damage: int = 15
-@export var shark_spawn_min: float = 12.0        ## появляется в зыбуне в 12…25 тайлах от машины
+@export var shark_spawn_min: float = 12.0        ## появляется в своём ареале в 12…25 тайлах от машины
 @export var shark_spawn_max: float = 25.0
+@export var shark_home_r: int = 4                ## ареал: зыбун и вода не дальше стольких тайлов от него
+@export var shark_chase_r: float = 10.0          ## гонит не дальше стольких тайлов от своего места (появления)
 @export var nessie_min_level: int = 2
 @export var nessie_first_s: float = 120.0        ## редкая: первая — не раньше этого времени забега…
 @export var nessie_gap_s: float = 180.0          ## …следующая — не раньше этого после встречи

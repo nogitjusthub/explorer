@@ -1,11 +1,14 @@
 class_name FaunaDirector
 extends Node3D
 ## Фауна забега (GDD §5.4, §5.6, §7.1). Существа появляются в кольце fauna_spawn_min…max вокруг машины —
-## сколько и кто, решает уровень угрозы (T1 — скакуны, T2 — + черви на песке, илозубы в зыбуне,
+## сколько и кто, решает уровень угрозы (T1 — скакуны, T2 — + черви на песке, илозубы в зыбуне и воде у него,
 ## Несса в больших озёрах, T3 — + панцирники), и исчезают дальше fauna_despawn, если не гонятся.
 ## Троеглазки лежат в мелкой воде по чанкам и уходят вместе с чанком. Существа слышат шум машины и
 ## посадок (NoiseField). Поля путей видов (FlowField) строятся
 ## задачами JobScheduler вокруг машины, пока кто-то гонится. Урон машине — сигналом damaged.
+## Таран (_ram): машина на скорости валки деревьев въехала в зверя — удар по нему (Creature.ram); машина
+## теряет скорость, как после валки дерева, корпус раскачивается, ховер платит tree_fell_damage, как за дерево.
+## Убитый тараном зверь мигает, пропадает облачком и уходит из списка (finished).
 
 signal damaged(amount: int, source: StringName)
 
@@ -26,7 +29,8 @@ var enabled := true
 var level := 1
 var forced: Array[Dictionary] = []        ## отладка: [{kind, at}] — hoppers, worm, shellback, shark, ray, nessie
 var noise := NoiseField.new()
-var stats := {"packs": 0, "worms": 0, "shellbacks": 0, "sharks": 0, "rays": 0, "nessies": 0, "hits": 0}
+var stats := {"packs": 0, "worms": 0, "shellbacks": 0, "sharks": 0, "rays": 0, "nessies": 0, "hits": 0,
+		"rams": 0, "kills": 0}                ## hits — по машине; rams и kills — тараном по зверям
 
 var _rng: RandomNumberGenerator
 var _creatures: Array[Creature] = []
@@ -65,7 +69,7 @@ func field(mode: FlowField.Mode) -> FlowField:
 ## Испуг (удар капсулы десанта): стаи рядом уходят, панцирники успокаиваются.
 func scare(at: Vector2, radius: float) -> void:
 	for c in _creatures:
-		if c.pos.distance_to(at) > radius:
+		if c.dead or c.pos.distance_to(at) > radius:
 			continue
 		if c is HopperPack:
 			(c as HopperPack).flee()
@@ -110,6 +114,7 @@ func step(dt: float) -> void:
 		_spawn()
 	for c in _creatures:
 		c.step(dt)
+	_ram()
 	for i in range(_creatures.size() - 1, -1, -1):
 		var c := _creatures[i]
 		if c is Stargazer:
@@ -121,6 +126,42 @@ func step(dt: float) -> void:
 				_nessie_wait = rules.nessie_gap_s
 			c.queue_free()
 			_creatures.remove_at(i)
+
+
+## Таран (GDD §5.4): машина въехала в зверя не медленнее порога валки деревьев своего класса — удар по
+## каждому телу, которого коснулась впервые (один контакт — один удар). Машина теряет скорость, как после
+## валки дерева (раз за кадр, сколько бы тел ни задела), корпус раскачивается, ховер платит HP, как за дерево.
+## Падающая, подброшенная, тонущая или разбитая машина не таранит (касания при этом запоминаются).
+func _ram() -> void:
+	var s := vehicle.state
+	var able := not (s.falling or s.launched or s.drowning or vehicle.wrecked)
+	var fast := able and VehicleKinematics.fells(vehicle.cls, s.vel.length())
+	var hits := 0
+	for c in _creatures:
+		var before := c.kills
+		hits += c.ram(s.pos, s.y, s.vel, fast)
+		stats["kills"] += c.kills - before
+	if hits == 0:
+		return
+	stats["rams"] += hits
+	VehicleKinematics.after_felling(s, vehicle.cls)
+	vehicle.rock(Vehicle.ROCK_TREE, -s.forward())
+	EventBus.camera_shake_requested.emit(0.3, 0.15)
+	if vehicle.cls.tree_fell_damage > 0:
+		damaged.emit(vehicle.cls.tree_fell_damage, &"ram")
+
+
+## Отладка (--hunt): ближайшее к from живое тело под тараном (центр) не дальше reach, или null.
+func nearest_prey(from: Vector2, reach: float = 30.0) -> Variant:
+	var best: Variant = null
+	var best_d := reach
+	for c in _creatures:
+		for b in c.bodies:
+			var d := b.pos.distance_to(from)
+			if b.alive() and d < best_d:
+				best = b.pos
+				best_d = d
+	return best
 
 
 ## Поля путей — только для видов, которые сейчас гонятся; центр — тайл машины.
@@ -191,9 +232,9 @@ func _spawn() -> void:
 		var at: Variant = _ring_point(func(t: Vector2i) -> bool: return _dry(t))
 		if at != null:
 			_spawn_shellback(at)
-	# Илозуб — в зыбуне или воде рядом с ним, ближе остальных: ему не уйти со своего грунта.
+	# Илозуб — в зыбуне или в воде у зыбуна, ближе остальных: ему не уйти со своего ареала.
 	if counts["sharks"] < _wanted(&"sharks"):
-		var at: Variant = _ring_point(func(t: Vector2i) -> bool: return MireShark.habitat(query, t),
+		var at: Variant = _ring_point(func(t: Vector2i) -> bool: return _shark_ground(t),
 				rules.shark_spawn_min, rules.shark_spawn_max, SHARK_SPAWN_TRIES)
 		if at != null:
 			_spawn_shark(at)
@@ -250,6 +291,11 @@ func _ring_point(ok: Callable, r_min: float = -1.0, r_max: float = -1.0, tries: 
 		if query.is_loaded(t.x, t.y) and ok.call(t):
 			return Vector2(t.x + 0.5, t.y + 0.5)
 	return null
+
+
+## Ареал илозуба: зыбун или вода не дальше shark_home_r от него.
+func _shark_ground(t: Vector2i) -> bool:
+	return MireShark.habitat(query, t, rules.shark_home_r)
 
 
 func _dry(t: Vector2i) -> bool:
@@ -364,11 +410,11 @@ func _force(kind: StringName) -> void:
 				sb.state = Shellback.State.APPROACH
 				sb.aggressive = true
 		&"shark":
-			var at: Variant = _scan_point(func(t: Vector2i) -> bool: return MireShark.habitat(query, t), 3.0, 15.0)
+			var at: Variant = _scan_point(func(t: Vector2i) -> bool: return _shark_ground(t), 3.0, 15.0)
 			if at != null:
 				_spawn_shark(at).start_hunt()
 			else:
-				print("fauna: no quicksand near the vehicle")
+				print("fauna: no quicksand (or water next to it) near the vehicle")
 		&"ray":
 			var at: Variant = _scan_point(func(t: Vector2i) -> bool: return Stargazer.habitat(query, t), 2.0, 8.0)
 			if at != null:

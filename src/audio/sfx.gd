@@ -3,7 +3,8 @@ extends RefCounted
 ## Процедурные звуки без ассетов (как и двигатель): AudioStreamWAV 16 бит, моно. Генерируются один
 ## раз при старте. Звуков угроз по GDD немного: молния (треск телеграфа и гром), гул землетрясения,
 ## смерч (вой с завываниями), гул пылевой бури, урон; у фауны — крик скакунов, мычание и топот панцирника; реактивный рёв капсулы и челноков,
-## луч захвата; «дзынь» подбора находки и «би-бип» пейджера; щелчок механического тумблера в интерфейсе.
+## луч захвата; «дзынь» подбора находки и «би-бип» пейджера; щелчок механического тумблера в интерфейсе; лязг люка
+## и гул гидропривода подъёмника в трюме на старте.
 
 const RATE := 22050
 
@@ -459,6 +460,67 @@ static func toggle() -> AudioStreamWAV:
 		data[i] = tanh(v * 0.8)
 	var wav := _wav(data)
 	_cache[&"toggle"] = wav
+	return wav
+
+
+## Люк и подъёмник трюма на старте (около 1,25 с), как сервисный подъёмник: лязг защёлки люка с дребезгом,
+## шипение сброса давления, гул гидропривода — мотор насоса раскручивается до ~100 Гц (жужжащие нечётные
+## обертоны), пульсация поршней и вой шестерён насоса, шум масла в трубах; в конце хода — мотор сбегает
+## вниз, платформа глухо встаёт на упор.
+static func hatch_lift() -> AudioStreamWAV:
+	if _cache.has(&"hatch_lift"):
+		return _cache[&"hatch_lift"]
+	var n := int(1.25 * RATE)
+	var data := PackedFloat32Array()
+	data.resize(n)
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 4411
+	# Металл люка: частота, затухание (1/с), громкость — неровный ряд, звенит «железом», а не колоколом.
+	var modes: Array[Vector3] = [Vector3(97.0, 16.0, 1.0), Vector3(233.0, 26.0, 0.7), Vector3(517.0, 38.0, 0.55),
+			Vector3(1130.0, 60.0, 0.4), Vector3(2210.0, 95.0, 0.3), Vector3(3470.0, 150.0, 0.2)]
+	# Удары: время, сила, высота (множитель частот) — защёлка, дребезг, упор платформы внизу.
+	var hits: Array[Vector3] = [Vector3(0.0, 1.0, 1.0), Vector3(0.034, 0.45, 1.06), Vector3(0.105, 0.22, 0.97),
+			Vector3(0.93, 0.8, 0.62)]
+	var phases: Array[float] = []
+	for m in modes.size() * hits.size():
+		phases.append(rng.randf() * TAU)
+	var motor := 0.0
+	var gear := 0.0
+	var hiss_hp := 0.0
+	var hiss_prev := 0.0
+	var flow := 0.0
+	for i in n:
+		var t := float(i) / RATE
+		var v := 0.0
+		for h in hits.size():
+			var dt := t - hits[h].x
+			if dt < 0.0:
+				continue
+			var s := rng.randf_range(-1.0, 1.0) * exp(-dt * 700.0) * 0.9
+			for m in modes.size():
+				var md := modes[m]
+				s += md.z * sin(TAU * md.x * hits[h].z * dt + phases[h * modes.size() + m]) * exp(-dt * md.y)
+			if h == hits.size() - 1:
+				s += 1.4 * sin(TAU * 55.0 * dt) * exp(-dt * 11.0)       # упор — глухой низ
+			v += s * hits[h].y
+		# Шипение: белый шум без низа, вспыхивает при отпирании и гаснет за ~0,3 с.
+		var noise := rng.randf_range(-1.0, 1.0)
+		hiss_hp = 0.85 * (hiss_hp + noise - hiss_prev)
+		hiss_prev = noise
+		v += hiss_hp * 0.35 * smoothstep(0.02, 0.06, t) * exp(-maxf(t - 0.06, 0.0) * 9.0)
+		# Гидропривод: с 0,12 с разгон, с 0,85 с — сбег; частота мотора 60 → 100 Гц и обратно вниз.
+		var run := smoothstep(0.12, 0.3, t) * (1.0 - smoothstep(0.85, 1.12, t))
+		var f := lerpf(60.0, 100.0, smoothstep(0.12, 0.35, t)) * lerpf(1.0, 0.7, smoothstep(0.85, 1.12, t))
+		motor += TAU * f / RATE
+		gear += TAU * f * 4.2 / RATE
+		var buzz := sin(motor) + 0.55 * sin(motor * 3.0) + 0.35 * sin(motor * 5.0) + 0.2 * sin(motor * 7.0) \
+				+ 0.3 * sin(motor * 2.0)
+		var ripple := 0.75 + 0.25 * sin(motor * 0.5)                   # поршни насоса
+		flow = lerpf(flow, noise, 0.08)                                  # масло в трубах — глухой шум
+		v += run * (buzz * ripple * 0.42 + sin(gear) * 0.12 + flow * 0.9)
+		data[i] = tanh(v * 0.9)
+	var wav := _wav(data)
+	_cache[&"hatch_lift"] = wav
 	return wav
 
 

@@ -3,15 +3,18 @@ extends RefCounted
 ## Автопилот для бенчмарка и снимков: едет на полном газу и раз в 0,4 с выбирает из 16
 ## направлений то, где дальше всего свободно (без стенок вверх, деревьев и глубокой воды),
 ## предпочитая текущий курс. Нужен, чтобы бенчмарк стриминга реально объезжал мир.
+## Охота (--hunt, отладка тарана): есть зверь рядом — едет на него по дуге, не сбрасывая газ.
 
 const PROBE_LEN := 10.0
 const PROBE_STEP := 0.5
 const REPLAN_S := 0.4
 const DIRECTIONS := 16
+const HUNT_TURN := deg_to_rad(20.0)  ## охота: курс к зверю не круче этого от текущего — скорость не падает
 
 var query: TerrainQuery
 var cls: VehicleClass
 var fixed_course := false        ## ехать строго по курсу, без объезда (отладка воды, обрывов)
+var prey: Callable               ## охота: (позиция машины) → точка ближайшего зверя под тараном или null
 var _course := 0.0
 var _timer := 0.0
 var _drift := 0.0
@@ -24,6 +27,10 @@ func _init(start_course: float, terrain_query: TerrainQuery, vehicle_class: Vehi
 
 
 func direction(state: VehicleState, dt: float) -> Vector2:
+	if prey.is_valid():
+		var at: Variant = prey.call(state.pos)
+		if at != null:
+			return _hunt(state, at)
 	_timer -= dt
 	_drift += dt
 	if fixed_course:
@@ -32,6 +39,15 @@ func direction(state: VehicleState, dt: float) -> Vector2:
 		_timer = REPLAN_S
 		_replan(state)
 	return Vector2.from_angle(_course)
+
+
+## На таран к точке at: с места — прямо на неё (доворот на месте), на ходу — по дуге, не круче HUNT_TURN
+## от курса: скорость держится у порога валки, промахнулся — заходит на новый круг.
+func _hunt(state: VehicleState, at: Vector2) -> Vector2:
+	var want := (at - state.pos).angle()
+	if state.vel.length() < VehicleKinematics.STOP_SPEED:
+		return Vector2.from_angle(want)
+	return Vector2.from_angle(state.heading + clampf(wrapf(want - state.heading, -PI, PI), -HUNT_TURN, HUNT_TURN))
 
 
 func _replan(state: VehicleState) -> void:

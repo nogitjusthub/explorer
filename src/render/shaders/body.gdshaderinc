@@ -7,7 +7,8 @@
 // ленты), 3 — юбка ховера (секции-«пальцы»), 4 — щитки панциря (пояса щитков с тёмными швами и светлой
 // серединой), 5 — шкура (морщинистая: светлые и тёмные крапины), 6 — кольчатое тело (бороздки с
 // разрывами, редкие поры), 7 — чешуя (ряды со сдвигом, тень под чешуйкой, блик), 8 — мокрый ил (комки
-// и блёстки), 9 — галька (камешки 2×2 разной яркости).
+// и блёстки), 9 — галька (камешки 2×2 разной яркости), 10 — хитин (пластины 2×2 разной яркости, тёмный
+// шов, пиксели отлива на гранях, глядящих вверх).
 
 uniform vec4 base_color : source_color = vec4(1.0);
 uniform int pattern = 0;
@@ -15,6 +16,10 @@ uniform float px = 0.0625;              // шаг пиксельной сетк�
                                         // с поправкой на масштаб узла (BodyMaterial, Grid.ART_PX)
 uniform float roughness : hint_range(0.0, 1.0) = 0.8;
 uniform float metallic : hint_range(0.0, 1.0) = 0.0;
+uniform float specular : hint_range(0.0, 1.0) = 0.5;   // как metallic_specular у StandardMaterial3D
+uniform bool vertex_tint = false;       // цвет детали — ещё и в вершинах меша (× base_color, sRGB, как
+                                        // vertex_color_is_srgb у StandardMaterial3D): у скакунов хитин,
+                                        // кромка и кость — один материал (BodyMaterial.tinted)
 
 varying vec3 obj_pos;
 varying vec3 obj_nrm;
@@ -225,6 +230,18 @@ float pebble(vec3 p) {
 	return r < 0.25 ? 0.86 : (r < 0.5 ? 0.95 : (r < 0.8 ? 1.03 : 1.12));
 }
 
+// Хитин: по сетке грани (трубы скакуна — узкие плоские грани) пластины 2×2 пикселя разной яркости, нижний
+// ряд пластины — тёмный шов; на гранях, глядящих вверх, — редкие светлые пиксели отлива.
+float chitin(vec3 p, vec3 n) {
+	vec2 q = floor(face_uv(p, n) / px);
+	if (n.y > 0.45 && hash2(q + 5.7) > 0.74) {
+		return 1.65;                                  // отлив
+	}
+	float r = hash2(floor(q / 2.0) + 3.1);
+	float tone = r < 0.35 ? 0.85 : (r < 0.8 ? 1.0 : 1.2);
+	return mod(q.y, 2.0) == 0.0 ? tone * 0.78 : tone;     // шов между поясами пластин
+}
+
 float body_detail(vec3 p, vec3 n, vec2 uv, vec2 uv2, vec4 col, vec4 rect0, vec4 rect1) {
 	if (pattern == 1) {
 		return plates(uv, uv2, n, round(col.rg * 16.0), rect0, rect1);
@@ -244,6 +261,8 @@ float body_detail(vec3 p, vec3 n, vec2 uv, vec2 uv2, vec4 col, vec4 rect0, vec4 
 		return mud(p);
 	} else if (pattern == 9) {
 		return pebble(p);
+	} else if (pattern == 10) {
+		return chitin(p, n);
 	}
 	return 1.0;
 }
@@ -256,7 +275,16 @@ void fragment() {
 	vec4 rect0 = vec4(0.0);
 	vec4 rect1 = vec4(0.0);
 #endif
-	ALBEDO = base_color.rgb * body_detail(obj_pos, obj_nrm, UV, UV2, COLOR, rect0, rect1);
+	vec3 tint = base_color.rgb;
+	if (vertex_tint) {
+		vec3 c = COLOR.rgb;
+		if (!OUTPUT_IS_SRGB) {
+			c = mix(pow((c + vec3(0.055)) * (1.0 / 1.055), vec3(2.4)), c * (1.0 / 12.92), lessThan(c, vec3(0.04045)));
+		}
+		tint *= c;
+	}
+	ALBEDO = tint * body_detail(obj_pos, obj_nrm, UV, UV2, COLOR, rect0, rect1);
 	ROUGHNESS = roughness;
 	METALLIC = metallic;
+	SPECULAR = specular;
 }

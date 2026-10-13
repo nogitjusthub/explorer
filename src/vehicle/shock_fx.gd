@@ -8,8 +8,8 @@ extends MeshInstance3D
 const ARCS := 2
 const ARC_EVERY_S := 0.07
 const POINTS := 6                        ## изломов в дуге (с концами)
-const CORE_W := 0.045
-const GLOW_W := 0.14
+const CORE_W := Grid.ART_PX              ## сердцевина — пиксель мира, как у молнии и дуги троеглазки
+const GLOW_W := Grid.ART_PX * 3.0        ## ореол — по пикселю с каждой стороны
 const CORE_COLOR := Color(1.0, 1.0, 1.0)
 const GLOW_COLOR := Color(0.3, 0.65, 1.0, 0.85)
 const FLASH_COLOR := Color(1.0, 1.0, 1.0)

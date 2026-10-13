@@ -86,11 +86,12 @@ float weather_density(vec3 p) {
 	return dens;
 }
 
-// Как гуще пелена с расстоянием r от машины: лёгкая дымка до clear_r − 2, внятно видно до clear_r,
-// полная пелена с clear_r + 2.5 (внешняя треть кадра). Плавно, без ступени.
+// Как гуще пелена с расстоянием r от машины: у машины — заметная дымка (почти треть полной), с clear_r − 3
+// густеет и к clear_r + 3 (внешняя треть кадра) — полная пелена. Переход широкий и пологий — просвет не
+// выглядит высверленной дырой.
 float weather_falloff(float r, float clear_r) {
-	float t = clamp((r - (clear_r - 2.0)) / 4.5, 0.0, 1.0);
-	return mix(0.22, 1.0, t * t * (3.0 - 2.0 * t));
+	float t = clamp((r - (clear_r - 3.0)) / 6.0, 0.0, 1.0);
+	return mix(0.3, 1.0, t * t * (3.0 - 2.0 * t));
 }
 
 // Цвет пелены: не ровная заливка, а клубы — светлее и темнее, медленно текут.
@@ -112,5 +113,5 @@ float vis_hidden(vec3 p_in) {
 	float billow = 0.55 + 0.45 * smoothstep(0.22, 0.7, vfbm(world_pos.xz * 0.08 + vec2(TIME * 0.05, -TIME * 0.035)));
 	// Разводы — в переходной зоне; дальше пелена сплошная (переход широкий — без ступеньки).
 	float solid = smoothstep(weather_clear - 0.5, weather_clear + 5.0, r);
-	return art_steps(clamp(dens * weather_max * mix(bubble * billow, 1.0, solid), 0.0, 1.0), 6.0, p_in);
+	return art_steps(clamp(dens * weather_max * mix(bubble * billow, 1.0, solid), 0.0, 1.0), 8.0, p_in);
 }

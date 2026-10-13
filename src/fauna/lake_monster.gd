@@ -96,7 +96,7 @@ const MEMO_S := 10.0                     ## память «глубоко ли»
 const TURN_RATE := 4.0                   ## рад/с — поворот V-следа
 const WAKE_LEN := 2.4
 const WAKE_ANGLE := 0.42                 ## рад — полураствор V-следа
-const WAKE_W := 0.16
+const WAKE_W := 0.125                    ## ширина гребня — два пикселя мира
 const HUMP_EVERY_MIN_S := 3.0            ## при подходе спина всплывает раз в столько…
 const HUMP_EVERY_MAX_S := 5.5
 const HUMP_SURFACE_S := 1.0              ## …на столько
@@ -726,18 +726,17 @@ func _animate_wake(dt: float) -> void:
 		_bubbles.position = Vector3(at.x, _water_y, at.y)
 
 
-## Пена у основания шеи: разгорается при появлении, гаснет при погружении. Точку удара ничто не
-## отмечает — ни до удара, ни после (только брызги).
+## Пена у основания шеи: разгорается при появлении, гаснет при погружении — ступенями (кольцо не
+## масштабируется: ширина — 2 пикселя мира). Точку удара ничто не отмечает — ни до удара, ни после
+## (только брызги).
 func _animate_foam() -> void:
 	match state:
 		State.EMERGE:
-			var k := _ease_out(_timer / 0.5)
-			_ring.scale = Vector3(0.4 + 0.6 * k, 0.3, 0.4 + 0.6 * k)
-			_ring_mat.albedo_color.a = 0.85 * k
+			_ring_mat.albedo_color.a = 0.85 * _steps(_ease_out(_timer / 0.5))
 		State.WATCH, State.POSE, State.STRIKE, State.LIE:
 			pass                                  # пена у основания держится
 		State.SUBMERGE:
-			_ring_mat.albedo_color.a = 0.85 * (1.0 - clampf((_timer - 0.4) / 0.6, 0.0, 1.0))
+			_ring_mat.albedo_color.a = 0.85 * _steps(1.0 - clampf((_timer - 0.4) / 0.6, 0.0, 1.0))
 		_:
 			_ring.visible = false
 
@@ -770,7 +769,7 @@ func _build() -> void:
 	_build_head()
 	_build_back()
 	_ring_mat = _foam_material()
-	_ring = _torus(0.32, 0.46, _ring_mat)
+	_ring = _torus(Grid.ART_PX * 5.0, Grid.ART_PX * 7.0, _ring_mat)
 	_build_wake()
 	_bubbles = _particles(28, 0.8, 1, 0.3, 0.8, -1.2)
 	_bubbles.emission_shape = CPUParticles3D.EMISSION_SHAPE_BOX
@@ -839,6 +838,11 @@ func _foam_material() -> StandardMaterial3D:
 	m.albedo_color = FOAM_COLOR
 	m.render_priority = 1                # поверх прозрачной воды, а не под ней
 	return m
+
+
+## Доля 0…1 — тремя ступенями (без плавного угасания).
+static func _steps(k: float) -> float:
+	return ceilf(clampf(k, 0.0, 1.0) * 3.0) / 3.0
 
 
 ## Плоское кольцо пены.

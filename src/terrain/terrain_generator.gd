@@ -14,7 +14,9 @@ extends RefCounted
 ## - седловидные тайлы («песочные часы», противоположные углы равны) убираются подъёмом низкой
 ##   пары углов — решение по вершине зависит только от соседних вершин, поэтому без швов;
 ## - вода: у каждой области свой уровень, между областями с разными уровнями — пологая дамба;
-##   на ровных полках — лужи вровень с краем. Вода нигде не «висит» над сухим соседом.
+##   на ровных полках — лужи вровень с краем. Вода нигде не «висит» над сухим соседом;
+## - дюны: посреди части пустынь — поперечные гряды из пологих склонов в ярус, поле гаснет к краям.
+##   Вершину гряды, при которой тайл стал бы круче яруса, правка сдвигает на ярус — стенок в дюнах нет.
 ##
 ## Против ям без выхода (стенку вверх не проезжает никто):
 ## - сеть «проездов» — решётка коридоров, где рельеф пологий; любая замкнутая стена крупнее
@@ -47,6 +49,12 @@ var _n_warp: FastNoiseLite
 var _n_water_warp: FastNoiseLite
 var _n_rough: FastNoiseLite
 var _n_mire: FastNoiseLite
+var _n_dune: FastNoiseLite
+var _n_dune_warp: FastNoiseLite
+var _n_dune_crest: FastNoiseLite
+var _dune_wind := Vector2.RIGHT                      ## куда дует ветер (одно направление на забег)
+var _last_field := 0.0                               ## маска дюн в последнем вызове _height (горячий путь генерации)
+var _last_dune := 0.0                                ## доля высоты гряд там же (0 — гряд нет)
 
 var _pads: Dictionary[Vector2i, Vector3i] = {}       ## блок → (центр x, центр z, ярус), кэш
 var _nests: Dictionary[Vector2i, Vector2i] = {}      ## блок → тайл гнезда (или NO_NEST), кэш
@@ -58,10 +66,12 @@ class GenJob:
 	extends RefCounted
 	var data: ChunkData
 	var ext := PackedInt32Array()       ## высоты вершин окна с запасом в одну вершину (EXT × EXT)
+	var ext_dune := PackedByteArray()   ## вершина в дюнном поле: 1 — в маске, 2 — и гряды есть (EXT × EXT)
 	var verts := PackedInt32Array()     ## после правки седловин (VERTS × VERTS)
 	var pads: Array[Vector3i] = []      ## площадки рядом с окном — чтобы не искать их на каждый тайл
 	var nests: Array[Vector2i] = []     ## гнёзда рядом с окном
 	var puddles: Array[Vector4] = []    ## лужи рядом с окном
+	var dunes := PackedByteArray()      ## тайлы окна на дюнах (1) — для свойств грунта
 	var pad_blocks: Array[Vector2i] = []      ## что проверить на этапе подготовки
 	var puddle_cells: Array[Vector2i] = []
 	var stage: int = 0
@@ -91,6 +101,11 @@ func _init(run_seed: int, params: TerrainParams) -> void:
 	_n_water_warp = _make_noise(14, 1.0 / 150.0, 1)
 	_n_rough = _make_noise(15, p.rough_freq, 2)
 	_n_mire = _make_noise(16, p.mire_freq, 1)
+	_n_dune = _make_noise(17, p.dune_field_freq, 1)
+	_n_dune_warp = _make_noise(18, p.dune_meander_freq, 1)
+	_n_dune_crest = _make_noise(19, p.dune_crest_freq, 1)
+	# Ветер — одно случайное направление на забег (по seed): гряды лежат под любым углом к кадру.
+	_dune_wind = Vector2.from_angle(DetRng.unit(seed, 0, 0, 611) * TAU)
 
 
 ## Полная генерация за один вызов (тесты, предзагрузка).
@@ -105,11 +120,15 @@ func begin(coord: Vector2i) -> GenJob:
 	var job := GenJob.new()
 	job.data = ChunkData.new(coord)
 	job.ext.resize(EXT * EXT)
+	job.ext_dune.resize(EXT * EXT)
 	job.verts.resize(VERTS * VERTS)
+	job.dunes.resize(Grid.WINDOW * Grid.WINDOW)
 	# Площадки и лужи считаются в step() (этап 0): поиск места под них — десятки проб высоты,
 	# в begin() это ушло бы мимо бюджета кадра.
 	var o := job.data.window_origin()
 	var reach := maxi(p.pad_half + p.pad_clear_r, p.pad_half + 2 + ceili(p.pad_blend))
+	if p.dunes_enabled:
+		reach = maxi(reach, p.pad_half + 2 + ceili(p.pad_blend + p.dune_pad_fade))   # дюны гаснут к площадкам
 	var b0 := Vector2i(floori((o.x - reach) / float(p.pad_block)), floori((o.y - reach) / float(p.pad_block)))
 	var b1 := Vector2i(floori((o.x + Grid.WINDOW + reach) / float(p.pad_block)), floori((o.y + Grid.WINDOW + reach) / float(p.pad_block)))
 	for bz in range(b0.y, b1.y + 1):
@@ -151,8 +170,9 @@ func step(job: GenJob, deadline_usec: int) -> bool:
 		for ex in EXT:
 			var x := float(origin.x + ex - 1)
 			var z := float(origin.y + ez - 1)
-			var h := _blend_pads(job.pads, x, z, height_raw(x, z))
+			var h := _blend_pads(job.pads, x, z, _height(x, z, true, job.pads))
 			job.ext[ez * EXT + ex] = roundi(_carve_puddles(job.puddles, x, z, h))
+			job.ext_dune[ez * EXT + ex] = 2 if _last_dune > 0.0 else (1 if _last_field > 0.0 else 0)
 		job.row += 1
 		if job.row >= EXT:
 			job.stage = 2
@@ -161,7 +181,11 @@ func step(job: GenJob, deadline_usec: int) -> bool:
 			return false
 	while job.stage == 2:
 		for vx in VERTS:
-			job.verts[job.row * VERTS + vx] = _fix_saddle_vertex(job.ext, vx + 1, job.row + 1)
+			var e := (job.row + 1) * EXT + vx + 1
+			var v := _fix_saddle_vertex(job.ext, vx + 1, job.row + 1)
+			if job.ext_dune[e] == 2 and v == job.ext[e]:
+				v = _fix_dune_vertex(job.ext, vx + 1, job.row + 1)
+			job.verts[job.row * VERTS + vx] = v
 		job.row += 1
 		if job.row >= VERTS:
 			job.stage = 3
@@ -179,7 +203,7 @@ func step(job: GenJob, deadline_usec: int) -> bool:
 			return false
 	while job.stage == 4:
 		# Свойства грунта — по соседям, когда всё окно готово; по ряду за шаг (бюджет кадра).
-		_ground_flags_row(job.data, job.row)
+		_ground_flags_row(job.data, job.dunes, job.row)
 		job.row += 1
 		if job.row >= Grid.WINDOW:
 			job.stage = 5
@@ -195,8 +219,9 @@ func step(job: GenJob, deadline_usec: int) -> bool:
 ##   обрывом к воде — не зыбкий);
 ## - неровный: россыпи камней по шуму (на скалах чаще, в лесу и у воды реже) и осыпи у подножия
 ##   обрывов от talus_tiers ярусов.
-## Площадки, гнёзда и вода — без свойств. Соседи — в пределах одного тайла, все есть в окне чанка.
-func _ground_flags_row(data: ChunkData, lz: int) -> void:
+## Площадки, гнёзда и вода — без свойств, дюны — без россыпей (чистый песок). Соседи — в пределах
+## одного тайла, все есть в окне чанка.
+func _ground_flags_row(data: ChunkData, dunes: PackedByteArray, lz: int) -> void:
 	var n := Grid.WINDOW
 	var origin := data.window_origin()
 	for lx in n:
@@ -227,8 +252,8 @@ func _ground_flags_row(data: ChunkData, lz: int) -> void:
 			if shore and _n_mire.get_noise_2d(tx + 0.5, tz + 0.5) > p.mire_threshold:
 				data.flags[i] |= ChunkData.FLAG_MIRE
 				continue
-		if wet:
-			continue                                   # кромку воды россыпью не покрываем
+		if wet or dunes[i] != 0:
+			continue                                   # кромку воды и дюны россыпью не покрываем
 		var talus := false
 		for o: Vector2i in [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)]:
 			var x := lx + o.x
@@ -262,23 +287,38 @@ func height_at(x: float, z: float) -> float:
 	return _carve_puddles(near, x, z, h)
 
 
-## Высота без площадок и луж: (база + горы) → одна ступенчатая функция → − ущелья → дамбы.
+## Высота без площадок и луж: (база + горы) → одна ступенчатая функция → + дюны → − ущелья → дамбы.
 ## Террасы считаются один раз по сумме: если ступенчатыми делать отдельно базу и горы, их ступени
 ## накладываются и превращают горы в лабиринт мелких стенок.
 func height_raw(x: float, z: float) -> float:
+	return _height(x, z, true, null)
+
+
+## То же; dunes = false — без гряд дюн. По такой высоте выбирается место площадки челнока: дюны гаснут
+## к площадкам, поэтому сами площадки от дюн зависеть не могут. pads — площадки рядом (список задачи
+## генерации, горячий путь) или null — тогда они берутся из кэша по блокам.
+func _height(x: float, z: float, dunes: bool, pads: Variant) -> float:
 	var avenue_d := _avenue_distance(x, z)
 	var avenue := 1.0 - _smooth(p.avenue_width, p.avenue_width + p.avenue_fade, avenue_d)
 	var detail := _n_detail.get_noise_2d(x, z)
-	var canyon_raw := _canyon_t(x, z)
+	var canyon_abs := absf(_n_canyon.get_noise_2d(x, z))
+	var canyon_raw := _canyon_of(canyon_abs)
 	# Ущелье мелеет к проезду на длинном участке, чтобы дно выходило наверх склоном, а не стенкой.
 	var canyon := canyon_raw * _smooth(p.avenue_width, p.avenue_width + p.avenue_canyon_fade, avenue_d)
 	var h := p.base_level + _n_coarse.get_noise_2d(x, z) * p.coarse_amp + detail * p.detail_amp
-	# Пологость: зоны пандусов, впадины, проезды, дно ущелий.
+	var n_mountain := _n_mountain.get_noise_2d(x, z)
+	var n_rock := _n_rock.get_noise_2d(x, z)
+	var field := _dune_gate(x, z)
+	if field > 0.0:
+		field = _dune_mask(field, x, z, h, n_mountain, canyon_abs, n_rock)
+	var relief := 0.0
+	# Пологость: зоны пандусов, впадины, проезды, дно ущелий, дюнные поля.
 	var gentle := maxf(maxf(_ramp_zone(x, z), _smooth(-0.02, -0.25, detail)), maxf(avenue, _smooth(0.0, 0.3, canyon)))
+	gentle = maxf(gentle, field)
 	var plateau := _smooth(-0.05, 0.25, _n_plateau.get_noise_2d(x, z))
 	var step_h := lerpf(p.terrace_low, p.terrace_high, plateau)
-	var mountain := _mountain_mask(x, z) * (1.0 - avenue)
-	var rocky := _rockiness(mountain, canyon_raw, x, z) * (1.0 - avenue)
+	var mountain := _smooth(p.mountain_threshold, p.mountain_threshold + 0.2, n_mountain) * (1.0 - avenue)
+	var rocky := _rocky_of(mountain, canyon_raw, n_rock) * (1.0 - avenue)
 
 	if mountain > 0.0:
 		var ridge := 1.0 - absf(_n_ridge.get_noise_2d(x, z))
@@ -289,6 +329,13 @@ func height_raw(x: float, z: float) -> float:
 	# Резкие ступени (обрывы) — на скалах; на грунте подъём между полками пологий.
 	var w := lerpf(lerpf(p.step_soil_w, p.step_sharp_w, rocky), p.step_gentle_w, gentle)
 	h = _terrace(h, step_h, w)
+	# Дюны — поверх полок без ступеней (в поле ступени сглажены по маске); ущелий, гор и воды в поле нет.
+	if dunes and field > 0.0:
+		relief = field * (_pad_clearance(x, z) if pads == null else _pad_clearance_in(pads, x, z))
+		if relief > 0.0:
+			h += relief * _dune_relief(x, z)
+	_last_field = field     # после _pad_clearance: она может вызвать _height для площадок
+	_last_dune = relief
 
 	if canyon > 0.0:
 		# Края резкие, кроме зон пандусов: там стенка ущелья становится склоном.
@@ -343,11 +390,11 @@ func pad_of_block(block: Vector2i) -> Vector3i:
 	for i in 12:
 		var cx := block.x * p.pad_block + margin + DetRng.hash4(seed, block.x, block.y, 100 + i) % span
 		var cz := block.y * p.pad_block + margin + DetRng.hash4(seed, block.x, block.y, 200 + i) % span
-		var h := height_raw(cx + 0.5, cz + 0.5)
+		var h := _height(cx + 0.5, cz + 0.5, false, null)
 		var lo := h
 		var hi := h
 		for o: Vector2i in [Vector2i(-4, -4), Vector2i(4, -4), Vector2i(-4, 4), Vector2i(4, 4)]:
-			var s := height_raw(cx + 0.5 + o.x, cz + 0.5 + o.y)
+			var s := _height(cx + 0.5 + o.x, cz + 0.5 + o.y, false, null)
 			lo = minf(lo, s)
 			hi = maxf(hi, s)
 		var water := _region_level(_water_region_of(cx + 0.5, cz + 0.5))
@@ -356,6 +403,7 @@ func pad_of_block(block: Vector2i) -> Vector3i:
 		var score := hi - lo
 		if _mountain_mask(cx + 0.5, cz + 0.5) > 0.05:
 			score += 20.0
+		score += p.dune_pad_penalty * dune_field(cx + 0.5, cz + 0.5)   # посреди дюн — только если больше негде
 		if score < best_score:
 			best_score = score
 			best = Vector3i(cx, cz, maxi(roundi(h), water + 1))
@@ -470,6 +518,37 @@ func _fix_saddle_vertex(ext: PackedInt32Array, ex: int, ez: int) -> int:
 	return v + 1
 
 
+## Вершина на грядах дюн: если у одного из четырёх её тайлов разброс углов ≥ 2 (гряда круче яруса на
+## тайл — бывает на краю поля, где сходятся склон гряды, край маски и уклон базы), вершина сдвигается
+## на ярус, когда это выравнивает все четыре тайла. Иначе тайл уплощился бы в стенку посреди дюн.
+## Как и у седловин, решение — по вершинам на расстоянии 1 (одинаково во всех окнах).
+func _fix_dune_vertex(ext: PackedInt32Array, ex: int, ez: int) -> int:
+	var v := ext[ez * EXT + ex]
+	if _vertex_tiles_ok(ext, ex, ez, v):
+		return v
+	if _vertex_tiles_ok(ext, ex, ez, v - 1):
+		return v - 1
+	if _vertex_tiles_ok(ext, ex, ez, v + 1):
+		return v + 1
+	return v
+
+
+## Разброс углов ≤ 1 у всех четырёх тайлов вокруг вершины (ex, ez), если её высота — v. Соседи по
+## ребру входят в два тайла, по диагонали — в один: тайл — вершина, два соседа по рёбрам и диагональ.
+func _vertex_tiles_ok(ext: PackedInt32Array, ex: int, ez: int, v: int) -> bool:
+	var c := ez * EXT + ex
+	var w := ext[c - 1]
+	var e := ext[c + 1]
+	var n := ext[c - EXT]
+	var s := ext[c + EXT]
+	return _range_ok(v, w, n, ext[c - EXT - 1]) and _range_ok(v, e, n, ext[c - EXT + 1]) \
+			and _range_ok(v, e, s, ext[c + EXT + 1]) and _range_ok(v, w, s, ext[c + EXT - 1])
+
+
+static func _range_ok(a: int, b: int, c: int, d: int) -> bool:
+	return maxi(maxi(a, b), maxi(c, d)) - mini(mini(a, b), mini(c, d)) <= 1
+
+
 func _build_tile(job: GenJob, lx: int, lz: int, origin: Vector2i) -> void:
 	var data := job.data
 	var i := lz * Grid.WINDOW + lx
@@ -490,10 +569,18 @@ func _build_tile(job: GenJob, lx: int, lz: int, origin: Vector2i) -> void:
 	var mountain := _mountain_mask(cx, cz)
 	var rocky := _rockiness(mountain, canyon_raw, cx, cz) * (1.0 - _avenue(cx, cz))
 	var biome := _biome(cx, cz, lo, water, canyon_raw, mountain)
+	# Дюнное поле (все углы тайла в нём) — посреди пустыни: песок без уступов и россыпей (кристаллы
+	# занесены песком).
+	var e := (lz + 1) * EXT + lx + 1
+	var dune := job.ext_dune[e] != 0 and job.ext_dune[e + 1] != 0 and job.ext_dune[e + EXT] != 0 \
+			and job.ext_dune[e + EXT + 1] != 0
+	if dune:
+		biome = ChunkData.Biome.CRATERS
+	job.dunes[i] = 1 if dune else 0
 
 	# Крутой тайл уплощается до минимума — на его высоких рёбрах появляются стенки.
 	# Тайл с разбросом 1 иногда тоже уплощается — уступ (на скалах часто, на грунте редко).
-	if hi - lo >= 2 or (hi - lo == 1 and not is_pad and _is_ledge(cx, cz, rocky)):
+	if hi - lo >= 2 or (hi - lo == 1 and not is_pad and not dune and _is_ledge(cx, cz, rocky)):
 		c0 = lo
 		c1 = lo
 		c2 = lo
@@ -503,7 +590,7 @@ func _build_tile(job: GenJob, lx: int, lz: int, origin: Vector2i) -> void:
 	data.set_corner(i, 2, c2)
 	data.set_corner(i, 3, c3)
 	data.biome[i] = biome
-	data.material[i] = _material(tx, tz, biome, lo, water, rocky)
+	data.material[i] = ChunkData.Mat.SAND if dune else _material(tx, tz, biome, lo, water, rocky)
 	data.water_level[i] = water + Grid.HEIGHT_OFFSET if water > lo else 0
 	data.flags[i] = ChunkData.FLAG_PAD if is_pad else 0
 	var nest_d := _nest_distance(job.nests, tx, tz)
@@ -591,8 +678,100 @@ func _tree_density(biome: int) -> float:
 
 ## Скалистость 0..1: горы, края и дно ущелий, отдельные выходы скал.
 func _rockiness(mountain: float, canyon_raw: float, x: float, z: float) -> float:
-	var outcrop := _smooth(p.rock_threshold, p.rock_threshold + 0.15, _n_rock.get_noise_2d(x, z))
+	return _rocky_of(mountain, canyon_raw, _n_rock.get_noise_2d(x, z))
+
+
+func _rocky_of(mountain: float, canyon_raw: float, n_rock: float) -> float:
+	var outcrop := _smooth(p.rock_threshold, p.rock_threshold + 0.15, n_rock)
 	return maxf(maxf(mountain, _smooth(0.0, 0.15, canyon_raw)), outcrop)
+
+
+## Маска дюнного поля 0..1 (GDD §3.4): середина пустыни (кратерного биома), если эту пустыню выбрал
+## низкочастотный шум, вдали от скал, гор, ущелий и воды. 0 — дюн нет. Площадки челнока маска
+## не учитывает (от неё зависит выбор их места) — к ним гаснет только высота гряд (dune_height).
+func dune_field(x: float, z: float) -> float:
+	var m := _dune_gate(x, z)
+	if m <= 0.0:
+		return 0.0
+	var h := p.base_level + _n_coarse.get_noise_2d(x, z) * p.coarse_amp + _n_detail.get_noise_2d(x, z) * p.detail_amp
+	return _dune_mask(m, x, z, h, _n_mountain.get_noise_2d(x, z), absf(_n_canyon.get_noise_2d(x, z)),
+			_n_rock.get_noise_2d(x, z))
+
+
+## Тайл в дюнном поле: все четыре угла в маске (так же решает генерация чанка).
+func dune_tile(tx: int, tz: int) -> bool:
+	return dune_field(tx, tz) > 0.0 and dune_field(tx + 1, tz) > 0.0 and dune_field(tx + 1, tz + 1) > 0.0 \
+			and dune_field(tx, tz + 1) > 0.0
+
+
+## Высота гряд дюн в точке, ярусы (то, что дюны добавляют к рельефу; 0 — дюн нет).
+func dune_height(x: float, z: float) -> float:
+	var m := dune_field(x, z)
+	return m * _pad_clearance(x, z) * _dune_relief(x, z) if m > 0.0 else 0.0
+
+
+## Дешёвая часть маски (почти везде дальше не считается): середина пустыни × шум выбора поля.
+func _dune_gate(x: float, z: float) -> float:
+	if not p.dunes_enabled:
+		return 0.0
+	var core := _smooth(p.crater_threshold + p.dune_core_from, p.crater_threshold + p.dune_core_to,
+			_n_crater.get_noise_2d(x, z))
+	if core <= 0.0:
+		return 0.0
+	return core * _smooth(p.dune_field_threshold, p.dune_field_threshold + p.dune_field_fade, _n_dune.get_noise_2d(x, z))
+
+
+## Остальная маска: где она > 0, там нет ни гор, ни ущелья, ни выходов скал, ни леса, а рельеф (h — база
+## до ступеней) выше самой высокой воды областей.
+func _dune_mask(gate: float, x: float, z: float, h: float, n_mountain: float, canyon_abs: float, n_rock: float) -> float:
+	var wet := p.water_level + p.water_spread
+	var m := gate * _smooth(wet + 1.5, wet + 4.0, h) \
+			* _smooth(p.mountain_threshold, p.mountain_threshold - 0.15, n_mountain) \
+			* _smooth(p.rock_threshold, p.rock_threshold - 0.15, n_rock) \
+			* _smooth(p.canyon_width + 0.01, p.canyon_width + 0.2, canyon_abs)
+	if m <= 0.0:
+		return 0.0
+	return m * _smooth(p.forest_threshold, p.forest_threshold - 0.25, _n_forest.get_noise_2d(x, z))
+
+
+## Профиль гряд, ярусы (0..dune_height): поперёк ветра пологий наветренный склон до гребня, за ним
+## круче — подветренный. Гряды изгибает шум, высота меняется вдоль гребня (низкие гряды при округлении
+## до яруса рвутся на отрезки).
+func _dune_relief(x: float, z: float) -> float:
+	var s := x * _dune_wind.x + z * _dune_wind.y + _n_dune_warp.get_noise_2d(x, z) * p.dune_meander
+	var t := fposmod(s / p.dune_spacing, 1.0)
+	var crest := 1.0 - p.dune_lee
+	var shape := t / crest if t < crest else (1.0 - t) / p.dune_lee
+	var tall := lerpf(0.4, 1.0, _smooth(-0.35, 0.35, _n_dune_crest.get_noise_2d(x, z)))
+	return p.dune_height * tall * shape
+
+
+## Дюны гаснут к площадкам челнока: 0 — на площадке и в её пологом кольце, 1 — дальше dune_pad_fade
+## за кольцом. Площадки выбираются без дюн (_height(…, false, …)), поэтому рекурсии нет.
+func _pad_clearance(x: float, z: float) -> float:
+	var reach := p.pad_half + 1 + p.pad_blend + p.dune_pad_fade
+	var d := INF
+	for bz in range(floori((z - reach) / p.pad_block), floori((z + reach) / p.pad_block) + 1):
+		for bx in range(floori((x - reach) / p.pad_block), floori((x + reach) / p.pad_block) + 1):
+			var pad := pad_of_block(Vector2i(bx, bz))
+			if pad.z != NO_PAD:
+				d = minf(d, _pad_rect_distance(pad, x, z))
+	return _smooth(p.pad_blend, p.pad_blend + p.dune_pad_fade, d)
+
+
+## То же по заранее найденному списку площадок окна (горячий путь генерации).
+func _pad_clearance_in(pads: Array[Vector3i], x: float, z: float) -> float:
+	var d := INF
+	for pad in pads:
+		d = minf(d, _pad_rect_distance(pad, x, z))
+	return _smooth(p.pad_blend, p.pad_blend + p.dune_pad_fade, d)
+
+
+## Чебышёвское расстояние от точки (в координатах вершин) до прямоугольника площадки; 0 — внутри.
+func _pad_rect_distance(pad: Vector3i, x: float, z: float) -> float:
+	var dx := maxf(maxf(pad.x - p.pad_half - x, x - (pad.x + p.pad_half + 1)), 0.0)
+	var dz := maxf(maxf(pad.y - p.pad_half - z, z - (pad.y + p.pad_half + 1)), 0.0)
+	return maxf(dx, dz)
 
 
 ## Зона пандусов: 1 — переходы пологие, 0 — резкие.
@@ -619,8 +798,12 @@ func _mountain_mask(x: float, z: float) -> float:
 
 ## Положение в полосе ущелья: 0 — вне или на краю, 1 — по центру.
 func _canyon_t(x: float, z: float) -> float:
-	var c := absf(_n_canyon.get_noise_2d(x, z))
-	return 0.0 if c >= p.canyon_width else 1.0 - c / p.canyon_width
+	return _canyon_of(absf(_n_canyon.get_noise_2d(x, z)))
+
+
+## То же по модулю шума ущелий.
+func _canyon_of(canyon_abs: float) -> float:
+	return 0.0 if canyon_abs >= p.canyon_width else 1.0 - canyon_abs / p.canyon_width
 
 
 ## Координаты точки в искривлённой решётке водных областей.
@@ -661,14 +844,16 @@ func _apply_dams(x: float, z: float, h: float) -> float:
 
 
 ## Место под лужу: ровная полка (все пробы в кольцах вокруг на одном ярусе), выше воды области,
-## не у площадки челнока и не на скалах.
+## не у площадки челнока, не на скалах и не в дюнном поле.
 func _puddle_site_ok(cx: float, cz: float, r: float) -> bool:
 	var shelf := height_at_no_puddles(cx, cz)
 	var level := roundf(shelf)
 	if absf(shelf - level) > 0.2 or level <= _region_level(_water_region_of(cx, cz)) + 1:
 		return false
-	if _rockiness(_mountain_mask(cx, cz), _canyon_t(cx, cz), cx, cz) > 0.3:
+	if _rockiness(_mountain_mask(cx, cz), _canyon_t(cx, cz), cx, cz) > 0.3 or dune_field(cx, cz) > 0.0:
 		return false
+	if pad_near_tile(floori(cx), floori(cz), ceili(r) + 2) != null:
+		return false   # ровная площадка — тоже полка, но чаша на ней утопила бы её край
 	for ring in [r, r + 1.0, r + 2.0]:
 		for k in 12:
 			var a := TAU * k / 12.0

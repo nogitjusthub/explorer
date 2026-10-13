@@ -5,9 +5,10 @@ extends RefCounted
 ## силуэтом сквозь препятствия следующим проходом — как STENCIL_MODE_XRAY у StandardMaterial3D; челноки и
 ## капсула десанта — body_faces.gdshader, без stencil. Цвет у таких материалов — параметр шейдера: менять
 ## через set_color (годится и для StandardMaterial3D). Обшивка (PLATES) — по граням: меш размечен
-## MeshKit.face_mapped (map_faces), на гранях — детали (Detail, до двух на грань).
+## MeshKit.face_mapped (map_faces), на гранях — детали (Detail, до двух на грань). Цвет может быть и в
+## вершинах меша (tinted: несколько цветов детали — один материал).
 
-enum Pattern { NONE, PLATES, TRACK, SKIRT, SCUTES, HIDE, GROOVES, SCALES, MUD, PEBBLE }
+enum Pattern { NONE, PLATES, TRACK, SKIRT, SCUTES, HIDE, GROOVES, SCALES, MUD, PEBBLE, CHITIN }
 enum Detail { NONE, DOOR, HATCH, VENT }   ## дверь, крышка люка, решётка моторного отсека
 
 const SHADER := preload("res://src/render/shaders/body.gdshader")
@@ -20,6 +21,16 @@ static func make(color: Color, pattern: Pattern, px: float, roughness: float = 0
 	var m := ShaderMaterial.new()
 	m.shader = SHADER
 	_setup(m, color, pattern, px, roughness, metallic)
+	return m
+
+
+## Деталь фауны, цвет которой — в вершинах меша (sRGB, SurfaceTool.set_color): тот же шейдер, что у make, —
+## вариант шейдера не новый. specular — как metallic_specular у StandardMaterial3D.
+static func tinted(pattern: Pattern, px: float, roughness: float = 0.8, metallic: float = 0.0,
+		specular: float = 0.5) -> ShaderMaterial:
+	var m := make(Color.WHITE, pattern, px, roughness, metallic)
+	m.set_shader_parameter(&"vertex_tint", true)
+	m.set_shader_parameter(&"specular", specular)
 	return m
 
 

@@ -225,10 +225,12 @@ func _worm() -> Node3D:
 	return w
 
 
+## Звери под тараном — с белым наложением мигания (RamBody) поверх материалов; облачко гибели летит.
 func _hoppers() -> Node3D:
 	var h := _creature(HopperPack.new()) as HopperPack
 	add_child(h)
 	h.setup(_at2(), rules.pack_max)
+	h.preview_flash()
 	return h
 
 
@@ -236,6 +238,7 @@ func _shellback() -> Node3D:
 	var s := _creature(Shellback.new()) as Shellback
 	add_child(s)
 	s.setup(_at2())
+	s.preview_flash()
 	return s
 
 
@@ -243,6 +246,7 @@ func _shark() -> Node3D:
 	var s := _creature(MireShark.new()) as MireShark
 	add_child(s)
 	s.setup(_at2())
+	s.preview_flash()
 	return s
 
 

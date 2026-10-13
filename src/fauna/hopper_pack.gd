@@ -7,7 +7,9 @@ extends Creature
 ## крик, и стая
 ## гонится (hopper_speed — быстрее танка, медленнее ровера) по общему полю путей вида HOPPER. Догнали —
 ## встают рядом с машиной, и передний бросается вперёд и кусает (раз в hopper_bite_cd_s); машину
-## укусы не двигают — только раскачивают корпус. Танк на ходу расшвыривает стаю. Не подобраться к машине
+## укусы не двигают — только раскачивают корпус. Кусают только на одном с машиной уровне (Creature.same_level):
+## машина под скалой или на ней — стая обходит уступ по полю путей, а обхода нет — ждёт у края.
+## Танк на ходу расшвыривает стаю. Не подобраться к машине
 ## fauna_give_up_s (или погоня дольше hopper_chase_s / дальше hopper_chase_dist) — стая уходит и пропадает.
 ## Разбуженная шумным событием (посадка челнока) стая сначала бежит к нему — это ещё не погоня, её пределы
 ## не тратятся; заметила машину — погоня с этого места. Добежала, а машины не видно — ждёт, пока слышен
@@ -18,6 +20,9 @@ extends Creature
 ## только две красные искры, в пасти — костяные зубы, изнутри она алая. На ходу бегут (ноги враз, корпус
 ## покачивается, хвост — в противофазе), стоя озираются, склоняют голову, переступают, дёргают хвостом;
 ## заметив машину — встают на дыбы с разинутой пастью (крик), передний кусает броском.
+## Таран: каждая особь — своё тело (RamBody), машина на скорости валки деревьев убивает её ram_hits_hopper
+## ударами — убитая замирает, мигает и пропадает облачком, уцелевшие пригибаются (оглушены), кусает первая
+## живая в строю; убиты все — стаи нет.
 
 enum State { IDLE, ALERT, CHASE, RETREAT }
 
@@ -53,6 +58,8 @@ const STUN_S := 1.0
 const PATROL_PAUSE_MIN_S := 1.0          ## на точке патруля стая стоит столько…
 const PATROL_PAUSE_MAX_S := 2.5          ## …до стольких секунд
 const PATROL_STUCK_S := 1.0              ## не продвинулась столько — точка недоступна, берёт следующую
+const RAM_R := 0.2                       ## радиус тела особи под тараном машины
+const PUFF_COLOR := Color(0.42, 0.39, 0.55)   ## облачко гибели — светлее хитина
 ## Места в строю (x, z) относительно центра стаи; перед — по −z, первый — передний (он и кусает).
 const FORMATION: Array[Vector2] = [Vector2(0, -0.2), Vector2(-0.17, 0.07), Vector2(0.17, 0.07), Vector2(0, 0.28)]
 
@@ -62,7 +69,8 @@ var source: Variant = null               ## шумное событие, к ко
 var _to_source := false                  ## бежит на шум: погоня (и её пределы) — с момента, когда заметит машину
 var _spent: Variant = null               ## шум, на который уже бегала и осталась, — на него больше не просыпается
 
-## Особи: узлы модели (node, body, head, jaw, throat, tail, tail2, arms, thighs, shins, feet) и состояние
+## Особи: узлы модели (node, body, head, jaw, throat, tail, tail2, arms, thighs, shins, feet), тело под
+## тараном (ram) и состояние
 ## анимации (phase — фаза шага, clock, idle — до новой повадки, look/look_to — голова: поворот, наклон,
 ## склон набок; yaw/yaw_to — разворот корпуса, crouch/crouch_t — присед, rear — дыбы, jaw_open — пасть,
 ## step — переступает, twitch — хвост, react — запаздывание крика).
@@ -96,6 +104,7 @@ func setup(at: Vector2, count: int) -> void:
 	for i in clampi(count, 1, FORMATION.size()):
 		var m := _build_model()
 		add_child(m["node"])
+		m["ram"] = add_body(rules.ram_hits_hopper, RAM_R, m["node"], PUFF_COLOR)
 		_members.append(m)
 	_place_all(0.0)
 	for m in _members:
@@ -117,6 +126,9 @@ func wake(toward: Variant = null) -> void:
 
 
 func step(dt: float) -> void:
+	tick_bodies(dt)
+	if dead:
+		return
 	_cd = maxf(_cd - dt, 0.0)
 	_lunge = maxf(_lunge - dt, 0.0)
 	_stun = maxf(_stun - dt, 0.0)
@@ -217,9 +229,12 @@ func _chase(dt: float) -> void:
 		if _to_source or state != State.CHASE:
 			return
 	_chase_t += dt
+	# Вблизи и на одном уровне — прямо к машине; машина за уступом (под скалой или на ней) — в обход по полю
+	# путей, а обхода нет — стоит у края, глядя на неё, пока не потеряет интерес.
+	var level := d <= 2.0 and Creature.same_level(query, pos, vp)
 	if _stun <= 0.0:
 		var goal: Vector2
-		if d > 2.0:
+		if not level:
 			var field: FlowField = director.call(&"field", FlowField.Mode.HOPPER)
 			var t := Grid.tile_of_world(pos.x, pos.y)
 			var next := field.next_tile(query, t) if field != null else t
@@ -227,10 +242,10 @@ func _chase(dt: float) -> void:
 		else:
 			goal = vp + (pos - vp).normalized() * STANDOFF
 		_move_pack(goal, rules.hopper_speed, dt)
-		if d < 2.0:
+		if d < 2.0 and (level or not _moving):
 			_face(vp - pos)                      # вблизи — передним к машине
 	_tank_bump(vp)
-	var reach := d <= REACH and not vehicle.state.falling and not vehicle.state.drowning
+	var reach := d <= REACH and level and not vehicle.state.falling and not vehicle.state.drowning
 	if reach and _cd <= 0.0 and _stun <= 0.0:
 		_bite(vp)
 	if lost_interest(dt, d, reach) or _chase_t > rules.hopper_chase_s \
@@ -247,9 +262,10 @@ func _bite(vp: Vector2) -> void:
 	vehicle.rock(Vehicle.ROCK_BITE, (vp - pos).normalized())
 
 
-## Танк на ходу расшвыривает стаю массой.
+## Танк на ходу расшвыривает стаю массой — только на одном с ней уровне (не через уступ).
 func _tank_bump(vp: Vector2) -> void:
-	if vehicle.cls.mass < 2.0 or vehicle.state.vel.length() < 1.5 or pos.distance_to(vp) > 0.7:
+	if vehicle.cls.mass < 2.0 or vehicle.state.vel.length() < 1.5 or pos.distance_to(vp) > 0.7 \
+			or not Creature.same_level(query, pos, vp):
 		return
 	var away := (pos - vp).normalized() if pos.distance_to(vp) > 0.01 else Vector2.RIGHT
 	pos = Creature.move_on_grid(query, FlowField.Mode.HOPPER, pos, pos + away * 1.6)
@@ -271,8 +287,22 @@ func _face(dir: Vector2) -> void:
 		_heading = dir.normalized()
 
 
+## Таран убил особь (или ударил, если ram_hits_hopper > 1): уцелевшие пригибаются, оглушённые.
+func _on_rammed(_b: RamBody, _dir: Vector2, _killed: bool) -> void:
+	_stun = STUN_S
+
+
+## Передний в строю — первый живой: он и бросается в укусе.
+func _front() -> int:
+	for i in _members.size():
+		if (_members[i]["ram"] as RamBody).alive():
+			return i
+	return -1
+
+
 ## Строй вокруг центра стаи, развёрнутый по курсу; каждой особи — своя поза (_pose): на ходу бегут, стоя
-## озираются, при крике встают на дыбы; передний при укусе бросается вперёд.
+## озираются, при крике встают на дыбы; передний при укусе бросается вперёд. Убитая тараном особь замирает,
+## где её настигло (мигает и пропадает — RamBody).
 func _place_all(dt: float) -> void:
 	var yaw := atan2(-_heading.x, -_heading.y)
 	var spd := 0.0
@@ -283,22 +313,29 @@ func _place_all(dt: float) -> void:
 	var go := clampf(_speed / 0.5, 0.0, 1.0)             # 0 — стоит, 1 — на ходу
 	var run := clampf((_speed - rules.hopper_wander_speed) / (rules.hopper_speed - rules.hopper_wander_speed),
 			0.0, 1.0)                                      # 0 — шаг патруля, 1 — бег погони
+	var front := _front()
 	for i in _members.size():
 		var m := _members[i]
+		var body: RamBody = m["ram"]
+		if not body.alive():
+			continue
 		var off: Vector2 = FORMATION[i] * SIZE * 1.15      # строй раздвинут соразмерно росту
 		var local := Vector3(off.x, 0, off.y).rotated(Vector3.UP, yaw)
 		var p := pos + Vector2(local.x, local.z)
 		var bite := 0.0
 		var snap := false
-		if i == 0 and _lunge > 0.0:
+		if i == front and _lunge > 0.0:
 			var k := 1.0 - _lunge / LUNGE_S
 			bite = sin(k * PI)
 			snap = k > 0.6                                 # к концу броска пасть захлопывается
 			p += _heading * bite * LUNGE_LEN
 		var lift := _pose(m, dt, go, run, bite, snap)
 		var node: Node3D = m["node"]
-		node.position = Vector3(p.x, ground_y(p) + lift, p.y)
+		var gy := ground_y(p)
+		node.position = Vector3(p.x, gy + lift, p.y)
 		node.rotation.y = yaw + m["yaw"]
+		body.pos = p
+		body.y = gy
 
 
 ## Поза особи за кадр: походка, повадки на месте, крик, бросок. Возвращает подъём над землёй (прыжок).
@@ -467,14 +504,11 @@ func _part(parent: Node3D, mesh: StringName, at: Vector3, shadow: bool = false) 
 
 
 ## Меши особи — раз на стаю. Каждая часть — в осях своего шарнира, из плоскогранных труб; цвет — в
-## вершинах (хитин, кромка, кость — один материал), у глаз и пасти — свои материалы.
+## вершинах (хитин, кромка, кость — один материал с пиксельным узором хитина, пиксель — пиксель мира с
+## поправкой на SIZE), у глаз и пасти — свои материалы.
 func _build_kit() -> void:
-	var skin := StandardMaterial3D.new()
-	skin.vertex_color_use_as_albedo = true
-	skin.vertex_color_is_srgb = true
-	skin.roughness = 0.6                 # хитин с мягким отливом: блик неширокий и неяркий
-	skin.metallic = 0.3
-	skin.metallic_specular = 0.35
+	# Хитин с мягким отливом: блик неширокий и неяркий.
+	var skin := BodyMaterial.tinted(BodyMaterial.Pattern.CHITIN, Grid.ART_PX / SIZE, 0.6, 0.3, 0.35)
 	var eye := StandardMaterial3D.new()
 	eye.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	eye.albedo_color = EYE_COLOR

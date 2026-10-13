@@ -93,9 +93,12 @@ func _on_drop_landed(_at: Vector3) -> void:
 
 
 ## Фауна: крик стаи скакунов, гул червя под песком и раскат его броска, мычание и топот панцирника,
-## бульканье и шлепок прыжка илозуба, гул и удар Нессы, треск разряда троеглазки.
+## бульканье и шлепок прыжка илозуба, гул и удар Нессы, треск разряда троеглазки; таран зверя машиной —
+## глухой удар.
 func _on_fauna_alerted(kind: StringName, at: Vector3) -> void:
 	match kind:
+		&"rammed":
+			_play_at(_sfx(&"hit"), at, -2.0, 0.7, FAUNA_HEAR_TILES)
 		&"hopper":
 			_play_at(_sfx(&"screech"), at, -6.0, 0.9 + 0.2 * fmod(absf(at.x * 0.13), 1.0), FAUNA_HEAR_TILES)
 		&"worm":
@@ -135,7 +138,7 @@ func _on_shuttle_sound(event: StringName, at: Vector3, small: bool, seconds: flo
 		&"ascend":
 			_play_at(_sfx(&"thrust"), at, volume, pitch, SHUTTLE_HEAR_TILES)
 		&"tractor":
-			_play_at(_sfx(&"tractor"), at, volume - 9.0, 1.0, SHUTTLE_HEAR_TILES)
+			_play_at(_sfx(&"tractor"), at, volume - 15.0, 1.0, SHUTTLE_HEAR_TILES)
 
 
 ## Подбор: кристалл — «дзынь», остальной груз — то же ниже, топливо и ремкомплект — ещё ниже.

@@ -77,6 +77,25 @@ extends Resource
 @export var mineral_freq: float = 1.0 / 30.0
 @export var crystal_threshold: float = 0.5
 
+@export_group("Dunes")
+## Дюнные поля посреди части пустынь (кратерный биом): поперечные гряды поперёк ветра (один на забег),
+## слегка извилистые. Гряды — из пологих склонов в ярус, без стенок и уступов; поле гаснет к краям
+## пустыни, к лесу, скалам, горам, ущельям, воде и площадкам челнока.
+@export var dunes_enabled: bool = true
+@export var dune_field_freq: float = 1.0 / 300.0    ## шум выбора: в какой пустыне поле, в какой нет
+@export var dune_field_threshold: float = 0.0       ## выше порога — поле (примерно каждая вторая пустыня)
+@export var dune_field_fade: float = 0.15           ## ширина края поля в единицах шума выбора
+@export var dune_core_from: float = 0.03            ## поле начинается глубже края пустыни: порог кратеров + …
+@export var dune_core_to: float = 0.18              ## … и набирает полную высоту к этому
+@export var dune_spacing: float = 10.0              ## шаг гряд, тайлов
+@export var dune_height: float = 2.2                ## высота гребня, ярусов (до округления)
+@export var dune_lee: float = 0.45                  ## доля шага под подветренный (более крутой) склон
+@export var dune_meander: float = 4.0               ## изгиб гряд, тайлов
+@export var dune_meander_freq: float = 1.0 / 80.0
+@export var dune_crest_freq: float = 1.0 / 30.0     ## высота меняется вдоль гребня — гряды рвутся
+@export var dune_pad_fade: float = 10.0             ## за кольцом площадки дюны набирают высоту за столько тайлов
+@export var dune_pad_penalty: float = 6.0           ## площадка челнока избегает дюн (штраф к оценке места)
+
 @export_group("Ground")
 @export var rough_freq: float = 1.0 / 11.0        ## пятна неровного грунта (россыпи камней)
 @export var rough_threshold: float = 0.42         ## выше — неровный; на скалах порог ниже, у воды и в лесу — выше

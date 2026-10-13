@@ -1,20 +1,27 @@
 class_name MireShark
 extends Creature
-## Илозуб (GDD §5.6, береговой засадчик) — хищный илистый прыгун. Живёт в зыбучем грунте и в воде рядом
-## с ним (habitat) и плавает только по нему. Облик: тело в тон мокрого ила (тон берёт от зыбуна, в котором
-## сидит); большая тупая голова-купол с широкой, опущенной углами книзу пастью — костяные зубы на тёмной
-## глотке; на макушке, вплотную, выпученные глаза на стебельках (алые, как у скакунов); тело сужается к
-## простому округлому хвосту; вдоль спины — низкий гребень с торчащими лучами; мускулистые грудные
-## плавники-костыли с веером на конце.
+## Илозуб (GDD §5.6, береговой засадчик) — хищный илистый прыгун. Живёт в зыбучем грунте и в воде у
+## зыбуна — не дальше shark_home_r тайлов от него (habitat) — и плавает только по ним. Своё место — точка
+## появления (_den_spot): от него не уходит дальше shark_chase_r. Облик: тело в тон мокрого ила (тон берёт
+## от зыбуна, в котором сидит); большая тупая голова-купол с широкой, опущенной углами книзу пастью —
+## костяные зубы на тёмной глотке; на макушке, вплотную, выпученные глаза на стебельках (алые, как у
+## скакунов); тело сужается к простому округлому хвосту; вдоль спины — низкий гребень с торчащими лучами;
+## мускулистые грудные плавники-костыли с веером на конце.
 ## Покой: сидит в иле носом кверху — над грунтом торчит только верх головы: купол макушки и два тусклых
-## полуприкрытых глаза; в воде бродит по своему пятну, за макушкой — круги по воде.
+## полуприкрытых глаза; в воде не спеша плавает вокруг своего места (в зыбун не заплывает), за макушкой —
+## круги по воде; место в зыбуне, а он в воде (выбросило прыжком) — плывёт туда и снова в засаду.
 ## В зыбуне — засада: не двигается. Услышал машину — приподнимает глаза-перископы и поворачивается к ней,
 ## но с места не сходит и не бросается, пока она не въедет в зону прыжка; въехала — бросок, даже если
-## подкралась тихо (не слышал). Интерес теряет, только когда машина дальше GIVE_UP_DIST.
-## В воде у зыбуна — охотник: услышал машину — медленно подбирается (shark_speed — танк легко уедет) по
-## ареалу к месту, откуда машина в досягаемости прыжка и стена не мешает (нет такого — к кромке ареала у
-## машины); заплыл в зыбун — снова засада. Макушка, что идёт к машине, — долгий телеграф. Машина ближе
-## shark_lunge_dist + LEAP_SLACK —
+## подкралась тихо (не слышал). Из засады выходит только прыжком. Интерес теряет, когда машина дальше
+## shark_chase_r от его места.
+## В воде — охотник, плывёт как рыба: услышал машину у своего места (не дальше shark_chase_r) — решительно
+## идёт к ней (shark_speed — быстрее танка, медленнее ровера и ховера; разгон, торможение и повороты —
+## плавно, SWIM_ACCEL, напрямик, а не ступеньками по тайлам) водой ареала, не дальше shark_chase_r от
+## места, к точке, откуда машина в досягаемости прыжка и стена не мешает (нет такого — к кромке ареала у
+## машины). Машина ушла дальше shark_chase_r от его места — бросает погоню, CALM_S не слышит машину и
+## возвращается. Машина в зоне прыжка — бросок и без шума. Макушка, что идёт к машине, и брызги с кругами
+## за ней — телеграф. Бросок — только на машину на одном с ним уровне (Creature.same_level): с воды на
+## берег вровень с ней, но не на уступ. Машина ближе shark_lunge_dist + LEAP_SLACK —
 ## замах shark_telegraph_s: выныривает, задирает голову, глаза выскакивают на стебельках и разгораются,
 ## пасть разевается алым, гребень встаёт парусом с алой кромкой, хвост сгибается пружиной. Цель — точка
 ## машины в начале замаха: уехал с места — промах. Прыжок дугой (APEX) на shark_lunge_dist со скоростью
@@ -22,6 +29,9 @@ extends Creature
 ## — укус shark_damage, отскок. Упал на сушу — шлёпается и ковыляет на грудных плавниках, как на костылях,
 ## к ближайшему тайлу ареала, там ныряет; до следующего замаха — RECOVER_S. Не подобраться fauna_give_up_s —
 ## ныряет и CALM_S не слышит машину. Опасен в паре с зыбуном: машина вязнет — илозуб успевает.
+## Таран (RamBody) достаёт его, только когда он над поверхностью: вынырнул в замахе, на суше, в прыжке
+## низко — на высоте корпуса машины; ram_hits_shark ударов — гибель (в прыжке падает наземь, мигает и
+## пропадает облачком ила).
 
 enum State { IDLE, STALK, WINDUP, LEAP, LANDED, CRAWL, DIVE }
 
@@ -36,13 +46,18 @@ const FOAM_COLOR := Color(0.82, 0.92, 0.88)     ## брызги и круги н
 const CLOD_GROUND := Color(0.45, 0.29, 0.23)    ## комья зыбуна на грунте…
 const CLOD_SAND := Color(0.6, 0.5, 0.36)        ## …и на песке
 
-const IDLE_SPEED := 0.7
+const CRUISE_SPEED := 1.3               ## в покое плавает вокруг своего места не спеша
+const CRUISE_PAUSE_MIN_S := 0.4          ## на точке держится столько…
+const CRUISE_PAUSE_MAX_S := 1.2          ## …до стольких секунд
+const RETURN_SPEED := 2.5                ## бросил погоню (унесло прыжком) — плывёт к своему месту
+const SWIM_ACCEL := 9.0                  ## тайл/с² — разгон, торможение и поворот в воде (дугой)
+const LOOK_AHEAD := 6                    ## точек маршрута: к самой дальней видимой — напрямик
 const CRAWL_SPEED := 2.6                 ## рывками на плавниках: в среднем ~2 тайл/с
 const TURN_RATE := 6.0                   ## рад/с
 const LEAP_SLACK := 0.3                  ## замах, когда машина ближе shark_lunge_dist + это
 const BITE_R := 0.7                      ## пролетел так близко от машины — укус
 const APEX := 0.6                        ## высота дуги прыжка над прямой взлёт — посадка
-const MAX_RISE := 0.7                    ## выше этого над взлётом на берег не запрыгнуть
+const MAX_RISE := Grid.TIER_H * 1.08      ## чуть выше яруса: выше этого над взлётом на берег не запрыгнуть
 const HOP_APEX := 0.9                    ## прыжок домой, если не доползти
 const GRAVITY := 20.0
 const MIN_GAP := 1.2                     ## ближе к машине не подплывает (ждёт замаха)
@@ -50,12 +65,13 @@ const LAND_S := 0.4                      ## шлёпнулся на сушу —
 const DIVE_S := 0.5
 const RECOVER_S := 1.5                   ## после прыжка до следующего замаха
 const CALM_S := 10.0                     ## сдался — столько не слышит машину
-const GIVE_UP_DIST := 30.0
 const STUCK_S := 1.0                     ## не ползётся столько — прыгает домой
 const MAX_HOPS := 3                      ## не выбрался столькими прыжками — зарывается и пропадает
 const ROUTE_EVERY_S := 0.4
 const REGION_R := 12                     ## путь по ареалу ищется в этом радиусе тайлов
-const WANDER_R := 4
+const WANDER_R := 4                      ## в покое плавает не дальше этого от своего места
+const HOME_R := 4                        ## ареал по умолчанию: вода не дальше стольких тайлов от зыбуна
+const GROUND_MEMO := 4096                ## тайлов в памяти ареала — больше: забывает и считает заново
 const WATER_DROP := 0.06                 ## зеркало воды ниже яруса (как в ChunkMesher)
 ## Глубина тела под поверхностью (мировые единицы): в покое торчит только макушка с глазами, на охоте —
 ## чуть больше.
@@ -69,6 +85,7 @@ const HEAD_UP := 0.75                    ## рад — голова задран
 const JAW_OPEN := 0.9                    ## рад — челюсть отвисла (в замахе — почти горизонтально)
 const CURL := 0.7                        ## рад — хвост согнут пружиной перед прыжком
 const POSE_RATE := 14.0
+const RAM_R := 0.3                       ## радиус тела под тараном машины
 
 var state := State.IDLE
 var target := Vector2.ZERO               ## точка машины в начале замаха — туда прыжок
@@ -82,10 +99,13 @@ var _route: Array[Vector2i] = []
 var _route_timer := 0.0
 var _aim := Vector2.ZERO                 ## куда плыть после маршрута: к машине или на место для прыжка
 var _moving := false
+var _swim_v := Vector2.ZERO              ## скорость в воде, тайл/с (меняется плавно)
 var _heading := Vector2(0, -1)
 var _yaw := 0.0
 var _dir := Vector2.ZERO                 ## направление прыжка (заперто в начале замаха)
 var _home := Vector2.ZERO                ## откуда прыгнул (ареал)
+var _den := Vector2.INF                  ## своё место — точка появления (_den_spot; INF — ещё не запомнил)
+var _ground: Dictionary[Vector2i, bool] = {}   ## память ареала: тайл → habitat (проверка — скан вокруг)
 var _hops := 0
 var _stuck := 0.0
 var _crawl_to := Vector2.ZERO
@@ -113,6 +133,7 @@ var _glow := 0.0
 var _curl := 0.0
 var _pitch := LURK_PITCH
 var _phase := 0.0
+var _stroke := 0.0                       ## фаза удара хвоста (частота — по ходу)
 var _flop := 0.0
 # Модель.
 var _model: Node3D
@@ -130,8 +151,9 @@ var _throat_mat: StandardMaterial3D
 var _eye_mat: StandardMaterial3D
 var _sail_mat: StandardMaterial3D        ## перепонка гребня
 var _rim_mat: StandardMaterial3D         ## кромка гребня
-var _wake: CPUParticles3D                ## комья из-под макушки
+var _wake: CPUParticles3D                ## комья из-под макушки (в воде — брызги)
 var _ripples: CPUParticles3D             ## расходящиеся круги — след макушки
+var _ripple_mat: ShaderMaterial
 var _splash: CPUParticles3D
 var _mud := MUD_GROUND
 var _clod := CLOD_GROUND
@@ -141,17 +163,48 @@ func _init() -> void:
 	name = "MireShark"
 
 
-## Зыбучий грунт или вода рядом с ним (в соседнем тайле).
-static func habitat(q: TerrainQuery, t: Vector2i) -> bool:
-	if (q.flags(t.x, t.y) & ChunkData.FLAG_MIRE) != 0:
+## Зыбучий грунт или вода (мелкая и глубокая) у зыбуна — не дальше near тайлов от него (rules.shark_home_r).
+## Открытые озёра вдали от зыбуна — не его.
+static func habitat(q: TerrainQuery, t: Vector2i, near: int = HOME_R) -> bool:
+	if mire(q, t):
 		return true
 	if q.water_tier(t.x, t.y) == TerrainQuery.NO_WATER:
 		return false
-	for dz in range(-1, 2):
-		for dx in range(-1, 2):
-			if (q.flags(t.x + dx, t.y + dz) & ChunkData.FLAG_MIRE) != 0:
+	for dz in range(-near, near + 1):
+		for dx in range(-near, near + 1):
+			if mire(q, t + Vector2i(dx, dz)):
 				return true
 	return false
+
+
+## Зыбучий грунт — место засады.
+static func mire(q: TerrainQuery, t: Vector2i) -> bool:
+	return (q.flags(t.x, t.y) & ChunkData.FLAG_MIRE) != 0
+
+
+## Ареал с памятью (проверка воды — скан вокруг тайла, а пути ищутся по сотням тайлов).
+func _habitat(t: Vector2i) -> bool:
+	var known: Variant = _ground.get(t)
+	if known != null:
+		return known
+	if _ground.size() >= GROUND_MEMO:
+		_ground.clear()
+	var ok := habitat(query, t, rules.shark_home_r)
+	_ground[t] = ok
+	return ok
+
+
+## Своё место — точка появления: запоминается при первом ходе (до него илозуб не двигается). В покое — засада
+## на нём или плавание вокруг, погоня — не дальше shark_chase_r от него.
+func _den_spot() -> Vector2:
+	if _den == Vector2.INF:
+		_den = pos
+	return _den
+
+
+## Машина у его места — не дальше shark_chase_r: за ней можно гнаться.
+func _in_reach_of_den(p: Vector2) -> bool:
+	return p.distance_to(_den_spot()) <= rules.shark_chase_r
 
 
 func setup(at: Vector2) -> void:
@@ -160,6 +213,7 @@ func setup(at: Vector2) -> void:
 	_heading = Vector2.from_angle(rng.randf() * TAU)
 	_yaw = atan2(-_heading.x, -_heading.y)
 	_build()
+	add_body(rules.ram_hits_shark, RAM_R, _model, _clod)
 	_tint(1.0)
 	_animate(0.0)
 	_place()
@@ -169,16 +223,22 @@ func setup(at: Vector2) -> void:
 
 ## Сразу охотится (услышал машину; отладка, --event=shark).
 func start_hunt() -> void:
+	_den_spot()
 	aggressive = true
 	_calm = 0.0
 	reset_interest()
 	_route_timer = 0.0
+	_ground.clear()                        # рельеф мог измениться — ареал заново
 	if state == State.IDLE:
 		state = State.STALK
 	EventBus.fauna_alerted.emit(&"shark", Vector3(pos.x, _surface(pos), pos.y))
 
 
 func step(dt: float) -> void:
+	tick_bodies(dt)
+	if dead:
+		_fall_dead(dt)
+		return
 	_time += dt
 	_cooldown = maxf(_cooldown - dt, 0.0)
 	_moving = false
@@ -187,14 +247,16 @@ func step(dt: float) -> void:
 	match state:
 		State.IDLE:
 			_calm = maxf(_calm - dt, 0.0)
-			if _in_mire():
-				# Засада: в зыбуне не шевелится; машина в зоне прыжка — бросок, даже если её не слышно.
-				if _calm <= 0.0 and _cooldown <= 0.0 and _can_leap(vp, d):
-					start_hunt()
-					_windup(vp)
+			# Машина в зоне прыжка — бросок, даже если её не слышно; в зыбуне — засада: не шевелится, в воде —
+			# плавает вокруг своего места. Слышит машину у своего места — охота.
+			if _calm <= 0.0 and _cooldown <= 0.0 and _can_leap(vp, d):
+				start_hunt()
+				_windup(vp)
+			elif _lurks():
+				_swim_v = Vector2.ZERO
 			else:
 				_wander(dt)
-			if state == State.IDLE and _calm <= 0.0 and noise.hears_vehicle(pos):
+			if state == State.IDLE and _calm <= 0.0 and noise.hears_vehicle(pos) and _in_reach_of_den(vp):
 				start_hunt()
 		State.STALK:
 			_stalk(dt, vp, d)
@@ -226,6 +288,7 @@ func step(dt: float) -> void:
 				_route.clear()
 				_route_timer = 0.0
 				_goal = pos
+				_swim_v = Vector2.ZERO
 				state = State.STALK if aggressive else State.IDLE
 	_tint(dt)
 	_animate(dt)
@@ -236,35 +299,65 @@ func step(dt: float) -> void:
 # --- Поведение -----------------------------------------------------------------------------------
 
 
-## Бродит по своему пятну: от точки к точке ареала, подолгу стоит.
+## Покой в воде: плавает вокруг своего места (не дальше WANDER_R, в зыбун не заплывает) от точки к точке, на
+## каждой ненадолго замирает. Унесло дальше (погоня, прыжок) или место — в зыбуне — плывёт туда.
 func _wander(dt: float) -> void:
+	var den := _den_spot()
+	var away := pos.distance_to(den) > WANDER_R + 0.5 or mire(query, Grid.tile_of_world(den.x, den.y))
+	var speed := RETURN_SPEED if away else CRUISE_SPEED
 	if _route.is_empty() and pos.distance_to(_goal) < 0.15:
+		_swim(_goal, speed, dt, true)                    # доплывает до точки без рывка
 		_timer -= dt
 		if _timer <= 0.0:
-			_timer = rng.randf_range(1.0, 3.0)
-			var parent := _region(WANDER_R)
-			var tiles: Array = parent.keys()
-			var t: Vector2i = tiles[rng.randi() % tiles.size()]
-			_route = _path(parent, t)
-			_goal = Vector2(t.x + 0.5, t.y + 0.5) + Vector2(rng.randf_range(-0.3, 0.3), rng.randf_range(-0.3, 0.3))
+			_timer = ROUTE_EVERY_S if away else rng.randf_range(CRUISE_PAUSE_MIN_S, CRUISE_PAUSE_MAX_S)
+			_pick_rest(den, away)
 		return
-	_follow(_goal, IDLE_SPEED, dt)
+	_follow(_goal, speed, dt)
 	if not _moving:
 		_route.clear()
 		_goal = pos
 
 
-## В досягаемости — замах. В зыбуне — засада: на месте, только смотрит на машину; в воде — подбирается к
-## ней по ареалу.
+## Куда плыть в покое: домой (away) — к своему месту по ареалу (не доплыть — к ближайшему к нему тайлу),
+## иначе — на случайный тайл воды не дальше WANDER_R от места. Задаёт маршрут и _goal.
+func _pick_rest(den: Vector2, away: bool) -> void:
+	var parent := _region(REGION_R if away else 2 * WANDER_R)
+	var to := Grid.tile_of_world(den.x, den.y)
+	var goal := den
+	if away and not parent.has(to):
+		var best_d := INF
+		for t: Vector2i in parent:
+			var dd := Vector2(t.x + 0.5, t.y + 0.5).distance_to(den)
+			if dd < best_d:
+				best_d = dd
+				to = t
+		goal = Vector2(to.x + 0.5, to.y + 0.5)
+	elif not away:
+		var tiles: Array[Vector2i] = []
+		for t: Vector2i in parent:
+			if not mire(query, t) and Vector2(t.x + 0.5, t.y + 0.5).distance_to(den) <= WANDER_R:
+				tiles.append(t)
+		if tiles.is_empty():
+			return
+		to = tiles[rng.randi() % tiles.size()]
+		goal = Vector2(to.x + 0.5, to.y + 0.5) + Vector2(rng.randf_range(-0.3, 0.3), rng.randf_range(-0.3, 0.3))
+	_route = _path(parent, to)
+	_goal = goal
+
+
+## В досягаемости — замах. Машина ушла дальше shark_chase_r от его места — бросает погоню. В зыбуне —
+## засада: на месте, только смотрит на машину; в воде — плывёт к ней по ареалу.
 func _stalk(dt: float, vp: Vector2, d: float) -> void:
 	if _cooldown <= 0.0 and _can_leap(vp, d):
 		_windup(vp)
 		return
+	if not _in_reach_of_den(vp):
+		_give_up()
+		return
 	if _in_mire():
 		_route.clear()
+		_swim_v = Vector2.ZERO
 		_face(vp - pos)
-		if d > GIVE_UP_DIST:
-			_give_up()
 		return
 	_route_timer -= dt
 	if _route_timer <= 0.0:
@@ -273,16 +366,18 @@ func _stalk(dt: float, vp: Vector2, d: float) -> void:
 	if d > MIN_GAP:
 		_follow(_aim, rules.shark_speed, dt)
 	else:
+		_swim(pos, rules.shark_speed, dt, true)          # вплотную — гасит ход и ждёт замаха
 		_face(vp - pos)
-	if lost_interest(dt, d) or d > GIVE_UP_DIST:
+	if lost_interest(dt, d):
 		_give_up()
 
 
+## Машина в зоне прыжка, на одном уровне с ним (не на уступе и не под ним), и дуге не мешает стена.
 func _can_leap(vp: Vector2, d: float) -> bool:
 	var s := vehicle.state
 	if d > rules.shark_lunge_dist + LEAP_SLACK or s.falling or s.launched or s.drowning or vehicle.wrecked:
 		return false
-	return leap_clear(pos, vp)
+	return Creature.same_level(query, pos, vp) and leap_clear(pos, vp)
 
 
 ## Прыжок из from к to не упрётся в стену: дуга (как в полёте) над рельефом до машины.
@@ -314,6 +409,7 @@ func _windup(vp: Vector2) -> void:
 	_heading = _dir
 	_home = pos
 	_hops = 0
+	_swim_v = Vector2.ZERO
 	_burst(pos, _surface(pos), 14, 2.5)
 
 
@@ -380,11 +476,13 @@ func _fly(dt: float) -> void:
 
 
 ## Пролетел рядом с машиной — укус (раз за прыжок): урон, раскачка, брызги; прыжок обрывается отскоком.
+## Машина ушла с уровня, откуда он прыгнул (съехала под уступ или забралась на него), — мимо.
 func _check_bite() -> void:
 	if _bitten:
 		return
 	var s := vehicle.state
-	if s.falling or s.launched or s.drowning or vehicle.wrecked or pos.distance_to(s.pos) > BITE_R:
+	if s.falling or s.launched or s.drowning or vehicle.wrecked or pos.distance_to(s.pos) > BITE_R \
+			or not Creature.same_level(query, _home, s.pos):
 		return
 	_bitten = true
 	damaged.emit(rules.shark_damage, &"shark")
@@ -400,7 +498,7 @@ func _check_bite() -> void:
 func _land() -> void:
 	_burst(pos, _surface(pos), 24, 3.0)
 	_pitch = 0.0
-	if habitat(query, _tile()):
+	if _habitat(_tile()):
 		_dive()
 	else:
 		state = State.LANDED
@@ -415,7 +513,7 @@ func _dive() -> void:
 
 ## Ползёт на грудных плавниках к ближайшему тайлу ареала; застрял — прыгает домой, не вышло — зарывается.
 func _crawl(dt: float) -> void:
-	if habitat(query, _tile()):
+	if _habitat(_tile()):
 		_burst(pos, _surface(pos), 12, 2.0)
 		_dive()
 		return
@@ -448,7 +546,7 @@ func _nearest_habitat() -> Vector2:
 			var t := c + Vector2i(dx, dz)
 			var p := Vector2(t.x + 0.5, t.y + 0.5)
 			var d := p.distance_to(pos)
-			if d < best_d and query.is_loaded(t.x, t.y) and habitat(query, t):
+			if d < best_d and query.is_loaded(t.x, t.y) and _habitat(t):
 				best_d = d
 				best = p
 	return best
@@ -458,6 +556,49 @@ func _nearest_habitat() -> Vector2:
 func scare() -> void:
 	if state == State.IDLE or state == State.STALK:
 		_give_up()
+
+
+## Таран достаёт илозуба над поверхностью: вынырнул в замахе, на суше; в прыжке — если низко (по высоте
+## тело рядом с днищем машины, RamBody.REACH_DY). Затаившегося в иле или в воде — нет.
+func ram_reachable(_b: RamBody) -> bool:
+	return state == State.WINDUP or state == State.LEAP or state == State.LANDED or state == State.CRAWL
+
+
+## Удар без гибели (если ram_hits_shark > 1): в прыжке — сбит наземь, в замахе — ныряет, на суше — бьётся.
+func _on_rammed(_b: RamBody, dir: Vector2, killed: bool) -> void:
+	if killed:
+		return
+	match state:
+		State.LEAP:
+			_bitten = true
+			_falling = true
+			_vy = 1.0
+			_drop_v = dir * 1.5
+		State.WINDUP:
+			_dive()
+		State.LANDED, State.CRAWL:
+			state = State.LANDED
+			_timer = LAND_S
+			_flop = 1.0
+
+
+## Убит тараном: след в иле стих, облачко гибели — цвета комьев его зыбуна (над водой — брызги).
+func _on_died() -> void:
+	_wake.emitting = false
+	_ripples.emitting = false
+	bodies[0].set_puff_color(FOAM_COLOR if _over_water(pos) else _clod)
+
+
+## Убитый в прыжке падает наземь (мигая), на земле — лежит.
+func _fall_dead(dt: float) -> void:
+	if state != State.LEAP:
+		return
+	var floor_y := _surface(pos)
+	_vy -= GRAVITY * dt
+	_y = maxf(_y + _vy * dt, floor_y)
+	if _y <= floor_y:
+		_vy = 0.0
+	_place()
 
 
 ## Сдался: ныряет, CALM_S не слышит машину.
@@ -477,24 +618,41 @@ func _tile() -> Vector2i:
 	return Grid.tile_of_world(pos.x, pos.y)
 
 
-## Сидит в зыбуне (не в воде рядом с ним).
+## Сидит в зыбуне (не в воде).
 func _in_mire() -> bool:
-	var t := _tile()
-	return (query.flags(t.x, t.y) & ChunkData.FLAG_MIRE) != 0
+	return mire(query, _tile())
 
 
-## Обход в ширину от своего тайла по ареалу (rad тайлов): тайл → родитель.
-func _region(rad: int) -> Dictionary:
+## В покое — засада: в зыбуне, и его место — в зыбуне. Пловца, которого прыжок забросил в зыбун, это не
+## держит — в покое он плывёт к своему месту.
+func _lurks() -> bool:
+	var den := _den_spot()
+	return _in_mire() and mire(query, Grid.tile_of_world(den.x, den.y))
+
+
+func _mire_at(p: Vector2) -> bool:
+	return mire(query, Grid.tile_of_world(p.x, p.y))
+
+
+## Обход в ширину от своего тайла по ареалу (rad тайлов): тайл → родитель. Пути идут водой: тайл зыбуна —
+## только конечная точка (заплыл — засада, дальше не плывёт). leash — не дальше стольких тайлов от своего
+## места (оказался дальше — путь только ближе к нему).
+func _region(rad: int, leash: float = INF) -> Dictionary:
 	var start := _tile()
+	var den := _den_spot()
 	var parent := {start: start}
 	var queue: Array[Vector2i] = [start]
 	var head := 0
 	while head < queue.size():
 		var t := queue[head]
 		head += 1
+		if t != start and mire(query, t):
+			continue
+		var limit := maxf(leash, Vector2(t.x + 0.5, t.y + 0.5).distance_to(den))
 		for dir in 4:
 			var n := t + Grid.DIR_OFFSETS[dir]
-			if parent.has(n) or absi(n.x - start.x) > rad or absi(n.y - start.y) > rad:
+			if parent.has(n) or absi(n.x - start.x) > rad or absi(n.y - start.y) > rad \
+					or Vector2(n.x + 0.5, n.y + 0.5).distance_to(den) > limit:
 				continue
 			if _edge_ok(t, dir, true):
 				parent[n] = t
@@ -511,42 +669,102 @@ static func _path(parent: Dictionary, to: Vector2i) -> Array[Vector2i]:
 	return route
 
 
-## Куда плыть к машине vp: на ближайшее по пути место ареала, откуда машина в досягаемости прыжка и
-## прыжку не мешает стена (обход с фланга), а нет такого — к кромке ареала, ближайшей к машине.
+## Куда плыть к машине vp: водой (в зыбун — только прыжком) не дальше shark_chase_r от своего места — на
+## ближайшее по пути место, откуда машина в досягаемости прыжка, на одном с ним уровне и прыжку не мешает
+## стена (обход с фланга), а нет такого — к кромке ареала, ближайшей к машине (в её тайле, к машине).
 ## Задаёт маршрут и _aim — точку, к которой идти после него.
 func _plan(vp: Vector2) -> void:
-	var parent := _region(REGION_R)
+	var parent := _region(REGION_R, rules.shark_chase_r)
 	var best := _tile()
 	var best_d := Vector2(best.x + 0.5, best.y + 0.5).distance_to(vp)
 	var spot: Array[Vector2i] = []
 	var reach := rules.shark_lunge_dist + LEAP_SLACK - 0.3
 	for t: Vector2i in parent:
+		if mire(query, t):
+			continue
 		var c := Vector2(t.x + 0.5, t.y + 0.5)
 		var d := c.distance_to(vp)
 		if d < best_d - 0.01:
 			best_d = d
 			best = t
-		if d <= reach and d >= MIN_GAP and leap_clear(c, vp):
+		if d <= reach and d >= MIN_GAP and Creature.same_level(query, c, vp) and leap_clear(c, vp):
 			var route := _path(parent, t)
 			if spot.is_empty() or route.size() < spot.size() - 1:
 				spot = route
 				spot.append(t)                     # последний — сам тайл (для пустого пути — свой)
 	if spot.is_empty():
+		var c := Vector2(best.x + 0.5, best.y + 0.5)
 		_route = _path(parent, best)
-		_aim = vp
+		_aim = c + (vp - c).limit_length(0.45)
 	else:
 		var t: Vector2i = spot.pop_back()
 		_route = spot
 		_aim = Vector2(t.x + 0.5, t.y + 0.5)
 
 
-## По маршруту — от центра к центру тайлов; маршрут кончился — прямо к final, пока пускает ареал.
+## Плывёт по маршруту — напрямик к самой дальней видимой (до LOOK_AHEAD) его точке, а не ступеньками от
+## центра к центру тайлов, и без остановок на них; маршрут кончился — прямо к final, пока пускает ареал.
 func _follow(final: Vector2, speed: float, dt: float) -> void:
 	var t := _tile()
 	while not _route.is_empty() and _route[0] == t:
 		_route.pop_front()
-	var aim := final if _route.is_empty() else Vector2(_route[0].x + 0.5, _route[0].y + 0.5)
-	_move(aim, speed, dt, true)
+	if _route.is_empty():
+		_swim(final, speed, dt, true)
+		return
+	var aim := Vector2(_route[0].x + 0.5, _route[0].y + 0.5)
+	for i in range(mini(_route.size(), LOOK_AHEAD) - 1, 0, -1):
+		var c := Vector2(_route[i].x + 0.5, _route[i].y + 0.5)
+		if _line_ok(pos, c):
+			aim = c
+			break
+	_swim(aim, speed, dt, false)
+
+
+## Отрезок от a до b проходим по ареалу (шагами меньше тайла) и не задевает зыбун, если b — не в нём.
+func _line_ok(a: Vector2, b: Vector2) -> bool:
+	var into_mire := _mire_at(b)
+	var n := ceili(a.distance_to(b) / 0.25)
+	var p := a
+	for i in range(1, n + 1):
+		var np := a.lerp(b, float(i) / n)
+		if not _can_pass(p, np, true) or (not into_mire and _mire_at(np) and not _mire_at(p)):
+			return false
+		p = np
+	return true
+
+
+## Плывёт к aim по ареалу: скорость меняется плавно (SWIM_ACCEL — разгон, торможение и поворот дугой;
+## круто поворачивает — сбавляет ход, чтобы вписаться); arrive — к конечной точке, с торможением, иначе —
+## на полном ходу. Упёрся в кромку ареала — скользит вдоль неё (поперечный ход гаснет); некуда — стоит.
+## В зыбун из воды заплывает, только если aim — в нём (домой, в засаду).
+func _swim(aim: Vector2, speed: float, dt: float, arrive: bool) -> void:
+	var may_mire := _mire_at(aim) or _in_mire()
+	var delta := aim - pos
+	var dist := delta.length()
+	var want := Vector2.ZERO
+	if dist > 0.02:
+		var dir := delta / dist
+		var v := minf(speed, sqrt(2.0 * SWIM_ACCEL * dist)) if arrive else speed
+		if _swim_v.length() > 0.5:
+			v *= clampf(1.0 - absf(_swim_v.angle_to(dir)) / PI, 0.4, 1.0)
+		want = dir * v
+	_swim_v = _swim_v.move_toward(want, SWIM_ACCEL * dt)
+	var step := _swim_v * dt
+	if step.length_squared() < 1e-10:
+		return
+	for k in 3:
+		var s := step if k == 0 else (Vector2(step.x, 0.0) if k == 1 else Vector2(0.0, step.y))
+		if s.length_squared() < 1e-10 or not _can_pass(pos, pos + s, true) or (not may_mire and _mire_at(pos + s)):
+			continue
+		pos += s
+		if k == 1:
+			_swim_v.y = 0.0
+		elif k == 2:
+			_swim_v.x = 0.0
+		_moving = true
+		_face(_swim_v)
+		return
+	_swim_v = Vector2.ZERO
 
 
 ## Шаг к aim; в ареале (in_habitat) — не выходя из него, на суше — через рёбра не выше яруса.
@@ -588,7 +806,7 @@ func _edge_ok(t: Vector2i, dir: int, in_habitat: bool) -> bool:
 	var n := t + Grid.DIR_OFFSETS[dir]
 	if not query.is_loaded(n.x, n.y):
 		return false
-	if in_habitat and not habitat(query, n):
+	if in_habitat and not _habitat(n):
 		return false
 	if query.water_tier(t.x, t.y) != TerrainQuery.NO_WATER or query.water_tier(n.x, n.y) != TerrainQuery.NO_WATER:
 		return true
@@ -681,9 +899,13 @@ func _animate(dt: float) -> void:
 	var bob := 0.0
 	if state == State.CRAWL:
 		bob = maxf(sin(_phase), 0.0) * 0.05                    # плавники упёрлись — перёд привстаёт
+	# Плывёт: хвост бьёт чаще и шире по ходу, корпус чуть виляет в противофазе — как у рыбы.
+	var beat := clampf(_swim_v.length() / rules.shark_speed, 0.0, 1.0) if _moving else 0.0
+	_stroke += dt * lerpf(2.5, 11.0, beat)
 	_body.position.y = -_sink + bob
 	_body.rotation = Vector3(_pitch + (sin(_phase) * 0.08 if state == State.CRAWL else 0.0),
-			_curl * -0.25, sin(_time * 50.0) * 0.05 * tremble + sin(_time * 16.0) * 0.3 * _flop)
+			_curl * -0.25 - sin(_stroke) * 0.07 * beat,
+			sin(_time * 50.0) * 0.05 * tremble + sin(_time * 16.0) * 0.3 * _flop)
 	_head.rotation.x = _head_up
 	_jaw.rotation.x = -JAW_OPEN * _jaw_open
 	for i in _eyes.size():
@@ -692,9 +914,9 @@ func _animate(dt: float) -> void:
 		_eyes[i].rotation.z = -s * EYE_SPLAY * _eyes_up                # стебельки врозь
 		_lids[i].rotation.x = lerpf(LID_HALF, LID_OPEN, _lid_open)
 	_frill.scale.y = lerpf(FRILL_FLAT, 1.0, _frill_up)
-	var swim := 8.0 if _moving else 2.5
-	var sway := (0.35 if _moving else 0.12) if not on_land else 0.25
-	_tail.rotation.y = _curl + sin(_time * swim) * sway * (1.0 - absf(_curl) / CURL * 0.8)
+	var sway := lerpf(0.12, 0.42, beat) if not on_land else 0.25
+	var wave := sin(_stroke) if not on_land else sin(_time * 8.0)
+	_tail.rotation.y = _curl + wave * sway * (1.0 - absf(_curl) / CURL * 0.8)
 	for i in _pecs.size():
 		var s := -1.0 if i == 0 else 1.0
 		var p := _pecs[i]
@@ -725,6 +947,9 @@ func _place() -> void:
 	var base := _y if state == State.LEAP else _surface(pos)
 	_model.position = Vector3(pos.x, base, pos.y)
 	_model.rotation.y = _yaw
+	for b in bodies:
+		b.pos = pos
+		b.y = base
 
 
 ## Тон ила — от зыбуна, в котором сидит: на грунте бурый, на песке — мокрый песок.
@@ -739,7 +964,8 @@ func _tint(dt: float) -> void:
 	BodyMaterial.set_color(_fin_mat, _mud.darkened(0.25))
 
 
-## След макушки, пока плывёт под поверхностью: комья ила (брызги над водой) и расходящиеся круги.
+## След макушки, пока плывёт под поверхностью: комья ила или — в воде — брызги усами по бокам (чем быстрее,
+## тем дальше летят), и расходящиеся круги.
 func _update_wake() -> void:
 	if not is_inside_tree():
 		return
@@ -750,12 +976,16 @@ func _update_wake() -> void:
 		return
 	var crown := pos + _heading * CROWN_AHEAD
 	var at := Vector3(crown.x, _surface(crown) + 0.02, crown.y)
-	_wake.position = at
-	_wake.direction = Vector3(-_heading.x, 1.2, -_heading.y).normalized()
-	_ripples.position = at
 	var wet := _over_water(crown)
+	var fast := clampf(_swim_v.length() / rules.shark_speed, 0.0, 1.0)
+	_wake.position = at
+	_wake.direction = Vector3(-_heading.x, 1.2 - 0.5 * fast if wet else 1.2, -_heading.y).normalized()
+	_wake.spread = lerpf(35.0, 70.0, fast) if wet else 35.0
+	_wake.initial_velocity_min = 0.6 + 0.6 * fast if wet else 0.6
+	_wake.initial_velocity_max = 1.4 + 1.2 * fast if wet else 1.4
+	_ripples.position = at
 	((_wake.mesh as QuadMesh).material as StandardMaterial3D).albedo_color = FOAM_COLOR if wet else _clod
-	(_ripples.mesh.surface_get_material(0) as StandardMaterial3D).albedo_color = FOAM_COLOR if wet else _mud
+	_ripple_mat.set_shader_parameter(&"tint", FOAM_COLOR if wet else _mud)
 
 
 ## Брызги ила или воды в точке p.
@@ -781,6 +1011,10 @@ func _over_water(at: Vector2) -> bool:
 
 const HEAD_AT := Vector3(0, -0.03, -0.12)       ## шарнир головы — углы рта, у шеи
 const CROWN_AHEAD := 0.3                 ## макушка впереди центра тела (за ней след по илу)
+const RIPPLE_SHADER := preload("res://src/render/shaders/ripple_ring.gdshader")
+const RIPPLE_R0 := 0.15                  ## круг за макушкой расходится от такого радиуса…
+const RIPPLE_R1 := 0.5                   ## …до такого (2–8 пикселей мира)
+const RIPPLE_W_PX := 1.0                 ## толщина кольца — пикселей мира
 const EYE_R := 0.068
 const EYE_Z := -0.18                     ## глаза — над передней частью купола
 const EYE_X := 0.072                     ## вплотную друг к другу…
@@ -1091,7 +1325,8 @@ func _particles(amount: int, lifetime: float, texels: int, v_min: float, v_max: 
 	return p
 
 
-## Круги по илу за макушкой: плоское кольцо растёт и тает.
+## Круги по воде и илу за макушкой: кольцо в пиксель мира (шейдер ripple_ring) растёт от RIPPLE_R0 до
+## RIPPLE_R1 целыми пикселями (радиус — масштаб частицы) и гаснет ступенями прозрачности.
 func _ripple_trail() -> CPUParticles3D:
 	var p := CPUParticles3D.new()
 	p.amount = 8
@@ -1100,31 +1335,24 @@ func _ripple_trail() -> CPUParticles3D:
 	p.initial_velocity_min = 0.0
 	p.initial_velocity_max = 0.0
 	p.local_coords = false
-	p.scale_amount_min = 0.5
-	p.scale_amount_max = 0.5
+	p.scale_amount_min = RIPPLE_R1
+	p.scale_amount_max = RIPPLE_R1
 	var grow := Curve.new()
-	grow.add_point(Vector2(0.0, 0.3))
+	grow.add_point(Vector2(0.0, RIPPLE_R0 / RIPPLE_R1))
 	grow.add_point(Vector2(1.0, 1.0))
 	p.scale_amount_curve = grow
-	var fade := Gradient.new()
-	fade.set_color(0, Color(1, 1, 1, 0.8))
-	fade.set_color(1, Color(1, 1, 1, 0.0))
-	p.color_ramp = fade
-	var st := SurfaceTool.new()
-	st.begin(Mesh.PRIMITIVE_TRIANGLES)
-	const SEGMENTS := 10
-	for i in SEGMENTS:
-		var a := Vector3.RIGHT.rotated(Vector3.UP, TAU * i / SEGMENTS)
-		var b := Vector3.RIGHT.rotated(Vector3.UP, TAU * (i + 1) / SEGMENTS)
-		MeshKit.tri(st, a, b, b * 0.72, Vector3.UP)
-		MeshKit.tri(st, a, b * 0.72, a * 0.72, Vector3.UP)
-	var m := StandardMaterial3D.new()
-	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	m.vertex_color_use_as_albedo = true
-	m.albedo_color = _mud
-	st.set_material(m)
-	p.mesh = st.commit()
+	var quad := PlaneMesh.new()                  # кольцо радиуса 1 в осях меша — с запасом на округление
+	quad.size = Vector2.ONE * 2.5
+	_ripple_mat = ShaderMaterial.new()
+	_ripple_mat.shader = RIPPLE_SHADER
+	_ripple_mat.set_shader_parameter(&"tint", _mud)
+	_ripple_mat.set_shader_parameter(&"width_px", RIPPLE_W_PX)
+	_ripple_mat.set_shader_parameter(&"r0", RIPPLE_R0)
+	_ripple_mat.set_shader_parameter(&"r1", RIPPLE_R1)
+	_ripple_mat.set_shader_parameter(&"alpha", 0.8)
+	_ripple_mat.render_priority = 1               # поверх прозрачной воды, а не под ней
+	quad.material = _ripple_mat
+	p.mesh = quad
 	p.emitting = false
 	add_child(p)
 	return p

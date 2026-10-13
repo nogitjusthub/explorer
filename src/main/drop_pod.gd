@@ -21,6 +21,7 @@ const FLAME_COLOR := Color(1.0, 0.72, 0.35)
 const FLAME_CORE := Color(1.0, 0.95, 0.8)
 const MARK_COLOR := Color(0.45, 1.0, 0.95, 0.8)
 const SHADOW_COLOR := Color(0.05, 0.03, 0.06, 0.5)
+const SHADOW_R := Grid.ART_PX * 13.0     ## радиус тени капсулы у земли — целые пиксели мира
 const NOZZLES := 3
 const PX := Grid.ART_PX / POD_SCALE      ## пиксель обшивки — как у рельефа (капсула уменьшена — в меше крупнее)
 
@@ -91,8 +92,9 @@ func _update() -> void:
 		var h := height_at(_t)
 		var k := clampf(_t / total_s(), 0.0, 1.0)
 		_pod.position = _ground + Vector3(0, h, 0)
-		_shadow.scale = Vector3.ONE * lerpf(0.3, 1.0, k)
-		_shadow_mat.albedo_color.a = SHADOW_COLOR.a * lerpf(0.3, 1.0, k)
+		# Тень растёт на целый пиксель мира по радиусу и темнеет ступенями.
+		_shadow.scale = Vector3.ONE * snappedf(SHADOW_R * lerpf(0.3, 1.0, k), Grid.ART_PX) / SHADOW_R
+		_shadow_mat.albedo_color.a = SHADOW_COLOR.a * lerpf(0.3, 1.0, floorf(k * 4.0) / 4.0)
 		_marker_mat.albedo_color.a = MARK_COLOR.a * (0.5 + 0.5 * float(fmod(_t, 0.4) < 0.25))
 		if _t >= FREE_FALL_S and not _burning:
 			_burning = true
@@ -252,8 +254,8 @@ func _build() -> void:
 	_shadow_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	_shadow_mat.albedo_color = SHADOW_COLOR
 	var disc := CylinderMesh.new()
-	disc.top_radius = 0.8
-	disc.bottom_radius = 0.8
+	disc.top_radius = SHADOW_R
+	disc.bottom_radius = SHADOW_R
 	disc.height = 0.02
 	disc.radial_segments = 12
 	disc.rings = 0
@@ -272,9 +274,11 @@ func _build() -> void:
 	_marker_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	_marker_mat.albedo_color = MARK_COLOR
 	_marker_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+	# Кольцо и перекрестье — целые пиксели мира, по два в ширину: от центра тайла штрихи ложатся
+	# на сетку текселей рельефа.
 	var ring := TorusMesh.new()
-	ring.inner_radius = 1.25
-	ring.outer_radius = 1.38
+	ring.inner_radius = Grid.ART_PX * 20.0
+	ring.outer_radius = Grid.ART_PX * 22.0
 	ring.rings = 16
 	ring.ring_segments = 4
 	var ring_mi := MeshInstance3D.new()
@@ -285,11 +289,11 @@ func _build() -> void:
 	for i in 4:     # перекрестье
 		var tick := MeshInstance3D.new()
 		var tb := BoxMesh.new()
-		tb.size = Vector3(0.45, 0.02, 0.08)
+		tb.size = Vector3(Grid.ART_PX * 7.0, 0.02, Grid.ART_PX * 2.0)
 		tick.mesh = tb
 		tick.material_override = _marker_mat
 		var a := TAU * i / 4.0
-		tick.position = Vector3(cos(a), 0, sin(a)) * 0.95
+		tick.position = Vector3(cos(a), 0, sin(a)) * Grid.ART_PX * 15.5     # от 12-го пикселя до 19-го
 		tick.rotation.y = -a
 		_marker.add_child(tick)
 
