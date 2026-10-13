@@ -9,7 +9,7 @@ var _time_left := 0.0
 func _ready() -> void:
 	layer = 15
 	_label = Label.new()
-	_label.add_theme_font_size_override(&"font_size", 8)
+	_label.add_theme_font_size_override(&"font_size", UiKit.TEXT)
 	_label.add_theme_color_override(&"font_shadow_color", Color(0, 0, 0, 0.9))
 	_label.add_theme_constant_override(&"shadow_offset_x", 1)
 	_label.add_theme_constant_override(&"shadow_offset_y", 1)

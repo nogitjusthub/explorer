@@ -98,21 +98,21 @@ func _draw_menu() -> void:
 	_canvas.draw_rect(PANEL, UiKit.COLOR_PANEL)
 	var x := PANEL.position.x
 	var w := PANEL.size.x
-	UiKit.text(_canvas, Vector2(x, PANEL.position.y + 13), "ВЫЗВАТЬ ЧЕЛНОК?", 8, UiKit.COLOR_MARK,
+	UiKit.text(_canvas, Vector2(x, PANEL.position.y + 13), "ВЫЗВАТЬ ЧЕЛНОК?", UiKit.TEXT, UiKit.COLOR_MARK,
 			HORIZONTAL_ALIGNMENT_CENTER, w)
-	UiKit.text(_canvas, Vector2(x, PANEL.position.y + 27), "что привезти?", 8, UiKit.COLOR_DIM,
+	UiKit.text(_canvas, Vector2(x, PANEL.position.y + 27), "что привезти?", UiKit.TEXT, UiKit.COLOR_DIM,
 			HORIZONTAL_ALIGNMENT_CENTER, w)
 	var tr := _track()
 	var fuel_c: Color = UiKit.STAT_COLORS[UiKit.Stat.FUEL]
 	var parts_c: Color = UiKit.STAT_COLORS[UiKit.Stat.ARMOR]
 	# Подписи по краям: «топливо [A]» слева, «[D] запчасти» справа; под ними — сколько чего.
 	var lw := 60.0
-	UiKit.text(_canvas, Vector2(tr.position.x - lw - 14, SLIDER_Y + 3), "топливо [A]", 8, fuel_c,
+	UiKit.text(_canvas, Vector2(tr.position.x - lw - 14, SLIDER_Y + 3), "топливо [A]", UiKit.TEXT, fuel_c,
 			HORIZONTAL_ALIGNMENT_RIGHT, lw)
-	UiKit.text(_canvas, Vector2(tr.end.x + 14, SLIDER_Y + 3), "[D] запчасти", 8, parts_c)
-	UiKit.text(_canvas, Vector2(tr.position.x - lw - 14, SLIDER_Y + 15), str(fuel), 8, UiKit.COLOR_TEXT,
+	UiKit.text(_canvas, Vector2(tr.end.x + 14, SLIDER_Y + 3), "[D] запчасти", UiKit.TEXT, parts_c)
+	UiKit.text(_canvas, Vector2(tr.position.x - lw - 14, SLIDER_Y + 15), str(fuel), UiKit.TEXT, UiKit.COLOR_TEXT,
 			HORIZONTAL_ALIGNMENT_RIGHT, lw)
-	UiKit.text(_canvas, Vector2(tr.end.x + 14, SLIDER_Y + 15), str(parts()), 8, UiKit.COLOR_TEXT)
+	UiKit.text(_canvas, Vector2(tr.end.x + 14, SLIDER_Y + 15), str(parts()), UiKit.TEXT, UiKit.COLOR_TEXT)
 	# Ползунок-«весы»: левая половина — цвет топлива, правая — запчастей; чем ближе ручка к подписи,
 	# тем больше этого груза (всё топливо — ручка у левого края). Стрелки «<<» и «>>» на концах.
 	var split := tr.position.x + tr.size.x * float(parts()) / supply
@@ -129,5 +129,5 @@ func _draw_menu() -> void:
 			var o := ax + side * j * 3.0
 			_canvas.draw_colored_polygon(PackedVector2Array([Vector2(o, SLIDER_Y - 2.5),
 					Vector2(o + side * 3.0, SLIDER_Y + 0.5), Vector2(o, SLIDER_Y + 3.5)]), UiKit.COLOR_DIM)
-	UiKit.text(_canvas, Vector2(x, SLIDER_Y + 30), "−%d очков, груз в трюме — за полцены" % penalty, 8,
+	UiKit.text(_canvas, Vector2(x, SLIDER_Y + 30), "-%d очков, груз в трюме — за полцены" % penalty, UiKit.TEXT,
 			UiKit.COLOR_DIM, HORIZONTAL_ALIGNMENT_CENTER, w)

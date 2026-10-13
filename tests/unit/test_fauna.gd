@@ -1,6 +1,17 @@
 extends TestCase
 ## Фауна (GDD §5.4): шум, поле путей по проходимости вида.
 
+const DT := 1.0 / 60.0
+
+
+## FaunaDirector для одной стаи: готовое поле путей к машине.
+class StubDirector:
+	extends Node
+	var f: FlowField
+
+	func field(_mode: FlowField.Mode) -> FlowField:
+		return f
+
 
 func _field(f: TerrainFixture, mode: FlowField.Mode, target: Vector2i) -> FlowField:
 	var result: Array[FlowField] = []
@@ -45,6 +56,69 @@ func test_hoppers_go_around_walls_and_not_through_water() -> void:
 	f.set_water(30, 10, 4)
 	var wet := _field(f, FlowField.Mode.HOPPER, Vector2i(20, 10))
 	assert_eq(wet.distance(Vector2i(30, 10)), FlowField.UNREACHED, "hoppers avoid water")
+
+
+## Стая у тихой (стоящей) машины в vehicle_at; поле путей — к машине.
+func _pack(f: TerrainFixture, at: Vector2, vehicle_at: Vector2) -> HopperPack:
+	var v := Vehicle.new(load("res://data/vehicles/rover.tres"), f.query)
+	v.state.pos = vehicle_at
+	v.state.tile = Grid.tile_of_world(vehicle_at.x, vehicle_at.y)
+	var p := HopperPack.new()
+	p.rules = BalanceRules.new()
+	p.vehicle = v
+	p.query = f.query
+	p.terrain = f.terrain
+	p.noise = NoiseField.new()
+	p.noise.update_vehicle(vehicle_at, 0.0, v.cls.max_speed)      # стоит — не слышно
+	var d := StubDirector.new()
+	d.f = _field(f, FlowField.Mode.HOPPER, v.state.tile)
+	p.director = d
+	p.rng = RandomNumberGenerator.new()
+	p.rng.seed = 5
+	p.setup(at, 3)
+	return p
+
+
+func _dispose(p: HopperPack) -> void:
+	p.vehicle.free()
+	p.director.free()
+	p.free()
+
+
+func test_hoppers_woken_by_the_shuttle_attack_at_the_pad() -> void:
+	# Стая появилась в 25 тайлах от севшего челнока: бег на шум — не погоня, её пределы (20 тайлов, 10 с)
+	# не тратятся; у площадки стоит машина — стая её кусает, а не уходит.
+	var f := TerrainFixture.new(4, 2)
+	var pad := Vector2(30.5, 10.5)
+	var p := _pack(f, Vector2(5.5, 10.5), pad + Vector2(1.0, 0.0))
+	p.noise.add(pad, p.rules.shuttle_noise_r, p.rules.shuttle_noise_s)
+	p.wake(pad)
+	var hits := [0]
+	p.damaged.connect(func(_amount: int, _source: StringName) -> void: hits[0] += 1)
+	for _i in int(20.0 / DT):
+		p.step(DT)
+		p.noise.tick(DT)
+		if hits[0] > 0:
+			break
+	assert_true(hits[0] > 0, "ran to the pad and bit the vehicle there")
+	assert_eq(p.state, HopperPack.State.CHASE, "hunting, not retreating")
+	_dispose(p)
+
+
+func test_hoppers_at_a_quiet_pad_stay_and_patrol() -> void:
+	# Машины у площадки нет: стая ждёт, пока шум слышен, потом остаётся патрулировать там.
+	var f := TerrainFixture.new(4, 2)
+	var pad := Vector2(20.5, 10.5)
+	var p := _pack(f, Vector2(5.5, 10.5), Vector2(-25.5, 40.5))
+	p.noise.add(pad, 15.0, 8.0)
+	p.wake(pad)
+	for _i in int(14.0 / DT):
+		p.step(DT)
+		p.noise.tick(DT)
+	assert_eq(p.state, HopperPack.State.IDLE, "settled after the noise faded")
+	assert_false(p.finished, "stays on the map")
+	assert_true(p.home.distance_to(pad) < 2.0, "patrols around the pad: %s" % p.home)
+	_dispose(p)
 
 
 func test_rover_and_hover_outrun_fauna_tank_does_not() -> void:

@@ -1,6 +1,7 @@
 class_name Vehicle
 extends Node3D
-## Машина игрока: модель класса (VehicleModels), кинематика по сетке (VehicleKinematics), звук двигателя.
+## Машина игрока: модель класса (VehicleModels), кинематика по сетке (VehicleKinematics), звук двигателя,
+## колея и пыль из-под колёс (VehicleTrail).
 ## Позиция обновляется в _physics_process; плавность на высоких FPS даёт physics interpolation.
 
 signal landed(tiers: int, damage: int)
@@ -38,6 +39,7 @@ var _tilt := Basis.IDENTITY
 var _model: VehicleModels.Model
 var _beacon_light: OmniLight3D
 var _shock: ShockFx                ## дуги разряда и белые вспышки корпуса, пока управление наоборот
+var _trail: VehicleTrail           ## колея на земле, пыль и комья из-под колёс
 var _rock := Vector2.ZERO          ## наклон модели от ударов: x — тангаж (нос вверх +), y — крен (правый борт вверх +)
 var _rock_vel := Vector2.ZERO
 var _tumble := Vector2.ZERO        ## наклон в полёте после броска — равновесие пружины, пока машина в воздухе
@@ -61,12 +63,17 @@ func _ready() -> void:
 	_rebuild_model()
 	_shock = ShockFx.new()
 	add_child(_shock)
+	_trail = VehicleTrail.new()
+	_trail.setup(cls, query)
+	add_child(_trail)
 
 
 ## Смена класса (экран выбора): модель, тон двигателя, высота над водой.
 func set_class(vehicle_class: VehicleClass) -> void:
 	cls = vehicle_class
 	_rebuild_model()
+	if _trail != null:
+		_trail.set_class(cls)
 	place(state.pos, state.heading)
 
 
@@ -193,6 +200,7 @@ func _physics_process(dt: float) -> void:
 		state.y = p.y
 		_model.root.rotation.y += dt * 2.5 * k
 		_ride.update(dt, _model, state, cls, 0, false, _rock)   # в луче тряска стихает, антенна успокаивается
+		_trail.track(state, false, dt)
 		_apply_transform()
 		if k >= 1.0:
 			visible = false
@@ -233,6 +241,7 @@ func _physics_process(dt: float) -> void:
 		_tilt = _tilt.slerp(_ground_basis(), minf(1.0, 12.0 * dt))
 	_apply_transform()
 	_animate(dt)
+	_trail.track(state, not state.falling and not state.launched and not state.drowning, dt)
 	if not wrecked:
 		engine.update(state.vel.length() / cls.max_speed, state.throttle, dt)
 	elif engine.playing:

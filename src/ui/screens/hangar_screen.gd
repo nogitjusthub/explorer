@@ -5,7 +5,10 @@ extends CanvasLayer
 ## Под выбранной — характеристики значками (1–5); ни названий классов, ни текстовых описаний.
 ## Выбор: A / D, стрелки, тап по машине или кнопкам; старт — F / Enter / кнопка: люк раскрывается,
 ## машина уходит вниз по шахте — дальше сцена десанта. Нужен и вебу: звук включается после действия игрока.
-## Трюм — отдельный мир в SubViewport: свой свет и окружение, игровой мир под экраном не трогаем.
+## Выбор и старт щёлкают механическим тумблером. Справа от названия — версия; в правом верхнем углу —
+## кнопка-динамик с окошком громкости (VolumeSlider; пока открыто, A / D — громкость, Esc — закрыть).
+## Трюм — отдельный мир в SubViewport: свой свет и окружение, игровой мир под экраном не трогаем; под ним —
+## непрозрачная подложка, чтобы до первого кадра трюма не просвечивал мир.
 
 signal started
 
@@ -141,8 +144,11 @@ var _shaft_lamps: ShaderMaterial
 var _shaft_glow: OmniLight3D             ## зарево снизу в шахте выбранной — подсвечивает машину на спуске
 var _light_k: PackedFloat32Array = []    ## яркость прожектора над каждой машиной 0..1
 var _ui: Control
+var _vol_button: Button                  ## динамик в правом верхнем углу: открывает окошко громкости
+var _vol_panel: Control                  ## окошко с регулятором (пока открыто — A / D крутят громкость)
+var _vol_slider: VolumeSlider
 var _fade: ColorRect
-var _clunk: AudioStreamPlayer
+var _toggle_snd: AudioStreamPlayer
 var _leave_t := -1.0
 var _emitted := false
 var _time := 0.0
@@ -153,6 +159,13 @@ var _bay_lamps: Array[StandardMaterial3D] = []
 func _ready() -> void:
 	name = "HangarScreen"
 	layer = 20
+	# Непрозрачная подложка: пока трюм не отрисовал первый кадр (в браузере — дольше), сквозь пустую
+	# картинку SubViewport не видно мира игры за ним.
+	var backdrop := ColorRect.new()
+	backdrop.color = Color(0.03, 0.025, 0.06)
+	backdrop.set_anchors_preset(Control.PRESET_FULL_RECT)
+	backdrop.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(backdrop)
 	var box := SubViewportContainer.new()
 	box.stretch = true
 	box.set_anchors_preset(Control.PRESET_FULL_RECT)
@@ -170,10 +183,10 @@ func _ready() -> void:
 	_fade.set_anchors_preset(Control.PRESET_FULL_RECT)
 	_fade.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(_fade)
-	_clunk = AudioStreamPlayer.new()
-	_clunk.stream = Sfx.hit(0.12)
-	_clunk.volume_db = -12.0
-	add_child(_clunk)
+	_toggle_snd = AudioStreamPlayer.new()
+	_toggle_snd.stream = Sfx.toggle()                 # выбор машины — щелчок механического тумблера
+	_toggle_snd.volume_db = -10.0
+	add_child(_toggle_snd)
 	_light_k.resize(vehicle_ids.size())
 	for i in _light_k.size():
 		_light_k[i] = 1.0 if i == selected else 0.0
@@ -518,14 +531,14 @@ func _build_ui() -> void:
 	_ui.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_ui.draw.connect(_draw_ui)
 	add_child(_ui)
-	var go := UiKit.button("ВЫСАДКА", "F", 8)
+	var go := UiKit.button("ВЫСАДКА", "F")
 	go.pressed.connect(_start)
 	_place(go, Vector2(VIEW.x * 0.5, CAPTION_Y + 16), true)        # сразу под строкой выбора
 	var help := UiKit.button("Справка", "F1")
 	help.pressed.connect(_open_help)
 	_place(help, Vector2(VIEW.x * 0.5, VIEW.y - 12), true)
 	# Стрелки — по бокам от строки «выбор машины».
-	var half := ThemeDB.fallback_font.get_string_size(CAPTION, HORIZONTAL_ALIGNMENT_LEFT, -1, 8).x * 0.5 + 8.0
+	var half := UiKit.FONT.get_string_size(CAPTION, HORIZONTAL_ALIGNMENT_LEFT, -1, UiKit.TEXT).x * 0.5 + 8.0
 	var prev := UiKit.button("<", "A")
 	prev.pressed.connect(_step.bind(-1))
 	_place(prev, Vector2(VIEW.x * 0.5 - half, CAPTION_Y - 3), false, true)
@@ -533,6 +546,55 @@ func _build_ui() -> void:
 	next.text = "[D]   >"
 	next.pressed.connect(_step.bind(1))
 	_place(next, Vector2(VIEW.x * 0.5 + half, CAPTION_Y - 3), false)
+	_build_volume()
+
+
+## Громкость: кнопка-динамик в правом верхнем углу; по нажатию под ней — окошко с регулятором.
+func _build_volume() -> void:
+	_vol_button = UiKit.button("", "")
+	_vol_button.custom_minimum_size = Vector2(22, 17)
+	_vol_button.draw.connect(_draw_speaker_button)
+	_vol_button.pressed.connect(_toggle_volume)
+	_place(_vol_button, Vector2(VIEW.x - 10, 16), false, true)
+	_vol_panel = Control.new()
+	_vol_panel.draw.connect(func() -> void:
+		var r := Rect2(Vector2.ZERO, _vol_panel.size)
+		_vol_panel.draw_rect(r, UiKit.COLOR_PANEL)
+		_vol_panel.draw_rect(r, UiKit.COLOR_EDGE, false, 1.0)
+		UiKit.text(_vol_panel, Vector2(8, 15), "ГРОМКОСТЬ", UiKit.TEXT, UiKit.COLOR_DIM)
+		UiKit.text(_vol_panel, Vector2(8, 43), "A / D, колесо", UiKit.TEXT, UiKit.COLOR_DIM))
+	add_child(_vol_panel)
+	_vol_slider = VolumeSlider.new()
+	_vol_panel.add_child(_vol_slider)
+	_vol_slider.changed.connect(func(_v: float) -> void: _vol_button.queue_redraw())
+	_vol_slider.position = Vector2(8, 20)
+	_vol_panel.size = Vector2(_vol_slider.size.x + 16.0, 50)
+	_vol_panel.position = Vector2(_vol_button.position.x + _vol_button.size.x - _vol_panel.size.x,
+			_vol_button.position.y + _vol_button.size.y + 3.0)
+	_vol_panel.visible = false
+
+
+func _toggle_volume() -> void:
+	_vol_panel.visible = not _vol_panel.visible
+	_vol_button.queue_redraw()
+
+
+func _draw_speaker_button() -> void:
+	var o := (_vol_button.size - Vector2(11, 9)) * 0.5
+	o = o.floor()
+	var level := roundi(Settings.master_volume * VolumeSlider.STEPS)
+	var c := UiKit.COLOR_MARK if _vol_panel != null and _vol_panel.visible else (UiKit.COLOR_TEXT if level > 0 else UiKit.COLOR_DIM)
+	_vol_button.draw_rect(Rect2(o + Vector2(0, 3), Vector2(2, 3)), c)
+	_vol_button.draw_colored_polygon(PackedVector2Array([o + Vector2(2, 3), o + Vector2(5, 0), o + Vector2(5, 9),
+			o + Vector2(2, 6)]), c)
+	if level == 0:
+		for i in 4:
+			_vol_button.draw_rect(Rect2(o + Vector2(7 + i, 2 + i), Vector2.ONE), c)
+			_vol_button.draw_rect(Rect2(o + Vector2(10 - i, 2 + i), Vector2.ONE), c)
+		return
+	_vol_button.draw_rect(Rect2(o + Vector2(7, 3), Vector2(1, 3)), c)
+	if level > VolumeSlider.STEPS / 2:
+		_vol_button.draw_rect(Rect2(o + Vector2(9, 1), Vector2(1, 7)), c)
 
 
 ## Кнопку — в точку: по вертикали всегда центром; по горизонтали — центром (center), правым краем
@@ -558,8 +620,12 @@ static func display_order(ids: Array[StringName]) -> Array[StringName]:
 
 func _draw_ui() -> void:
 	var w := float(VIEW.x)
-	UiKit.text(_ui, Vector2(0, 26), "EXPLORER", 16, UiKit.COLOR_TEXT, HORIZONTAL_ALIGNMENT_CENTER, w)
-	UiKit.text(_ui, Vector2(0, CAPTION_Y), CAPTION, 8, UiKit.COLOR_DIM, HORIZONTAL_ALIGNMENT_CENTER, w)
+	UiKit.text(_ui, Vector2(0, 26), "EXPLORER", UiKit.TITLE, UiKit.COLOR_TEXT, HORIZONTAL_ALIGNMENT_CENTER, w)
+	# Версия — мелко правее заголовка, по его нижней линии (application/config/version).
+	var title_w := UiKit.FONT.get_string_size("EXPLORER", HORIZONTAL_ALIGNMENT_LEFT, -1, UiKit.TITLE).x
+	UiKit.text(_ui, Vector2(roundf((w + title_w) * 0.5) + 4.0, 26), "v" + str(ProjectSettings.get_setting(
+			"application/config/version", "")), UiKit.TEXT, UiKit.COLOR_DIM)
+	UiKit.text(_ui, Vector2(0, CAPTION_Y), CAPTION, UiKit.TEXT, UiKit.COLOR_DIM, HORIZONTAL_ALIGNMENT_CENTER, w)
 	if vehicle_ids.is_empty():
 		return
 	var cls := Balance.vehicle(vehicle_ids[selected])
@@ -582,7 +648,17 @@ func _process(dt: float) -> void:
 	if _leave_t >= 0.0:
 		_leave(dt)
 		return
-	if not HelpScreen.shown(get_tree()):
+	if _vol_panel.visible:
+		# Окошко громкости: A / D — громкость, Esc — закрыть; выбор машины и высадка ждут.
+		if Input.is_action_just_pressed(&"move_left") or Input.is_action_just_pressed(&"ui_left"):
+			_vol_slider.nudge(-1)
+			_vol_button.queue_redraw()
+		elif Input.is_action_just_pressed(&"move_right") or Input.is_action_just_pressed(&"ui_right"):
+			_vol_slider.nudge(1)
+			_vol_button.queue_redraw()
+		elif Input.is_action_just_pressed(&"pause") or Input.is_action_just_pressed(&"ui_cancel"):
+			_toggle_volume()
+	elif not HelpScreen.shown(get_tree()):
 		if Input.is_action_just_pressed(&"move_left") or Input.is_action_just_pressed(&"ui_left"):
 			_step(-1)
 		elif Input.is_action_just_pressed(&"move_right") or Input.is_action_just_pressed(&"ui_right"):
@@ -601,6 +677,10 @@ func _process(dt: float) -> void:
 func _unhandled_input(event: InputEvent) -> void:
 	if _leave_t >= 0.0 or HelpScreen.shown(get_tree()) or not UiKit.is_click(event):
 		return
+	if _vol_panel.visible:
+		_toggle_volume()                     # клик мимо окошка громкости — закрыть его
+		get_viewport().set_input_as_handled()
+		return
 	var p: Vector2 = (event as InputEventMouseButton).position
 	for i in _models.size():
 		var sp := _cam.unproject_position(_models[i].root.position + Vector3(0, 0.25, 0))
@@ -618,7 +698,7 @@ func _step(d: int) -> void:
 
 func _select(i: int) -> void:
 	selected = i
-	_clunk.play()
+	_toggle_snd.play()
 	vehicle_changed.emit(vehicle_ids[selected])
 
 
@@ -641,7 +721,7 @@ func _start() -> void:
 	if _leave_t >= 0.0 or HelpScreen.shown(get_tree()):
 		return
 	_leave_t = 0.0
-	_clunk.play()
+	_toggle_snd.play()
 	_shaft_glow.position = Vector3(_doors[selected].position.x, -1.5, 0)
 	_shaft_glow.light_energy = 0.0
 	_shaft_glow.visible = true
@@ -691,7 +771,7 @@ func _leave(dt: float) -> void:
 func _show_loading() -> void:
 	if _loading == null:
 		_loading = Label.new()
-		_loading.add_theme_font_size_override(&"font_size", 8)
+		_loading.add_theme_font_size_override(&"font_size", UiKit.TEXT)
 		_loading.add_theme_color_override(&"font_color", Color(0.75, 0.72, 0.8))
 		_loading.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		_loading.position = Vector2(0, 152)

@@ -217,8 +217,7 @@ func _on_announced(_pad: Vector3i) -> void:
 
 func _on_landed(_pad: Vector3i) -> void:
 	_main_craft.touch_down()
-	_touchdown_hits(_pad_ground(), ShuttleCraft.MAIN_HULL_R)
-	hud.popup("Челнок на площадке", ShuttleCraft.COLOR_RING)
+	_touchdown_hits(_pad_ground(), ShuttleCraft.MAIN_HULL_R)    # о посадке говорит строка отсчёта внизу HUD
 
 
 func _on_departed() -> void:

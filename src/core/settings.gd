@@ -5,7 +5,7 @@ const PATH := "user://settings.cfg"
 
 var camera_shake: bool = true
 var zoom_preset: int = 1
-var master_volume: float = 1.0
+var master_volume: float = 1.0         ## общая громкость 0…1 шагами по 0,1 (VolumeSlider); 0 — без звука
 var player_name: String = "AAA"        ## последнее введённое имя для таблицы рекордов
 var vehicle_id: String = "rover"       ## последний выбранный класс техники
 var quick_restart := false             ## «Заново» на экране итога: следующий забег без экрана выбора (не сохраняется)
@@ -13,6 +13,20 @@ var quick_restart := false             ## «Заново» на экране и�
 
 func _ready() -> void:
 	load_settings()
+	apply_volume()
+
+
+## Новая общая громкость: применить к шине Master и сохранить.
+func set_master_volume(v: float) -> void:
+	master_volume = clampf(snappedf(v, 0.1), 0.0, 1.0)
+	apply_volume()
+	save_settings()
+
+
+## Громкость шины Master: по квадрату уровня — на слух ступени ровнее (половина — −12 дБ); 0 — выключен.
+func apply_volume() -> void:
+	AudioServer.set_bus_mute(0, master_volume <= 0.0)
+	AudioServer.set_bus_volume_db(0, linear_to_db(maxf(master_volume * master_volume, 0.0001)))
 
 
 func load_settings() -> void:

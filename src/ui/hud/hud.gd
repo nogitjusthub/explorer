@@ -7,7 +7,8 @@ extends CanvasLayer
 
 const FUEL_WARN := 0.2                 ## доля бака, ниже которой полоса топлива мигает
 const BAR_W := 60
-const PANEL := Rect2(3, 3, 93, 33)
+const PANEL := Rect2(3, 3, 97, 33)
+const BAR_X := 36                        ## полосы — правее подписей HP / ТОП / ГРУЗ
 const COLOR_PANEL := Color(0.06, 0.04, 0.09, 0.62)
 const COLOR_TEXT := Color(0.95, 0.92, 0.85)
 const COLOR_DIM := Color(0.62, 0.58, 0.66)
@@ -53,7 +54,7 @@ var pager: Pager
 
 func _ready() -> void:
 	layer = 5
-	_font = ThemeDB.fallback_font
+	_font = UiKit.FONT
 	_canvas = Control.new()
 	_canvas.set_anchors_preset(Control.PRESET_FULL_RECT)
 	_canvas.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -151,7 +152,7 @@ func _on_pickup_collected(kind: StringName, value: int) -> void:
 
 func _on_damaged(amount: int, _source: StringName, _at: Vector3) -> void:
 	_damage_flash = 0.35
-	popup("−%d HP" % amount, COLOR_DAMAGE)
+	popup("-%d HP" % amount, COLOR_DAMAGE)
 
 
 func _process(dt: float) -> void:
@@ -182,28 +183,28 @@ func _draw_hud() -> void:
 
 	_canvas.draw_rect(PANEL, COLOR_PANEL)
 	var hp_frac := float(_hp) / maxf(_hp_max, 1)
-	_text(Vector2(6, 11), "HP", 8, COLOR_DIM)
-	_bar(Vector2(32, 6), hp_frac, COLOR_HP if hp_frac > 0.3 else COLOR_HP_LOW, true)
+	_text(Vector2(6, 11), "HP", UiKit.TEXT, COLOR_DIM)
+	_bar(Vector2(BAR_X, 6), hp_frac, COLOR_HP if hp_frac > 0.3 else COLOR_HP_LOW, true)
 	var fuel_frac := _fuel / maxf(_fuel_max, 0.001)
 	var low := fuel_frac <= FUEL_WARN
 	var blink_on := not low or fmod(_time, 0.5) < 0.3
-	_text(Vector2(6, 21), "ТОП", 8, COLOR_FUEL_LOW if low and blink_on else COLOR_DIM)
-	_bar(Vector2(32, 16), fuel_frac, COLOR_FUEL_LOW if low else COLOR_FUEL, blink_on)
-	_text(Vector2(6, 31), "ГРУЗ", 8, COLOR_DIM)
+	_text(Vector2(6, 21), "ТОП", UiKit.TEXT, COLOR_FUEL_LOW if low and blink_on else COLOR_DIM)
+	_bar(Vector2(BAR_X, 16), fuel_frac, COLOR_FUEL_LOW if low else COLOR_FUEL, blink_on)
+	_text(Vector2(6, 31), "ГРУЗ", UiKit.TEXT, COLOR_DIM)
 	# Ячейки трюма — во всю ширину полос HP и топлива при любом числе слотов: границы ячеек делят
 	# BAR_W + 1 пикселей поровну (с округлением), между ячейками — пиксель зазора.
 	var n := maxi(_slots_max, 1)
 	for i in n:
 		var x0 := roundi(i * (BAR_W + 1.0) / n)
 		var x1 := roundi((i + 1) * (BAR_W + 1.0) / n) - 1
-		_canvas.draw_rect(Rect2(32 + x0, 26, x1 - x0, 5), COLOR_SLOT if i < _slots else COLOR_SLOT_EMPTY)
+		_canvas.draw_rect(Rect2(BAR_X + x0, 26, x1 - x0, 5), COLOR_SLOT if i < _slots else COLOR_SLOT_EMPTY)
 
-	_text(Vector2(0, 17), "%06d" % roundi(_score_shown), 16, COLOR_TEXT, HORIZONTAL_ALIGNMENT_CENTER, size.x)
+	_text(Vector2(0, 17), "%06d" % roundi(_score_shown), UiKit.TITLE, COLOR_TEXT, HORIZONTAL_ALIGNMENT_CENTER, size.x)
 	var y := 30.0
 	for p in _popups:
 		var c: Color = p["color"]
 		c.a = clampf(p["t"] / 0.4, 0.0, 1.0)
-		_text(Vector2(0, y), p["text"], 8, c, HORIZONTAL_ALIGNMENT_CENTER, size.x)
+		_text(Vector2(0, y), p["text"], UiKit.TEXT, c, HORIZONTAL_ALIGNMENT_CENTER, size.x)
 		y += 10.0
 
 	_draw_bottom(size)
@@ -211,7 +212,7 @@ func _draw_hud() -> void:
 	if _banner_t > 0.0:
 		var c := _banner_color
 		c.a = clampf(_banner_t / 0.5, 0.0, 1.0)
-		_text(Vector2(0, size.y * 0.5 - 30), _banner, 16, c, HORIZONTAL_ALIGNMENT_CENTER, size.x)
+		_text(Vector2(0, size.y * 0.5 - 30), _banner, UiKit.TITLE, c, HORIZONTAL_ALIGNMENT_CENTER, size.x)
 
 
 ## Низ-центр: внизу — таймер основного челнока; над ним — его сообщение (площадка выбрана), выше —
@@ -222,20 +223,20 @@ func _draw_bottom(size: Vector2) -> void:
 	var blink := fmod(_time, 0.6) < 0.4
 	match _shuttle_state:
 		&"waiting":
-			_text(Vector2(0, y), "ПОСАДКА ЧЕЛНОКА ЧЕРЕЗ  %s" % _clock(_shuttle_left), 8, COLOR_TEXT,
+			_text(Vector2(0, y), "ПОСАДКА ЧЕЛНОКА ЧЕРЕЗ  %s" % _clock(_shuttle_left), UiKit.TEXT, COLOR_TEXT,
 					HORIZONTAL_ALIGNMENT_CENTER, size.x)
 		&"announced":
-			_text(Vector2(0, y), "ПОСАДКА ЧЕЛНОКА ЧЕРЕЗ  %s" % _clock(_shuttle_left), 8, COLOR_PAD,
+			_text(Vector2(0, y), "ПОСАДКА ЧЕЛНОКА ЧЕРЕЗ  %s" % _clock(_shuttle_left), UiKit.TEXT, COLOR_PAD,
 					HORIZONTAL_ALIGNMENT_CENTER, size.x)
 		&"landed":
 			var col := COLOR_PAD if _shuttle_left > 5.0 or blink else COLOR_FUEL_LOW
-			_text(Vector2(0, y), "ЧЕЛНОК НА ПЛОЩАДКЕ  %s  — остановитесь в круге" % _clock(_shuttle_left), 8, col,
+			_text(Vector2(0, y), "ЧЕЛНОК НА ПЛОЩАДКЕ  %s  — остановитесь в круге" % _clock(_shuttle_left), UiKit.TEXT, col,
 					HORIZONTAL_ALIGNMENT_CENTER, size.x)
 	y -= 12.0
 	if _notice_t > 0.0:
 		var c := _notice_color
 		c.a = clampf(_notice_t / 0.5, 0.0, 1.0) * (0.4 if _notice_t > 3.0 and not blink else 1.0)
-		_text(Vector2(0, y), _notice, 8, c, HORIZONTAL_ALIGNMENT_CENTER, size.x)
+		_text(Vector2(0, y), _notice, UiKit.TEXT, c, HORIZONTAL_ALIGNMENT_CENTER, size.x)
 		y -= 12.0
 	var call_line := ""
 	var call_color := COLOR_WARN
@@ -253,11 +254,11 @@ func _draw_bottom(size: Vector2) -> void:
 		var a := 1.0 if blink else 0.35
 		call_color = Color(COLOR_TEXT, a)
 		if not call_line.is_empty():
-			_text(Vector2(0, y), call_line, 8, call_color, HORIZONTAL_ALIGNMENT_CENTER, size.x)
+			_text(Vector2(0, y), call_line, UiKit.TEXT, call_color, HORIZONTAL_ALIGNMENT_CENTER, size.x)
 			y -= 8.0
-		_text(Vector2(0, y - 4.0), "НЕТ ТОПЛИВА", 16, Color(COLOR_FUEL_LOW, a), HORIZONTAL_ALIGNMENT_CENTER, size.x)
+		_text(Vector2(0, y - 4.0), "НЕТ ТОПЛИВА", UiKit.TITLE, Color(COLOR_FUEL_LOW, a), HORIZONTAL_ALIGNMENT_CENTER, size.x)
 	elif not call_line.is_empty():
-		_text(Vector2(0, y), call_line, 8, call_color, HORIZONTAL_ALIGNMENT_CENTER, size.x)
+		_text(Vector2(0, y), call_line, UiKit.TEXT, call_color, HORIZONTAL_ALIGNMENT_CENTER, size.x)
 
 
 static func _clock(seconds: float) -> String:

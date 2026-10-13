@@ -11,6 +11,7 @@ signal exit_requested
 
 const LETTERS := "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-"
 const LETTERS_Y := 166.0
+const LINE_H := 11.0                     ## шаг строк таблиц: шрифт 10 px и пиксель зазора
 const INPUT_DELAY_S := 0.8             ## нажатия в первые доли секунды игнорируются (палец ещё на газе)
 const CAUSE_TEXT := {
 	"evacuated": "ВОЗВРАЩЕНИЕ НА ОРБИТУ",
@@ -62,7 +63,7 @@ func _init(run_result: Dictionary, leaderboard: Leaderboard) -> void:
 
 func _ready() -> void:
 	layer = 20
-	_font = ThemeDB.fallback_font
+	_font = UiKit.FONT
 	var shade := ColorRect.new()
 	shade.color = Color(0.06, 0.04, 0.1, 0.78)
 	shade.set_anchors_preset(Control.PRESET_FULL_RECT)
@@ -186,7 +187,7 @@ func _draw_screen() -> void:
 	var w := _canvas.size.x
 	var cause := String(result["cause"])
 	var evacuated := cause == String(RunState.CAUSE_EVACUATED)
-	_text(Vector2(0, 30), CAUSE_TEXT.get(cause, "МАШИНА УНИЧТОЖЕНА"), 16,
+	_text(Vector2(0, 30), CAUSE_TEXT.get(cause, "МАШИНА УНИЧТОЖЕНА"), UiKit.TITLE,
 			COLOR_GOOD if evacuated else COLOR_BAD, HORIZONTAL_ALIGNMENT_CENTER, w)
 
 	var lines: Array[Array] = []
@@ -201,21 +202,21 @@ func _draw_screen() -> void:
 	lines.append(["Рейсов челнока", str(int(result["shipments"]))])
 	var y := 52.0
 	for line in lines:
-		_text(Vector2(w * 0.5 - 130, y), line[0], 8, COLOR_DIM)
-		_text(Vector2(w * 0.5 - 130, y), line[1], 8, COLOR_TEXT, HORIZONTAL_ALIGNMENT_RIGHT, 260)
-		y += 10.0
+		_text(Vector2(w * 0.5 - 130, y), line[0], UiKit.TEXT, COLOR_DIM)
+		_text(Vector2(w * 0.5 - 130, y), line[1], UiKit.TEXT, COLOR_TEXT, HORIZONTAL_ALIGNMENT_RIGHT, 260)
+		y += LINE_H
 	y += 6.0
-	_text(Vector2(0, y + 6), "ИТОГ  %d" % int(result["score"]), 16, COLOR_MARK, HORIZONTAL_ALIGNMENT_CENTER, w)
+	_text(Vector2(0, y + 6), "ИТОГ  %d" % int(result["score"]), UiKit.TITLE, COLOR_MARK, HORIZONTAL_ALIGNMENT_CENTER, w)
 	y += 26.0
 
 	if _entering:
-		_text(Vector2(0, y), "НОВЫЙ РЕКОРД — %d-е место" % (_rank + 1), 8, COLOR_GOOD, HORIZONTAL_ALIGNMENT_CENTER, w)
+		_text(Vector2(0, y), "НОВЫЙ РЕКОРД — %d-е место" % (_rank + 1), UiKit.TEXT, COLOR_GOOD, HORIZONTAL_ALIGNMENT_CENTER, w)
 		y = LETTERS_Y
 		var x0 := w * 0.5 - 27.0
 		for i in 3:
 			var x := x0 + i * 20.0
 			var col := COLOR_MARK if i == _cursor else COLOR_TEXT
-			_text(Vector2(x, y), LETTERS[_letters[i]], 16, col, HORIZONTAL_ALIGNMENT_CENTER, 14)
+			_text(Vector2(x, y), LETTERS[_letters[i]], UiKit.TITLE, col, HORIZONTAL_ALIGNMENT_CENTER, 14)
 			if i == _cursor and fmod(_age, 0.6) < 0.4:
 				_canvas.draw_rect(Rect2(x + 1, y + 3, 12, 2), COLOR_MARK)
 			for up: bool in [true, false]:
@@ -223,26 +224,26 @@ func _draw_screen() -> void:
 				var s := -1.0 if up else 1.0
 				_canvas.draw_colored_polygon(PackedVector2Array([c + Vector2(-4, -2 * s), c + Vector2(4, -2 * s),
 						c + Vector2(0, 3 * s)]), COLOR_MARK if i == _cursor else COLOR_DIM)
-		_text(Vector2(0, y + 24), "W / S — буква,  A / D — позиция", 8, COLOR_DIM,
+		_text(Vector2(0, y + 24), "W / S — буква,  A / D — позиция", UiKit.TEXT, COLOR_DIM,
 				HORIZONTAL_ALIGNMENT_CENTER, w)
 		return
 
 	var list := board.entries(StringName(result["class"]))
-	_text(Vector2(0, y), "РЕКОРДЫ", 8, COLOR_DIM, HORIZONTAL_ALIGNMENT_CENTER, w)
+	_text(Vector2(0, y), "РЕКОРДЫ", UiKit.TEXT, COLOR_DIM, HORIZONTAL_ALIGNMENT_CENTER, w)
 	y += 11.0
 	for i in list.size():
 		var e: Dictionary = list[i]
 		var col := COLOR_MARK if i == _highlight else COLOR_TEXT
 		var x := w * 0.5 - 100
-		_text(Vector2(x, y), "%2d." % (i + 1), 8, COLOR_DIM)
-		_text(Vector2(x + 18, y), String(e.get("name", "???")), 8, col)
-		_text(Vector2(x + 50, y), str(int(e.get("score", 0))), 8, col, HORIZONTAL_ALIGNMENT_RIGHT, 60)
-		_text(Vector2(x + 120, y), _format_time(float(e.get("time", 0.0))), 8, COLOR_DIM)
+		_text(Vector2(x, y), "%2d." % (i + 1), UiKit.TEXT, COLOR_DIM)
+		_text(Vector2(x + 18, y), String(e.get("name", "???")), UiKit.TEXT, col)
+		_text(Vector2(x + 50, y), str(int(e.get("score", 0))), UiKit.TEXT, col, HORIZONTAL_ALIGNMENT_RIGHT, 60)
+		_text(Vector2(x + 120, y), _format_time(float(e.get("time", 0.0))), UiKit.TEXT, COLOR_DIM)
 		var saved: bool = e.get("cause", "") == String(RunState.CAUSE_EVACUATED)
-		_text(Vector2(x + 152, y), "возврат" if saved else "гибель", 8, COLOR_GOOD if saved else COLOR_BAD)
-		y += 10.0
+		_text(Vector2(x + 152, y), "возврат" if saved else "гибель", UiKit.TEXT, COLOR_GOOD if saved else COLOR_BAD)
+		y += LINE_H
 	if list.is_empty():
-		_text(Vector2(0, y), "пока пусто", 8, COLOR_DIM, HORIZONTAL_ALIGNMENT_CENTER, w)
+		_text(Vector2(0, y), "пока пусто", UiKit.TEXT, COLOR_DIM, HORIZONTAL_ALIGNMENT_CENTER, w)
 
 
 static func _format_time(seconds: float) -> String:

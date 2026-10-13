@@ -16,7 +16,7 @@ func _ready() -> void:
 	layer = 10
 	_label = Label.new()
 	_label.position = Vector2(4, 40)   # под панелью HUD
-	_label.add_theme_font_size_override(&"font_size", 8)
+	_label.add_theme_font_size_override(&"font_size", UiKit.TEXT)
 	_label.add_theme_color_override(&"font_shadow_color", Color(0, 0, 0, 0.8))
 	_label.add_theme_constant_override(&"shadow_offset_x", 1)
 	_label.add_theme_constant_override(&"shadow_offset_y", 1)

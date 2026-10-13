@@ -18,16 +18,22 @@ const CONTROLS := [
 	["Меню челнока", "W / S, F", "стик, X"],
 	["Поворот камеры", "Q / E", "LB / RB"],
 	["Пауза", "Esc", "Start"],
+	["Громкость (пауза)", "A / D", "стик"],
 	["Справка", "F1", ""],
 ]
 
 const GROUP := &"help_screen"
+const MARGIN := 14.0                   ## поля экрана
+const COL_GAP := 8.0                   ## зазор между колонками таблицы управления
+const ROW_H := 13.0
 
 var pause_game := false                ## во время вылазки — ставить игру на паузу
 var _paused_here := false
 var _canvas: Control
 var _closed_frame := -1
 var _close: Button
+var _table_x := 0.0                    ## левый край таблицы управления (справа, по ширине текста)
+var _col: Array[float] = []            ## отступы колонок таблицы от _table_x
 
 
 func _ready() -> void:
@@ -44,8 +50,10 @@ func _ready() -> void:
 	_canvas.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_canvas.draw.connect(_draw_help)
 	add_child(_canvas)
-	_add_block(Rect2(14, 24, 250, 90), "ЦЕЛЬ", GOAL)
-	_add_block(Rect2(14, 128, 250, 80), "УГРОЗЫ", THREATS)
+	_layout_table()
+	var text_w := _table_x - MARGIN * 2.0 - 1.0     # слева — текст, до разделителя перед таблицей
+	var y := _add_block(Vector2(MARGIN, 20), text_w, "ЦЕЛЬ", GOAL)
+	_add_block(Vector2(MARGIN, y + 10.0), text_w, "УГРОЗЫ", THREATS)
 	_close = UiKit.button("ЗАКРЫТЬ", "Esc")
 	_close.pressed.connect(close)
 	add_child(_close)
@@ -54,38 +62,54 @@ func _ready() -> void:
 	visible = false
 
 
-func _add_block(r: Rect2, title: String, body: String) -> void:
+## Колонки таблицы управления — по самому широкому тексту в каждой; таблица прижата к правому полю.
+func _layout_table() -> void:
+	var widths: Array[float] = [0.0, 0.0, 0.0]
+	var rows: Array = [["УПРАВЛЕНИЕ", "клавиши", "геймпад"]]
+	rows.append_array(CONTROLS)
+	for row: Array in rows:
+		for c in 3:
+			var w := UiKit.FONT.get_string_size(row[c], HORIZONTAL_ALIGNMENT_LEFT, -1, UiKit.TEXT).x
+			widths[c] = maxf(widths[c], ceilf(w))
+	_col = [0.0, widths[0] + COL_GAP, widths[0] + widths[1] + COL_GAP * 2.0]
+	_table_x = 480.0 - MARGIN - (_col[2] + widths[2])
+
+
+## Блок текста: заголовок и абзац шириной width от pos; возвращает нижний край абзаца.
+func _add_block(pos: Vector2, width: float, title: String, body: String) -> float:
 	var head := Label.new()
 	head.text = title
-	head.position = r.position
-	head.add_theme_font_size_override(&"font_size", 8)
+	head.position = pos
+	head.add_theme_font_size_override(&"font_size", UiKit.TEXT)
 	head.add_theme_color_override(&"font_color", UiKit.COLOR_MARK)
 	add_child(head)
 	var label := Label.new()
 	label.text = body
 	label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	label.add_theme_font_size_override(&"font_size", 8)
+	label.add_theme_font_size_override(&"font_size", UiKit.TEXT)
 	label.add_theme_color_override(&"font_color", UiKit.COLOR_TEXT)
 	label.add_theme_constant_override(&"line_spacing", -1)
 	add_child(label)
-	label.position = r.position + Vector2(0, 13)
-	label.custom_minimum_size = Vector2(r.size.x, 0)
-	label.size = Vector2(r.size.x, r.size.y - 13)
+	label.position = pos + Vector2(0, ROW_H)
+	label.custom_minimum_size = Vector2(width, 0)
+	label.size = Vector2(width, 0)
+	return label.position.y + label.get_combined_minimum_size().y
 
 
 func _draw_help() -> void:
-	var x := 284.0
+	var x := _table_x
 	var y := 30.0
-	UiKit.text(_canvas, Vector2(x, y), "УПРАВЛЕНИЕ", 8, UiKit.COLOR_MARK)
-	UiKit.text(_canvas, Vector2(x + 96, y), "клавиши", 8, UiKit.COLOR_DIM)
-	UiKit.text(_canvas, Vector2(x + 144, y), "геймпад", 8, UiKit.COLOR_DIM)
+	UiKit.text(_canvas, Vector2(x, y), "УПРАВЛЕНИЕ", UiKit.TEXT, UiKit.COLOR_MARK)
+	UiKit.text(_canvas, Vector2(x + _col[1], y), "клавиши", UiKit.TEXT, UiKit.COLOR_DIM)
+	UiKit.text(_canvas, Vector2(x + _col[2], y), "геймпад", UiKit.TEXT, UiKit.COLOR_DIM)
 	y += 16.0
 	for row: Array in CONTROLS:
-		UiKit.text(_canvas, Vector2(x, y), row[0], 8, UiKit.COLOR_DIM)
-		UiKit.text(_canvas, Vector2(x + 96, y), row[1], 8, UiKit.COLOR_TEXT)
-		UiKit.text(_canvas, Vector2(x + 144, y), row[2], 8, UiKit.COLOR_TEXT)
-		y += 13.0
-	_canvas.draw_line(Vector2(274, 24), Vector2(274, 296), Color(1, 1, 1, 0.12), 1.0)
+		UiKit.text(_canvas, Vector2(x, y), row[0], UiKit.TEXT, UiKit.COLOR_DIM)
+		UiKit.text(_canvas, Vector2(x + _col[1], y), row[1], UiKit.TEXT, UiKit.COLOR_TEXT)
+		UiKit.text(_canvas, Vector2(x + _col[2], y), row[2], UiKit.TEXT, UiKit.COLOR_TEXT)
+		y += ROW_H
+	var line_x := _table_x - MARGIN * 0.5 - 1.0
+	_canvas.draw_line(Vector2(line_x, 24), Vector2(line_x, 296), Color(1, 1, 1, 0.12), 1.0)
 
 
 func open() -> void:

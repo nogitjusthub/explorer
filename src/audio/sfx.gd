@@ -3,7 +3,7 @@ extends RefCounted
 ## Процедурные звуки без ассетов (как и двигатель): AudioStreamWAV 16 бит, моно. Генерируются один
 ## раз при старте. Звуков угроз по GDD немного: молния (треск телеграфа и гром), гул землетрясения,
 ## смерч (вой с завываниями), гул пылевой бури, урон; у фауны — крик скакунов, мычание и топот панцирника; реактивный рёв капсулы и челноков,
-## луч захвата; «дзынь» подбора находки и «би-бип» пейджера.
+## луч захвата; «дзынь» подбора находки и «би-бип» пейджера; щелчок механического тумблера в интерфейсе.
 
 const RATE := 22050
 
@@ -379,35 +379,87 @@ static func pager_beep() -> AudioStreamWAV:
 	return _wav(data)
 
 
-## Луч захвата (эвакуация): низкий гул с пульсацией, над ним тон, плавно взлетающий вверх (300 → 1200 Гц,
-## с вибрато), и россыпь коротких высоких искорок; в конце стихает.
+## Луч захвата: среднечастотное волнообразное гудение — тон около 420 Гц с обертонами, громкость и
+## высота плавают волнами 3,2 раза в секунду («воу-воу»), второй голос чуть выше даёт биение. Звучит
+## перегруженно и рычит: субгармоника октавой ниже, «рык» — рваная амплитудная модуляция ~38 Гц, сигнал
+## загнан в несимметричный клип, срезан жёстко и огрублён по разрядности; раз в 0,3–0,7 с — броски
+## перегруза (громче, треск, разрядность ещё ниже). Нарастает и гаснет плавно.
 static func tractor(seconds: float) -> AudioStreamWAV:
 	var n := int(seconds * RATE)
 	var data := PackedFloat32Array()
 	data.resize(n)
 	var rng := RandomNumberGenerator.new()
 	rng.seed = 1515
-	var hum := 0.0
-	var tone := 0.0
-	var ping := 0.0
-	var ping_f := 3000.0
-	var ping_t := 1.0
+	var p1 := 0.0
+	var p2 := 0.0
+	var lp := 0.0
+	var surge := 0.0                                    # бросок перегруза 0…1, гаснет
+	var next_surge := 0.2
+	var growl_ph := 0.0                                 # фаза «рыка»: частота гуляет 30…46 Гц
+	var growl_f := 38.0
 	for i in n:
 		var t := float(i) / RATE
 		var k := t / seconds
-		hum += TAU * 90.0 / RATE
-		var drone := (sin(hum) + 0.5 * sin(hum * 2.0)) * (0.6 + 0.4 * sin(TAU * 9.0 * t))
-		tone += TAU * 300.0 * pow(4.0, k) * (1.0 + 0.03 * sin(TAU * 7.0 * t)) / RATE
-		var rise := sin(tone) + 0.3 * sin(tone * 1.5)
-		if rng.randf() < 0.0015:
-			ping_t = 0.0
-			ping_f = rng.randf_range(2200.0, 4800.0)
-		ping_t += 1.0 / RATE
-		ping += TAU * ping_f / RATE
-		var sparkle := sin(ping) * exp(-ping_t * 30.0)
-		var env := minf(t / 0.15, 1.0) * (1.0 - smoothstep(0.8, 1.0, k))
-		data[i] = tanh((drone * 0.35 + rise * 0.35 + sparkle * 0.25) * env * 1.4)
+		var wave := sin(TAU * 3.2 * t)
+		var f := 420.0 * (1.0 + 0.035 * wave)
+		p1 += TAU * f / RATE
+		p2 += TAU * f * 1.007 / RATE
+		var voice := sin(p1) + 0.5 * sin(p1 * 2.0) + 0.25 * sin(p1 * 3.0) + 0.6 * sin(p2) + 0.3 * sin(p2 * 2.0) \
+				+ 0.7 * sin(p1 * 0.5)                     # субгармоника — низ рыка
+		if i % 220 == 0:
+			growl_f = rng.randf_range(30.0, 46.0)
+		growl_ph += TAU * growl_f / RATE
+		var growl := 0.35 + 0.65 * clampf(sin(growl_ph) * 3.0, 0.0, 1.0)   # рваные «хрипы» ~38 раз в секунду
+		lp = lerpf(lp, voice * growl, 0.45)
+		if t >= next_surge:
+			surge = 1.0
+			next_surge = t + rng.randf_range(0.3, 0.7)
+		surge = maxf(surge - 9.0 / RATE, 0.0)
+		var amp := 0.62 + 0.38 * sin(TAU * 3.2 * t - 0.6)
+		var x := lp * amp * (4.5 + 2.5 * surge) + rng.randf_range(-1.0, 1.0) * 0.9 * surge * surge
+		var y := tanh(x + 0.35) - tanh(0.35)           # несимметричный клип — «рваный» верх
+		y = clampf(y * 1.6, -0.75, 0.75)               # жёсткий срез сверху — рычание, не гул
+		var bits := lerpf(24.0, 6.0, surge)            # разрядность: грубее в броске
+		y = roundf(y * bits) / bits
+		var env := smoothstep(0.0, 0.2, t) * (1.0 - smoothstep(0.82, 1.0, k))
+		data[i] = y * env
 	return _wav(data)
+
+
+## Старый механический тумблер: тихий взвод рычага, через 18 мс — главный щелчок защёлки, ещё через 9 мс —
+## дребезг пружины. Каждое событие — корпус (низ ~190 Гц) и металл (1,2–4 кГц), затухающие с разной
+## скоростью, плюс короткий шумовой удар.
+static func toggle() -> AudioStreamWAV:
+	if _cache.has(&"toggle"):
+		return _cache[&"toggle"]
+	var n := int(0.09 * RATE)
+	var data := PackedFloat32Array()
+	data.resize(n)
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 2207
+	# Моды: частота, затухание (1/с), громкость.
+	var modes: Array[Vector3] = [Vector3(190.0, 45.0, 0.8), Vector3(1180.0, 110.0, 0.55),
+			Vector3(2350.0, 170.0, 0.45), Vector3(3900.0, 320.0, 0.3)]
+	var events: Array[Vector2] = [Vector2(0.0, 0.25), Vector2(0.018, 1.0), Vector2(0.027, 0.3)]
+	var phases: Array[float] = []
+	for m in modes.size() * events.size():
+		phases.append(rng.randf() * TAU)
+	for i in n:
+		var t := float(i) / RATE
+		var v := 0.0
+		for e in events.size():
+			var dt := t - events[e].x
+			if dt < 0.0:
+				continue
+			var s := rng.randf_range(-1.0, 1.0) * exp(-dt * 1800.0) * 0.8
+			for m in modes.size():
+				var md := modes[m]
+				s += md.z * sin(TAU * md.x * dt + phases[e * modes.size() + m]) * exp(-dt * md.y)
+			v += s * events[e].y
+		data[i] = tanh(v * 0.8)
+	var wav := _wav(data)
+	_cache[&"toggle"] = wav
+	return wav
 
 
 ## Удар по корпусу: глухой низкий «бум» со щелчком.

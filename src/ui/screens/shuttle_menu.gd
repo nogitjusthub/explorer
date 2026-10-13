@@ -94,7 +94,7 @@ func _confirm() -> void:
 func _draw_menu() -> void:
 	_canvas.draw_rect(PANEL, COLOR_PANEL)
 	UiKit.text(_canvas, Vector2(PANEL.position.x, PANEL.position.y + 12), "ЧЕЛНОК — окно %d с" % ceili(window_left),
-			8, COLOR_DIM, HORIZONTAL_ALIGNMENT_CENTER, PANEL.size.x)
+			UiKit.TEXT, COLOR_DIM, HORIZONTAL_ALIGNMENT_CENTER, PANEL.size.x)
 	for i in ITEMS.size():
 		var r := _row(i)
 		var enabled := i != Item.SHIP or cargo_value > 0
@@ -102,7 +102,7 @@ func _draw_menu() -> void:
 			_canvas.draw_rect(r, COLOR_ROW)
 			_canvas.draw_rect(r, COLOR_MARK, false, 1.0)
 		var col := COLOR_MARK if i == _selected else (COLOR_TEXT if enabled else COLOR_DIM)
-		UiKit.text(_canvas, Vector2(r.position.x, r.position.y + 11), ITEMS[i], 8, col,
+		UiKit.text(_canvas, Vector2(r.position.x, r.position.y + 11), ITEMS[i], UiKit.TEXT, col,
 				HORIZONTAL_ALIGNMENT_CENTER, r.size.x)
 	var hint := ""
 	match _selected:
@@ -110,5 +110,5 @@ func _draw_menu() -> void:
 			hint = "+%d очков, челнок улетит" % cargo_value if cargo_value > 0 else "трюм пуст"
 		Item.EVACUATE:
 			hint = "груз %d + бонус %d, конец забега" % [cargo_value, bonus]
-	UiKit.text(_canvas, Vector2(PANEL.position.x, PANEL.end.y - 6), hint, 8, COLOR_DIM,
+	UiKit.text(_canvas, Vector2(PANEL.position.x, PANEL.end.y - 6), hint, UiKit.TEXT, COLOR_DIM,
 			HORIZONTAL_ALIGNMENT_CENTER, PANEL.size.x)

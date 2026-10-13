@@ -23,7 +23,7 @@ var _font: Font
 
 func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_font = ThemeDB.fallback_font
+	_font = UiKit.FONT
 	EventBus.threat_telegraphed.connect(_on_telegraphed)
 	EventBus.threat_ended.connect(_on_ended)
 
@@ -61,6 +61,6 @@ func _draw() -> void:
 	for e in _entries:
 		var text: String = NAMES[e["kind"]]
 		var col := COLOR_NEW if e["age"] < 1.0 and fmod(e["age"], 0.3) < 0.15 else COLOR_TEXT
-		draw_string(_font, Vector2(0, y) + Vector2.ONE, text, HORIZONTAL_ALIGNMENT_RIGHT, size.x - 4.0, 8, Color(0, 0, 0, 0.85))
-		draw_string(_font, Vector2(0, y), text, HORIZONTAL_ALIGNMENT_RIGHT, size.x - 4.0, 8, col)
+		draw_string(_font, Vector2(0, y) + Vector2.ONE, text, HORIZONTAL_ALIGNMENT_RIGHT, size.x - 4.0, UiKit.TEXT, Color(0, 0, 0, 0.85))
+		draw_string(_font, Vector2(0, y), text, HORIZONTAL_ALIGNMENT_RIGHT, size.x - 4.0, UiKit.TEXT, col)
 		y += LINE_H

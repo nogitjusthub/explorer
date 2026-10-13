@@ -9,6 +9,9 @@ extends Creature
 ## встают рядом с машиной, и передний бросается вперёд и кусает (раз в hopper_bite_cd_s); машину
 ## укусы не двигают — только раскачивают корпус. Танк на ходу расшвыривает стаю. Не подобраться к машине
 ## fauna_give_up_s (или погоня дольше hopper_chase_s / дальше hopper_chase_dist) — стая уходит и пропадает.
+## Разбуженная шумным событием (посадка челнока) стая сначала бежит к нему — это ещё не погоня, её пределы
+## не тратятся; заметила машину — погоня с этого места. Добежала, а машины не видно — ждёт, пока слышен
+## шум, и остаётся патрулировать там; застряла по пути — патрулирует, где стоит.
 ## Облик — помесь «Чужого» и велоцираптора: чёрный глянцевый хитин с сине-фиолетовым отливом, наклонный
 ## корпус на «птичьих» ногах (бедро, голень, высокая стопа с поднятым когтем-серпом), короткие передние
 ## лапки с когтями, трубки на спине, короткий ребристый хвост; голова — длинный гладкий купол без глаз,
@@ -56,6 +59,8 @@ const FORMATION: Array[Vector2] = [Vector2(0, -0.2), Vector2(-0.17, 0.07), Vecto
 var state := State.IDLE
 var home := Vector2.ZERO
 var source: Variant = null               ## шумное событие, к которому идёт стая (посадка челнока)
+var _to_source := false                  ## бежит на шум: погоня (и её пределы) — с момента, когда заметит машину
+var _spent: Variant = null               ## шум, на который уже бегала и осталась, — на него больше не просыпается
 
 ## Особи: узлы модели (node, body, head, jaw, throat, tail, tail2, arms, thighs, shins, feet) и состояние
 ## анимации (phase — фаза шага, clock, idle — до новой повадки, look/look_to — голова: поворот, наклон,
@@ -104,10 +109,10 @@ func flee() -> void:
 	_timer = RETREAT_S
 
 
-## Разбудить (шумное событие — посадка челнока): крик и погоня.
+## Разбудить (шумное событие — посадка челнока): крик и бег на шум.
 func wake(toward: Variant = null) -> void:
-	source = toward
 	if state == State.IDLE:
+		source = toward
 		_alert()
 
 
@@ -123,7 +128,7 @@ func step(dt: float) -> void:
 				_alert()
 			else:
 				var heard: Variant = noise.heard_source(pos)
-				if heard != null:
+				if heard != null and heard != _spent:
 					wake(heard)
 		State.ALERT:
 			_timer -= dt
@@ -131,9 +136,8 @@ func step(dt: float) -> void:
 			if _timer <= 0.0:
 				state = State.CHASE
 				aggressive = true
-				_chase_from = pos
-				_chase_t = 0.0
-				reset_interest()
+				_to_source = source != null
+				_start_chase()
 		State.CHASE:
 			_chase(dt)
 		State.RETREAT:
@@ -167,16 +171,55 @@ func _patrol(dt: float) -> void:
 	_stuck = _stuck + dt if pos.distance_squared_to(before) < 0.0001 else 0.0
 
 
+## Погоня — с этого места и момента: пределы hopper_chase_s, hopper_chase_dist и потеря интереса.
+func _start_chase() -> void:
+	_chase_from = pos
+	_chase_t = 0.0
+	reset_interest()
+
+
+## Бег на шум: заметила машину — погоня отсюда; добежала — ждёт, пока шум слышен, затем патрулирует здесь;
+## не продвигается к цели fauna_give_up_s — патрулирует, где стоит.
+func _run_to_source(dt: float, hunting: bool) -> void:
+	if hunting:
+		_to_source = false
+		source = null
+		_start_chase()
+		return
+	var target: Vector2 = source
+	var there := pos.distance_to(target) < 1.5
+	if lost_interest(dt, pos.distance_to(target), there) or (there and noise.heard_source(pos) == null):
+		_settle()
+		return
+	if not there:
+		_move_pack(target, rules.hopper_speed, dt)
+
+
+## Остаётся здесь: патрулирует вокруг этого места, машину замечает, как обычно.
+func _settle() -> void:
+	state = State.IDLE
+	aggressive = false
+	_to_source = false
+	_spent = source
+	source = null
+	home = pos
+	_goal = pos
+	_timer = 0.0
+	reset_interest()
+
+
 func _chase(dt: float) -> void:
-	_chase_t += dt
 	var vp := vehicle.state.pos
 	var d := pos.distance_to(vp)
 	var hunting := noise.hears_vehicle(pos) or d < SEE_R
+	if _to_source:
+		_run_to_source(dt, hunting)
+		if _to_source or state != State.CHASE:
+			return
+	_chase_t += dt
 	if _stun <= 0.0:
 		var goal: Vector2
-		if not hunting and source != null:
-			goal = source as Vector2
-		elif d > 2.0:
+		if d > 2.0:
 			var field: FlowField = director.call(&"field", FlowField.Mode.HOPPER)
 			var t := Grid.tile_of_world(pos.x, pos.y)
 			var next := field.next_tile(query, t) if field != null else t

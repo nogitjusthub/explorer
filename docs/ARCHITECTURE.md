@@ -22,36 +22,45 @@
 
 ```
 explorer/
-├─ project.godot
+├─ project.godot  export_presets.cfg  play.cmd  editor.cmd
 ├─ .gitignore  .gitattributes  README.md
-├─ docs/                        GDD.md  ARCHITECTURE.md
+├─ docs/                        GDD.md  ARCHITECTURE.md  CREATURE_OPTIONS.md (варианты облика фауны)  PLANETS.md (бэклог)
 ├─ tools/                       .gdignore — Godot не сканирует папку
-│  ├─ godot/                    портативный движок (в .gitignore), файл ._sc_ — self-contained режим
-│  └─ scripts/                  get_godot  get_templates  test  export_web (.ps1), web_server.py
+│  ├─ godot/                    портативный движок, шаблоны экспорта, свой веб-шаблон templates/ (всё в .gitignore);
+│  │                            файл ._sc_ — self-contained режим
+│  ├─ scripts/                  get_godot  get_templates  build_web_template  test  export_web  publish_web (.ps1),
+│  │                            web_server.py, build_web_template.gdbuild (классы, выключенные в веб-шаблоне)
+│  └─ textures/                 gen_terrain_tops  gen_cliff_walls  gen_water_cycle  gen_ground_sprites — генераторы текстур
 ├─ src/                         код и сцены, сгруппированы по фичам
 │  ├─ core/                     event_bus  balance  settings  job  job_scheduler  grid  det_rng
 │  ├─ main/                     main.tscn (GameFlow)  run_state  leaderboard  drop_pod
-│  ├─ terrain/                  chunk_data  terrain_data  terrain_rules  terrain_generator
-│  │                            terrain_query  terrain_connectivity  terrain_repair  diff_store
-│  │                            chunk_mesher  world_streamer  chunk_node  tree_field  (deformation — M3)
-│  ├─ vehicle/                  vehicle  vehicle_models  vehicle_ride  vehicle_state  vehicle_kinematics  vehicle_input
-│  ├─ camera/                   iso_camera_rig(.tscn)
-│  ├─ hazards/                  threat_director  storm_front  weather_front  murk_layers  quake  tornado
-│  ├─ fauna/                    fauna_director  creature  hopper_pack  worm  shellback  nest  noise_field  flow_field
+│  ├─ terrain/                  chunk_data  terrain_data  terrain_rules  terrain_checks  terrain_generator  terrain_query
+│  │                            terrain_connectivity  terrain_repair  diff_store  deformation  fault_line
+│  │                            chunk_mesher  chunk_node  world_streamer  tree_field  ground_sprites
+│  ├─ vehicle/                  vehicle  vehicle_models  vehicle_ride  vehicle_trail  vehicle_state  vehicle_kinematics
+│  │                            vehicle_input  shock_fx
+│  ├─ camera/                   iso_camera_rig
+│  ├─ hazards/                  threat_director  storm_front  weather_front  murk_layers  quake  tornado  whirlpool
+│  ├─ fauna/                    fauna_director  creature  noise_field  flow_field  hopper_pack  worm  shellback
+│  │                            mire_shark  lake_monster  stargazer
 │  ├─ pickups/                  pickup_generator  pickup_field
 │  ├─ shuttle/                  shuttle_scheduler  emergency_call  shuttle_craft  shuttle_controller
-│  ├─ render/                   terrain_materials  warmup  mesh_kit  shaders/ (terrain, water, tree, pickup, pickup_outline,
-│  │                            fog_layer, fog_layer_depth, visibility.gdshaderinc, fog_layer.gdshaderinc)
-│  ├─ audio/                    engine_sound  (audio_director — M3)
+│  ├─ render/                   terrain_materials  body_material  mesh_kit  shader_cache  warmup
+│  │  └─ shaders/               terrain  water  tree  ground_sprite  track_mark  pickup  pickup_outline  body  body_xray
+│  │                            body_faces  whirlpool  foam_strip  landing_hazard  st_elmo  fog_layer  fog_layer_depth
+│  │                            (.gdshader); visibility  fog_layer  body (.gdshaderinc)
+│  ├─ audio/                    audio_director  sfx  engine_sound
 │  ├─ debug/                    dev_tools  autopilot  debug_snapshot  map_render  map_preview
-│  └─ ui/                       debug_overlay  toast  weather_overlay  pause_overlay  ui_kit  vehicle_portrait
-│                               hud/ (hud, radar, pager)  screens/ (hangar, help, shuttle_menu, results)
-│                               screens/ (results_screen, shuttle_menu)
+│  └─ ui/                       ui_kit  volume_slider  debug_overlay  toast  weather_overlay  pause_overlay  vehicle_portrait
+│     ├─ hud/                   hud  radar  pager
+│     └─ screens/               hangar_screen  help_screen  shuttle_menu  emergency_menu  results_screen
 ├─ data/                        ресурсы баланса (.tres)
-│  ├─ balance_rules.gd  balance.tres  terrain_params.gd  terrain_params.tres
+│  ├─ balance_rules.gd  balance.tres  terrain_params.gd
 │  ├─ vehicles/                 vehicle_class.gd  rover.tres  tank.tres  hover.tres
 │  └─ pickups/                  pickup_kind.gd  crystal  sample  core  repair  canister (.tres)
-├─ assets/                      models/  textures/  sfx/  fonts/
+├─ assets/
+│  ├─ textures/                 terrain_tops  cliff_walls  water_cycle  ground_sprites (.png — из tools/textures)
+│  └─ fonts/                    ark-pixel-10px.ttf (OFL.txt)  ui_theme.tres
 └─ tests/                       run_tests.gd  test_case.gd  terrain_fixture.gd  unit/test_*.gd
 ```
 
@@ -100,18 +109,20 @@ explorer/
 | `JobScheduler` | Очередь задач с приоритетом и бюджетом микросекунд на кадр |
 | `WorldStreamer` | Какие чанки нужны, гистерезис загрузки и выгрузки, пул `ChunkNode`; `ready_around` — мир вокруг точки собран и ямы залиты. При обычном старте мир вокруг точки старта грузится в фоне, пока игрок в трюме (бюджет задач там 12 мс); «Высадка» раньше, чем догружен мир и прошёл прогрев шейдеров, — трюм держит затемнение с надписью «загрузка мира…». Синхронно (`preload_around`) — только отладочные запуски и «Заново» |
 | `ChunkNode` | 4 × `MeshInstance3D` (секции) + вода + `MultiMeshInstance3D` деревьев и мелочи на земле |
-| `Vehicle` | Владеет `VehicleState`, вызывает кинематику, шлёт события; `set_class()` меняет модель и тон двигателя. Разряд по машине рисует `ShockFx`: ломаные дуги лентами к камере (`ImmediateMesh`) и белое мерцание корпуса через `material_overlay` — материалы с ключами, которые уже прогреты |
+| `Vehicle` | Владеет `VehicleState`, вызывает кинематику, шлёт события; `set_class()` меняет модель, тон двигателя и колеи (`VehicleTrail`). Разряд по машине рисует `ShockFx`: ломаные дуги лентами к камере (`ImmediateMesh`) и белое мерцание корпуса через `material_overlay` — материалы с ключами, которые уже прогреты |
 | `MeshKit` | Low-poly геометрия с плоскими гранями: призмы по контуру, правильные многоугольники, треугольники с правильной лицевой стороной — для техники и фауны; `face_mapped` — разметка граней для узора обшивки (UV — точка относительно центра грани, UV2 — её полуразмеры, `COLOR`, `CUSTOM0` и `CUSTOM1` — до двух деталей грани) |
 | `VehicleModels` | Модели трёх классов из примитивов по `design_references/`: коробки, цилиндры, трубы `_rod` (бампер, кенгурятник), призмы `MeshKit.prism` по контуру (нос ховера, гусеницы танка); материалы для силуэта (stencil; окрашенные части и гусеницы — `BodyMaterial` с узором), вращающиеся части, огонёк антенны `beacon` (`Vehicle` мигает им, пока летит аварийный челнок). Ходовая — в `root`, корпус — в подрессоренном `body`, антенна — на шарнире `antenna`. `build_plain` — без stencil, для экранов вне игры |
 | `VehicleRide` | Анимация хода, только модель: тряска `body` (сумма синусов; по скорости, грунту `FLAG_ROUGH`/`FLAG_MIRE` и массе класса), осадка в зыбучем, наклоны от ускорения, колыхание и крен ховера, антенна-хлыст на пружине (инерция, отставание от раскачки `Vehicle.rock`) |
+| `VehicleTrail` | Следы и пыль от езды: колея колёс ровера и гусениц танка — отпечатки-квады в одном `MultiMesh` (кольцом по 900), шейдер `track_mark` затемняет ими землю умножением в пикселях сетки рельефа (1/16 тайла: тексель берётся по своему центру, края и рисунок протектора — ступеньками), гаснет за 16 с и дальше 13 тайлов от машины, ступенями; пыль (облачка 4×4 текселя) и комья (тексель) — `CPUParticles3D` цвета грунта. Сила по материалу: песок, грунт, камень и кристалл — едва; зыбун — колея и грязь без пыли; вода — ничего. Ховер колеи не оставляет — пыль кольцом вокруг юбки |
 | `VehicleInput` | Действия ввода → вектор направления относительно экрана |
 | `IsoCameraRig` | Ортокамера, поворот 90°, упреждение, тряска |
 | `GameFlow` (`main.gd`) | Машина состояний: Старт → Десант → Вылазка → Итог; владеет `RunState`. Точка высадки — `_landing_point` рядом с площадкой старта (детерминированно по seed); `RunState.tick` и угрозы идут только в фазе вылазки |
 | `DropPod` | Сцена десанта: тень и маркер на земле, капсула падает с разгоном и у земли тормозит тремя двигателями (пламя, подсветка, пыль, рёв `Sfx.thrust`), мягко садится (`landed` — тряску и испуг фауны делает `GameFlow`, глухой удар — `AudioDirector`), раскрывается лепестками (`opened` — старт вылазки) |
-| `PauseOverlay` | Пауза по Esc: `get_tree().paused`, затемнение и надпись; включена только во время вылазки. `DevTools` работает и на паузе (`PROCESS_MODE_ALWAYS`) |
-| `HangarScreen` | Экран выбора — трюм челнока в своём мире (`SubViewport`, `own_world_3d`): задняя и левая стены, люки в ряд вдоль задней стены, три модели (`VehicleModels.build_plain` — без x-ray), прожектор без теней (`SpotLight3D` + видимый конус, под машиной — пятно-тень) и лампа отсека над выбранной, характеристики значками; старт — машина уходит в люк, затемнение, `started` |
+| `PauseOverlay` | Пауза по Esc: `get_tree().paused`, затемнение, надпись и регулятор громкости (`VolumeSlider`, A / D); включена только во время вылазки. `DevTools` работает и на паузе (`PROCESS_MODE_ALWAYS`) |
+| `HangarScreen` | Экран выбора — трюм челнока в своём мире (`SubViewport`, `own_world_3d`): задняя и левая стены, люки в ряд вдоль задней стены, три модели (`VehicleModels.build_plain` — без x-ray), прожектор без теней (`SpotLight3D` + видимый конус, под машиной — пятно-тень) и лампа отсека над выбранной, характеристики значками; справа от названия — версия (`application/config/version`), в правом верхнем углу — кнопка-динамик с окошком громкости (`VolumeSlider`; пока открыто, A / D — громкость); под картинкой трюма — непрозрачная подложка (пока трюм не отрисовал первый кадр, мир за ним не просвечивает); старт — машина уходит в люк, затемнение, `started` |
 | `HelpScreen` | Справка F1 (`PROCESS_MODE_ALWAYS`): цель, угрозы, управление; во время вылазки ставит паузу. Статический `is_open` — пока справка открыта, другие экраны ввод не берут |
-| `UiKit` | Кнопки с хоткеем (мышь и тап), текст с тенью, значки и шкала характеристик `stat_*` класса |
+| `UiKit` | Кнопки с хоткеем (мышь и тап), текст с тенью, значки и шкала характеристик `stat_*` класса; шрифт `FONT` (Ark Pixel 10 px) и кегли `TEXT` = 10, `TITLE` = 20 — другие размеры у пиксельного шрифта не ложатся в пиксели |
+| `VolumeSlider` | Регулятор общей громкости: динамик, 10 делений, проценты; клик и протяжка, колесо, `nudge` для клавиш; клик по динамику — выключить и вернуть; каждое изменение — `Settings.set_master_volume` и щелчок тумблера |
 | `VehiclePortrait` | Маленький вращающийся портрет модели класса в своём мире (экран итога) |
 | `ResultsScreen` | Итог, ввод имени (клавиши и тап), рекорды; кнопки «Заново [R]» (`Settings.quick_restart` — после перезагрузки сцены сразу десант) и «Выход [Esc]» (в трюм) |
 | `ThreatDirector` | Уровень угрозы T, цикл непогоды «ясно → гроза или плохая видимость → ясно» (жребий вида — `murk_variant`), таймеры землетрясений и смерчей с T ≥ 3, затишье после сдачи; угрозы — дочерние узлы, урон машине — сигналом `damaged` |
@@ -134,7 +145,7 @@ explorer/
 | `Radar` | Часть HUD: находки и площадка (или стрелка на неё), ориентирован по экрану |
 | `DevTools` | Параметры запуска, бенчмарк, снимки, сценарии без рук (`--idle`, `--press`) |
 | `Visibility` | Глобальные uniform видимости, логическое скрытие объектов |
-| `AudioDirector`, `Sfx` | Процедурные звуки событий (треск телеграфа молнии, гром, удар по корпусу, гудение помех при инверсии управления, фауна, челноки, «дзынь» подбора по `pickup_collected`, «би-бип» пейджера по `pager_alert`, гул пылевой бури по `weather_changed`), громкость по расстоянию. Синтез — по звуку за кадр, пока игрок в трюме (все сразу на старте — почти секунда чёрного экрана в браузере); нужный раньше синтезируется сразу |
+| `AudioDirector`, `Sfx` | Процедурные звуки событий (треск телеграфа молнии, гром, удар по корпусу, гудение помех при инверсии управления, фауна, челноки, «дзынь» подбора по `pickup_collected`, «би-бип» пейджера по `pager_alert`, щелчок старого механического тумблера в интерфейсе (`Sfx.toggle`: выбор машины в трюме, регулятор громкости), луч захвата — среднечастотное волнообразное гудение с перегрузом и рычанием (субгармоника, рваная модуляция ~38 Гц, клип, огрублённая разрядность, броски), гул пылевой бури по `weather_changed`), громкость по расстоянию. Синтез — по звуку за кадр, пока игрок в трюме (все сразу на старте — почти секунда чёрного экрана в браузере); нужный раньше синтезируется сразу |
 | `HUD` | Отображение; подписан на `EventBus`, логики не содержит. Внутри — `Radar` и `Pager` (угрозы и «МАЛО ТОПЛИВА»: только название), вспышка экрана от молнии; внизу — таймеры челноков и при пустом баке мигающие «НЕТ ТОПЛИВА» / вызов аварийного |
 
 ### 3.3 Autoload-синглтоны
@@ -143,7 +154,7 @@ explorer/
 |---|---|
 | `EventBus` | Только сигналы, без состояния. Связи «один ко многим» (HUD, пейджер, аудио, тряска камеры) без ссылок между модулями |
 | `Balance` | Загружает `data/*.tres`, отдаёт типизированный доступ: `Balance.vehicle(&"rover")`, `Balance.rules`. В тестах подменяется |
-| `Settings` | Пользовательские настройки (тряска, зум, громкость), `user://settings.cfg` |
+| `Settings` | Пользовательские настройки (тряска, зум, громкость), `user://settings.cfg`; громкость применяется к шине Master по квадрату уровня (`apply_volume`), на нуле шина выключена |
 | `BodyMaterial` | Материалы техники и фауны с пиксельным узором (M5): `body.gdshader` (фауна), `body_xray.gdshader` (машины — пишет 1 в stencil; силуэт сквозь препятствия — следующий проход `xray_pass`, как `STENCIL_MODE_XRAY`) и `body_faces.gdshader` (челноки и капсула десанта — обшивка по граням без stencil, силуэт машины сквозь них виден), общий код — `body.gdshaderinc`: цвет детали × яркость узора по координатам меша (траки, юбка, щитки, шкура, кольца, чешуя, ил, галька); обшивка техники — по граням: `map_faces` размечает меши `MeshKit.face_mapped`, грань делится на целое число пикселей, детали `Detail` (дверь, люк, решётка; до двух на грань, из мета `details` узла) — прямоугольники на своих гранях; свет — как у `StandardMaterial3D`. Цвет — параметр шейдера: `set_color` / `color_of` (годятся и для `StandardMaterial3D`) |
 | `ShaderCache` | Держит материалы образцов прогрева всю сессию: шейдер `StandardMaterial3D` общий на набор свойств, и Godot выбрасывает его (с программами GPU) вместе с последним материалом — без удержания каждая молния и новый червь компилировали шейдеры заново. Переживает «Заново» |
 
@@ -399,7 +410,7 @@ signal run_ended(result: Dictionary)
 
 ## 10. Рендер в Compatibility
 
-- **Пиксель-арт без шейдеров постобработки:** базовое разрешение 480×320 (`display/window/size/viewport_*`), окно 960×640, `stretch/mode = viewport`, `stretch/aspect = keep` (3:2 с полями), `stretch/scale_mode = integer`, фильтр холста `nearest`, MSAA выключен, шрифты без сглаживания. Камера: наклон 45°, `size = 320 × √2 / 40`, чтобы ромб тайла был 40 пикселей в ширину (≈ 28 в высоту); отладочный `--zoom=N`.
+- **Пиксель-арт без шейдеров постобработки:** базовое разрешение 480×320 (`display/window/size/viewport_*`), окно 960×640, `stretch/mode = viewport`, `stretch/aspect = keep` (3:2 с полями), `stretch/scale_mode = integer`, фильтр холста `nearest`, MSAA выключен. Шрифт — пиксельный Ark Pixel 10 px (`assets/fonts/ark-pixel-10px.ttf`, OFL; урезан `pyftsubset` до латиницы, кириллицы и знаков): тема проекта `assets/fonts/ui_theme.tres`, импорт без сглаживания, хинтинга и дробных позиций; кегли только 10 и 20 (`UiKit.TEXT`, `UiKit.TITLE`). Знака минус U+2212 в шрифте нет — в тексте на экране дефис. Камера: наклон 45°, `size = 320 × √2 / 40`, чтобы ромб тайла был 40 пикселей в ширину (≈ 28 в высоту); отладочный `--zoom=N`.
 - **Тени:** одна ортогональная карта (`SHADOW_ORTHOGONAL`) на 40 единиц, `shadow_bias = 0.1`, `shadow_normal_bias = 2.0`; параметр запуска `--no-shadows` выключает их.
 
 - **Террейн** (`terrain.gdshader`): `COLOR.rgb` — тинт материала, `COLOR.a` — признак стенки. Во `fragment()`: `NORMAL = normalize(cross(dFdx(VERTEX), dFdy(VERTEX)))` с разворотом к камере — flat-освещение. Верх тайла — тонкая тёмная кромка по краям (сетка ромбов). Стенки — страты по `floor(world_y / 0.5)`, три цвета по кругу.
@@ -459,12 +470,22 @@ $g = ".\tools\godot\Godot_v4.7.2-stable_win64_console.exe"
 | Угрозы | `-- --no-threats`, `--no-fauna`, `--threat=N` (уровень не ниже N), `--event=storm@5,quake@12` (storm, quake, fog, acid, dust, tornado, hoppers, worm, shellback — событие на заданной секунде; разлом не ложится у площадки старта — для проверки `--spawn=100,60`). В отчёте бенчмарка — счётчики угроз; `--log-slow` печатает кадры дольше 20 мс со временем (первый запуск после правки шейдеров даёт пики компиляции — со второго их нет, Godot кэширует) |
 | Сценарий без рук | `… -- --seed=7 --idle --shuttle-in=6 --shuttle-dist=0 --shots=2 --press=radio@8`: машина стоит на площадке старта, челнок садится через 6 с, F на 8-й секунде (меню открыто — подтверждает эвакуацию). Без стартового экрана (`--idle`, автопилот, бенчмарк) и с `--no-drop` сцены десанта нет — машина сразу на площадке старта; десант с экраном выбора: `--idle --select --press=radio@0.6 --shots=16 --shot-every=0.25`. Пауза: `--press=pause@3,pause@5`. Ещё: `--fuel=N` (мало топлива — проверка пустого бака), `--debug` (оверлей сразу) |
 | Карта рельефа в PNG | `… --headless --path . --script res://src/debug/map_preview.gd -- --seed=1 --chunks=8` → `build/preview/` |
+| Свой веб-шаблон (урезанный) | `powershell -ExecutionPolicy Bypass -File tools\scripts\build_web_template.ps1` → `tools/godot/templates/web_nothreads_release.zip`; исходники Godot, emsdk и объектники — в `..\godot-web-build` (вне репозитория) |
 | Веб-сборка | `powershell -ExecutionPolicy Bypass -File tools\scripts\export_web.ps1 [-Debug] [-Serve]` → `build/web/` |
 | Веб-сервер с приёмом отчётов | `python tools/scripts/web_server.py 8000`; страница `http://127.0.0.1:8000/?seed=7&bench=40&shots=2` пишет результаты в `build/web_log.txt` и снимки в `build/web_shots/` |
 
 - Движок портативный, лежит в `tools/godot/` (в `.gitignore`), self-contained режим (`._sc_`) — настройки редактора и шаблоны экспорта внутри этой папки.
 - `build/` в `.gitignore` и с `.gdignore` — Godot его не сканирует.
 - Пресет `Web` в `export_presets.cfg`: однопоточная сборка (`variant/thread_support = false`), спец-заголовки сервера не нужны.
+- **Свой шаблон веб-экспорта.** Пресет `Web` берёт `custom_template/release = res://tools/godot/templates/web_nothreads_release.zip` — Godot 4.7.2-stable, собранный `build_web_template.ps1`: Emscripten 4.0.20 (им собран официальный шаблон), `optimize=size lto=full production=yes`, без потоков и GDExtension. `index.wasm` 39,5 → 22,2 МБ, в gzip 10,1 → 5,6 МБ (−45 %); `index.pck` тот же. Отключено то, чем игра не пользуется:
+  - 2D/3D-физика (тела, области, запросы), навигация, XR — `_physics_process`, `Engine.get_physics_frames()` и physics interpolation от них не зависят;
+  - MSDF (шрифт — пиксельный TTF, без MSDF); SVG: иконки встроенной темы (CheckBox, OptionButton, полосы прокрутки) станут пустыми — в игре таких контролов нет;
+  - форматы картинок, кроме PNG и WebP (lossless-текстуры в `.ctex` хранятся как WebP — модуль `webp` обязателен), Basis/ASTC/ETC; звук ogg/vorbis/mp3, видео theora, interactive_music (звук синтезируется в `AudioStreamWAV`/`AudioStreamGenerator`);
+  - сеть и криптография (multiplayer, ENet, WebRTC, WebSocket, JSON-RPC, UPnP, mbedTLS), GLTF/FBX, CSG, GridMap, meshoptimizer (LOD/simplify у `SurfaceTool` не вызываются), RegEx, VisualShader, ZIPReader/ZIPPacker;
+  - классы, которых нет ни в скриптах, ни в сценах, ни в ресурсах игры (build profile Godot, список — `tools/scripts/build_web_template.gdbuild`): лишние GUI-контролы (RichTextLabel, TextEdit, Tree, GraphEdit, ColorPicker, OptionButton, SpinBox, TabContainer…), AnimationTree, TileMap, 2D-узлы (Line2D, Polygon2D, Light2D, Parallax2D…), GPU-частицы, Label3D/Sprite3D, Decal, ReflectionProbe, VoxelGI, LightmapGI, небо (Procedural/Panorama/PhysicalSkyMaterial), TextMesh, аудиоэффекты. Они не регистрируются в ClassDB, и LTO выкидывает их код (около −1 МБ gzip). Из C++ движка они по-прежнему создаются — недоступны только по имени: из скриптов, сцен и ресурсов.
+  - Оставлено нужное: `noise` (`FastNoiseLite`), `javascript_eval` (`JavaScriptBridge.eval` в отладочных инструментах), FreeType (шрифт — TTF) + Brotli (встроенный шрифт Godot — WOFF2, запасной), `bcdec` (распаковка S3TC/BPTC, если GPU их не умеет), текст-сервер Advanced (HarfBuzz + ICU) — текст пиксель в пиксель как в официальной сборке. Ключ `-FallbackText` ставит Fallback-сервер: ещё −0,5 МБ gzip, кириллица работает, но глифы 8-пиксельного шрифта без сглаживания встают на другие доли пикселя — у «[» в подсказках «[A]», «[F]» пропадают засечки, чуть иначе пробелы.
+  - **Понадобилось игре что-то из списка — включите модуль в `build_web_template.ps1` (или уберите класс из `build_web_template.gdbuild`) и пересоберите шаблон**: в вебе без него класса просто нет, скрипт или ресурс не загрузится. На ПК (официальный движок) такой ошибки не видно — после новых классов, ресурсов и звуков проверяйте веб-сборку (консоль браузера: `Cannot get class`, `Parse Error`). Сборка — около 10 минут.
+- `export_web.ps1`: если zip нет (свежий клон), на время экспорта путь в пресете очищается и экспорт идёт на официальном шаблоне (`get_templates.ps1`); debug-экспорт всегда на официальном. Экспорт из редактора без zip падает с «Custom release template not found» — соберите шаблон или очистите поле (Проект → Экспорт → Web, расширенные настройки).
 
 ## 13. Подводные камни (найдены в M0)
 

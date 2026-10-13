@@ -62,7 +62,7 @@ func _ready() -> void:
 	_light.shadow_enabled = false
 	_light.position = _spot + Vector3(0, 1.5, 0)
 	add_child(_light)
-	_makers = [_basics, _world_kit, _tornado, _worm, _hoppers, _shellback, _shark, _nessie, _stargazer,
+	_makers = [_basics, _world_kit, _trail, _tornado, _worm, _hoppers, _shellback, _shark, _nessie, _stargazer,
 			_whirlpool, _shuttle.bind(ShuttleCraft.Kind.MAIN), _shuttle.bind(ShuttleCraft.Kind.EMERGENCY), _drop_pod,
 			_vehicles]
 	_t0 = Time.get_ticks_msec()
@@ -206,6 +206,15 @@ func _tornado() -> Node3D:
 	t.rng = RandomNumberGenerator.new()
 	add_child(t)                        # звук и расстановка — в дереве сцены
 	t.begin(_at2())
+	return t
+
+
+## Колея, пыль и комья из-под колёс (VehicleTrail).
+func _trail() -> Node3D:
+	var t := VehicleTrail.new()
+	t.setup(vehicle.cls if vehicle != null else Balance.vehicle(&"rover"), query)
+	add_child(t)
+	t.preview(at)
 	return t
 
 
