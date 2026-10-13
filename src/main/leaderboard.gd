@@ -10,6 +10,7 @@ extends RefCounted
 
 const DEFAULT_PATH := "user://leaderboard.json"
 const SIZE := 10
+const NAME_MAX := 8                    ## имя в таблице — до стольких знаков
 const BAD_SUFFIX := ".bad"
 const TMP_SUFFIX := ".tmp"
 
@@ -61,7 +62,7 @@ static func clean_entry(raw: Variant) -> Variant:
 	var time: Variant = e.get("time", 0.0)
 	var shipments: Variant = e.get("shipments", 0)
 	return {
-		"name": e["name"] if e.get("name") is String else "???",
+		"name": (e["name"] as String).substr(0, NAME_MAX) if e.get("name") is String else "???",
 		"score": int(score),
 		"time": float(time) if (time is float or time is int) and is_finite(float(time)) else 0.0,
 		"shipments": int(shipments) if (shipments is float or shipments is int) and is_finite(float(shipments)) else 0,

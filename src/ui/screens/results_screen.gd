@@ -1,16 +1,19 @@
 class_name ResultsScreen
 extends CanvasLayer
 ## Экран итога (GDD §6): причина конца, разбор счёта, ввод имени при попадании в топ-10 класса
-## (3 знака, аркадный выбор: W/S — знак, A/D — позиция, F/Enter — готово; на телефоне — тап по
-## стрелкам над и под буквой и кнопка «Готово»), затем таблица рекордов и две кнопки с хоткеями:
+## (до Leaderboard.NAME_MAX знаков: с клавиатуры набирается прямо — буквы, цифры, дефис, пробел, Backspace
+## стирает; аркадный выбор для геймпада и стрелок: ↑/↓ — знак, ←/→ — позиция; Enter — готово; на телефоне —
+## тап по стрелкам над и под знаком и кнопка «Готово»; пустые позиции — пробел, по краям обрезается),
+## затем таблица рекордов и две кнопки с хоткеями:
 ## «Заново» (R) — сразу новый забег на той же машине, «Выход» (Esc) — в трюм челнока к выбору машины.
 ## Класс машины показан портретом — названий классов игроку не показываем.
 
 signal restart_requested
 signal exit_requested
 
-const LETTERS := "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-"
+const LETTERS := " ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-"   ## первый — пусто (пробел)
 const LETTERS_Y := 166.0
+const SLOT_W := 18.0                     ## шаг позиций имени: знак кеглем 20 — до 16 пикселей
 const LINE_H := 11.0                     ## шаг строк таблиц: шрифт 10 px и пиксель зазора
 const INPUT_DELAY_S := 0.8             ## нажатия в первые доли секунды игнорируются (палец ещё на газе)
 const CAUSE_TEXT := {
@@ -46,7 +49,7 @@ var board: Leaderboard
 var _rank := -1
 var _entering := false
 var _highlight := -1
-var _letters := PackedInt32Array([0, 0, 0])
+var _letters := PackedInt32Array()       ## индексы знаков в LETTERS по позициям имени
 var _cursor := 0
 var _age := 0.0
 var _canvas: Control
@@ -85,10 +88,27 @@ func _ready() -> void:
 	_rank = board.rank_for(StringName(result["class"]), score) if score > 0 else -1
 	_entering = _rank >= 0
 	_update_buttons()
-	var last := Settings.player_name.to_upper()
-	for i in 3:
-		var idx := LETTERS.find(last[i]) if i < last.length() else 0
-		_letters[i] = maxi(idx, 0)
+	_letters = letters_of(Settings.player_name)
+	_cursor = mini(Settings.player_name.strip_edges().length(), Leaderboard.NAME_MAX - 1)   # набор — за прошлым именем
+
+
+## Имя → индексы знаков (до NAME_MAX позиций, незнакомые знаки и хвост — пусто).
+static func letters_of(player_name: String) -> PackedInt32Array:
+	var up := player_name.to_upper()
+	var out := PackedInt32Array()
+	out.resize(Leaderboard.NAME_MAX)
+	for i in Leaderboard.NAME_MAX:
+		out[i] = maxi(LETTERS.find(up[i]), 0) if i < up.length() else 0
+	return out
+
+
+## Индексы знаков → имя: пустые позиции — пробелы, по краям обрезаются; совсем пусто — «???».
+static func compose_name(letters: PackedInt32Array) -> String:
+	var s := ""
+	for i in letters:
+		s += LETTERS[i]
+	s = s.strip_edges()
+	return s if not s.is_empty() else "???"
 
 
 func _process(dt: float) -> void:
@@ -119,10 +139,14 @@ func _update_buttons() -> void:
 	_exit.visible = not _entering
 
 
-## Стрелки над и под буквой (тап меняет знак): прямоугольники для попадания.
+## Левый край позиции i имени (позиции — по центру экрана).
+func _slot_x(i: int) -> float:
+	return _canvas.size.x * 0.5 - SLOT_W * Leaderboard.NAME_MAX * 0.5 + i * SLOT_W
+
+
+## Стрелки над и под знаком (тап меняет знак): прямоугольники для попадания.
 func _letter_arrow(i: int, up: bool) -> Rect2:
-	var x := _canvas.size.x * 0.5 - 27.0 + i * 20.0
-	return Rect2(x, LETTERS_Y - (25.0 if up else -3.0), 14, 10)
+	return Rect2(_slot_x(i) + 2.0, LETTERS_Y - (25.0 if up else -3.0), 14, 10)
 
 
 func _input(event: InputEvent) -> void:
@@ -130,9 +154,9 @@ func _input(event: InputEvent) -> void:
 		return
 	if _entering and UiKit.is_click(event):
 		var p: Vector2 = (event as InputEventMouseButton).position
-		for i in 3:
+		for i in Leaderboard.NAME_MAX:
 			for up: bool in [true, false]:
-				if _letter_arrow(i, up).grow(3.0).has_point(p):
+				if _letter_arrow(i, up).grow(2.0).has_point(p):
 					_cursor = i
 					_letters[i] = (_letters[i] + (1 if up else LETTERS.length() - 1)) % LETTERS.length()
 					get_viewport().set_input_as_handled()
@@ -140,6 +164,9 @@ func _input(event: InputEvent) -> void:
 		return
 	if not (event is InputEventKey or event is InputEventJoypadButton or event is InputEventJoypadMotion \
 			or event is InputEventAction):
+		return
+	if _entering and event is InputEventKey and _type_key(event as InputEventKey):
+		get_viewport().set_input_as_handled()
 		return
 	var confirm := event.is_action_pressed(&"radio") or event.is_action_pressed(&"ui_accept")
 	if _entering:
@@ -150,7 +177,7 @@ func _input(event: InputEvent) -> void:
 		elif event.is_action_pressed(&"move_left", true):
 			_cursor = maxi(_cursor - 1, 0)
 		elif event.is_action_pressed(&"move_right", true):
-			_cursor = mini(_cursor + 1, 2)
+			_cursor = mini(_cursor + 1, Leaderboard.NAME_MAX - 1)
 		elif confirm:
 			_save_entry()
 		else:
@@ -164,15 +191,28 @@ func _input(event: InputEvent) -> void:
 		exit_requested.emit()
 
 
-func _player_name() -> String:
-	var s := ""
-	for i in 3:
-		s += LETTERS[_letters[i]]
-	return s
+## Набор с клавиатуры: знак из LETTERS (буквы, цифры, дефис, пробел; W/A/S/D при наборе имени — тоже буквы)
+## встаёт в позицию, курсор идёт дальше; Backspace стирает назад. true — клавиша съедена.
+func _type_key(k: InputEventKey) -> bool:
+	if not k.pressed:
+		return false
+	if k.keycode == KEY_BACKSPACE:
+		if _letters[_cursor] == 0 and _cursor > 0:
+			_cursor -= 1
+		_letters[_cursor] = 0
+		return true
+	if k.echo or k.unicode == 0 or k.ctrl_pressed or k.alt_pressed:
+		return false
+	var idx := LETTERS.find(String.chr(k.unicode).to_upper())
+	if idx < 0:
+		return false
+	_letters[_cursor] = idx
+	_cursor = mini(_cursor + 1, Leaderboard.NAME_MAX - 1)
+	return true
 
 
 func _save_entry() -> void:
-	var entry_name := _player_name()
+	var entry_name := compose_name(_letters)
 	_highlight = board.add(StringName(result["class"]), {
 		"name": entry_name, "score": int(result["score"]), "time": snappedf(float(result["time"]), 0.1),
 		"shipments": int(result["shipments"]), "cause": String(result["cause"]),
@@ -213,19 +253,22 @@ func _draw_screen() -> void:
 	if _entering:
 		_text(Vector2(0, y), "НОВЫЙ РЕКОРД — %d-е место" % (_rank + 1), UiKit.TEXT, COLOR_GOOD, HORIZONTAL_ALIGNMENT_CENTER, w)
 		y = LETTERS_Y
-		var x0 := w * 0.5 - 27.0
-		for i in 3:
-			var x := x0 + i * 20.0
+		for i in Leaderboard.NAME_MAX:
+			var x := _slot_x(i) + 2.0
 			var col := COLOR_MARK if i == _cursor else COLOR_TEXT
 			_text(Vector2(x, y), LETTERS[_letters[i]], UiKit.TITLE, col, HORIZONTAL_ALIGNMENT_CENTER, 14)
 			if i == _cursor and fmod(_age, 0.6) < 0.4:
 				_canvas.draw_rect(Rect2(x + 1, y + 3, 12, 2), COLOR_MARK)
+			elif i != _cursor and _letters[i] == 0:
+				_canvas.draw_rect(Rect2(x + 3, y + 3, 8, 1), COLOR_DIM)      # пустая позиция — черта
 			for up: bool in [true, false]:
 				var c := _letter_arrow(i, up).get_center()
 				var s := -1.0 if up else 1.0
 				_canvas.draw_colored_polygon(PackedVector2Array([c + Vector2(-4, -2 * s), c + Vector2(4, -2 * s),
 						c + Vector2(0, 3 * s)]), COLOR_MARK if i == _cursor else COLOR_DIM)
-		_text(Vector2(0, y + 24), "W / S — буква,  A / D — позиция", UiKit.TEXT, COLOR_DIM,
+		_text(Vector2(0, y + 24), "Набери имя (до %d знаков), Backspace — стереть" % Leaderboard.NAME_MAX,
+				UiKit.TEXT, COLOR_DIM, HORIZONTAL_ALIGNMENT_CENTER, w)
+		_text(Vector2(0, y + 24 + LINE_H), "↑ ↓ — знак,  ← → — позиция,  Enter — готово", UiKit.TEXT, COLOR_DIM,
 				HORIZONTAL_ALIGNMENT_CENTER, w)
 		return
 
@@ -235,13 +278,13 @@ func _draw_screen() -> void:
 	for i in list.size():
 		var e: Dictionary = list[i]
 		var col := COLOR_MARK if i == _highlight else COLOR_TEXT
-		var x := w * 0.5 - 100
+		var x := w * 0.5 - 104
 		_text(Vector2(x, y), "%2d." % (i + 1), UiKit.TEXT, COLOR_DIM)
-		_text(Vector2(x + 18, y), String(e.get("name", "???")), UiKit.TEXT, col)
-		_text(Vector2(x + 50, y), str(int(e.get("score", 0))), UiKit.TEXT, col, HORIZONTAL_ALIGNMENT_RIGHT, 60)
-		_text(Vector2(x + 120, y), _format_time(float(e.get("time", 0.0))), UiKit.TEXT, COLOR_DIM)
+		_text(Vector2(x + 18, y), String(e.get("name", "???")), UiKit.TEXT, col)      # 8 знаков — до 64 пикселей
+		_text(Vector2(x + 84, y), str(int(e.get("score", 0))), UiKit.TEXT, col, HORIZONTAL_ALIGNMENT_RIGHT, 44)
+		_text(Vector2(x + 136, y), _format_time(float(e.get("time", 0.0))), UiKit.TEXT, COLOR_DIM)
 		var saved: bool = e.get("cause", "") == String(RunState.CAUSE_EVACUATED)
-		_text(Vector2(x + 152, y), "возврат" if saved else "гибель", UiKit.TEXT, COLOR_GOOD if saved else COLOR_BAD)
+		_text(Vector2(x + 166, y), "возврат" if saved else "гибель", UiKit.TEXT, COLOR_GOOD if saved else COLOR_BAD)
 		y += LINE_H
 	if list.is_empty():
 		_text(Vector2(0, y), "пока пусто", UiKit.TEXT, COLOR_DIM, HORIZONTAL_ALIGNMENT_CENTER, w)
