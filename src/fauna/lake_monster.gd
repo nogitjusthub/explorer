@@ -92,7 +92,8 @@ const REPLAN_S := 0.5
 const LURK_CHECK_S := 1.0
 const LURK_R := 20.0                     ## таится: машину дальше не замечает
 const LOSE_DIST := 30.0
-const MEMO_S := 10.0                     ## память «глубоко ли» — забывается (рельеф меняется)
+const MEMO_S := 10.0                     ## память «глубоко ли» — забывается (рельеф меняется), и пока таится
+const STRANDED_R := 2                    ## озеро под ней обмелело — ищет глубокую воду в стольких тайлах
 const TURN_RATE := 4.0                   ## рад/с — поворот V-следа
 const WAKE_LEN := 2.4
 const WAKE_ANGLE := 0.42                 ## рад — полураствор V-следа
@@ -133,6 +134,7 @@ var _watch_from := PackedFloat32Array()  ## WATCH: наклоны дисков, 
 var _watch_head := 0.0
 var _watch_jaw := 0.0
 var _water_y := 0.0                      ## мировая высота зеркала воды под Нессой
+var _refuge := Vector2.INF               ## под ней обмелело — плывёт сюда, к глубокой воде (_regain_deep)
 
 # Бросок
 var _base := Vector2.ZERO                ## основание шеи — точка на глубокой воде
@@ -299,6 +301,10 @@ func start_hunt() -> void:
 func step(dt: float) -> void:
 	_time += dt
 	_timer += dt
+	_memo_age += dt
+	if _memo_age > MEMO_S:
+		_memo_age = 0.0
+		_deep.clear()                       # рельеф меняется (землетрясение, воронка) — и пока таится тоже
 	var vp := vehicle.state.pos
 	var d := pos.distance_to(vp)
 	match state:
@@ -306,12 +312,18 @@ func step(dt: float) -> void:
 			_check -= dt
 			if _check <= 0.0:
 				_check = LURK_CHECK_S
-				if d <= LURK_R and _in_band(_plan_to(vp)):
+				if not _on_deep():
+					_resettle()
+				elif d <= LURK_R and _in_band(_plan_to(vp)):
 					start_hunt()
 		State.APPROACH:
 			if lost_interest(dt, d) or d > LOSE_DIST:
 				_leave()
+			elif not _on_deep():
+				if not _regain_deep(dt):
+					_leave()                    # глубокой воды рядом нет — уходит, а не стоит на мели
 			else:
+				_refuge = Vector2.INF
 				_approach(dt, vp)
 				if _strikable(d):
 					_emerge()
@@ -376,10 +388,6 @@ func _leave() -> void:
 ## Подход под водой: путь пересчитывается раз в REPLAN_S (машина движется), Несса плывёт по нему со
 ## скоростью nessie_speed.
 func _approach(dt: float, vp: Vector2) -> void:
-	_memo_age += dt
-	if _memo_age > MEMO_S:
-		_memo_age = 0.0
-		_deep.clear()
 	_check -= dt
 	if _check <= 0.0:
 		_path = _plan_to(vp)
@@ -398,12 +406,74 @@ func _approach(dt: float, vp: Vector2) -> void:
 		else:
 			pos += (wp - pos) * (budget / gap)
 			budget = 0.0
+	_moved(from, dt)
+
+
+## Сдвинулась из from за dt: скорость и путь V-следа, курс, зеркало воды под ней.
+func _moved(from: Vector2, dt: float) -> void:
 	var moved := pos - from
 	_speed = moved.length() / maxf(dt, 0.0001)
 	_traveled += moved.length()
 	if moved.length() > 0.0001:
 		_heading = _rotate_toward(_heading, moved.normalized(), TURN_RATE * dt)
 	_water_y = _water_y_at(pos)
+
+
+## Под ней глубокая вода (рельеф мог измениться: землетрясение, воронка).
+func _on_deep() -> bool:
+	return habitat(query, Grid.tile_of_world(pos.x, pos.y))
+
+
+## Озеро под ней обмелело, пока таилась: незаметно (под водой) переходит на ближайшую глубокую воду рядом;
+## нет такой — уходит (finished).
+func _resettle() -> void:
+	var to := _nearest_deep()
+	if to == Vector2.INF:
+		finished = true
+		return
+	pos = to
+	_water_y = _water_y_at(pos)
+
+
+## Озеро под ней обмелело на подходе: плывёт по прямой к ближайшей глубокой воде рядом (_nearest_deep), там
+## путь снова ищется. false — такой воды нет.
+func _regain_deep(dt: float) -> bool:
+	if _refuge == Vector2.INF or not habitat(query, Grid.tile_of_world(_refuge.x, _refuge.y)):
+		_refuge = _nearest_deep()
+		if _refuge == Vector2.INF:
+			return false
+	var from := pos
+	pos = pos.move_toward(_refuge, rules.nessie_speed * dt)
+	_moved(from, dt)
+	_check = 0.0                                    # добралась — путь сразу заново
+	return true
+
+
+## Центр ближайшего глубокого тайла не дальше STRANDED_R, до которого от неё по прямой — вода (сушу не
+## переползает), или INF.
+func _nearest_deep() -> Vector2:
+	var c := Grid.tile_of_world(pos.x, pos.y)
+	var best := Vector2.INF
+	var best_d := INF
+	for dz in range(-STRANDED_R, STRANDED_R + 1):
+		for dx in range(-STRANDED_R, STRANDED_R + 1):
+			var t := c + Vector2i(dx, dz)
+			var p := Vector2(t.x + 0.5, t.y + 0.5)
+			var dd := p.distance_to(pos)
+			if dd < best_d and query.is_loaded(t.x, t.y) and habitat(query, t) and _wet_line(pos, p):
+				best = p
+				best_d = dd
+	return best
+
+
+## По прямой от a до b — всюду вода.
+func _wet_line(a: Vector2, b: Vector2) -> bool:
+	var n := maxi(ceili(a.distance_to(b) / 0.25), 1)
+	for i in range(1, n + 1):
+		var p := a.lerp(b, float(i) / n)
+		if query.water_tier(floori(p.x), floori(p.y)) == TerrainQuery.NO_WATER:
+			return false
+	return true
 
 
 func _plan_to(vp: Vector2) -> Array[Vector2i]:
@@ -425,6 +495,11 @@ func _strikable(d: float) -> bool:
 	var s := vehicle.state
 	if vehicle.wrecked or s.falling or s.drowning or d < REACH_MIN or d > rules.nessie_reach:
 		return false
+	return _low_enough(s)
+
+
+## Машина не на скале над водой: днище не выше зеркала + CLIFF_MAX.
+func _low_enough(s: VehicleState) -> bool:
 	return s.y <= _water_y + CLIFF_MAX
 
 
@@ -485,7 +560,10 @@ func _impact() -> void:
 	_splash.emitting = true
 	EventBus.fauna_alerted.emit(&"nessie_strike", Vector3(_impact_at.x, _impact_y, _impact_at.y))
 	var s := vehicle.state
-	var hit := not (vehicle.wrecked or s.falling or s.drowning) and in_impact_zone(_base, _dir, _length, s.pos)
+	# Под головой, по высоте шее досягаема (за позу и удар — ~0,85 с — машина могла взобраться на скалу) и на
+	# одном уровне с точкой удара: заехала на уступ рядом с ней (или съехала под него) — голова бьёт мимо.
+	var hit := not (vehicle.wrecked or s.falling or s.drowning) and in_impact_zone(_base, _dir, _length, s.pos) \
+			and _low_enough(s) and Creature.same_level(query, _impact_at, s.pos)
 	EventBus.camera_shake_requested.emit(1.0 if hit else 0.5, 0.4 if hit else 0.3)
 	if not hit:
 		return
@@ -749,9 +827,9 @@ func _hide_body() -> void:
 
 # --- Сборка -----------------------------------------------------------------------------------------
 
-## Шея — 9 дисков-«позвонков» (low-poly призмы, широкие светлые и узкие тёмные вперемешку), голова —
+## Шея — DISCS (6) дисков-«позвонков» (low-poly призмы, широкие светлые и узкие тёмные вперемешку), голова —
 ## основание морды, глотка и три челюсти, как у червя; спина — дуга из таких же звеньев; пена: кольцо у основания, два гребня
-## V-следа; пузыри и всплеск. 20 деталей и 2 системы частиц.
+## V-следа; пузыри и всплеск. 21 деталь и 2 системы частиц.
 func _build() -> void:
 	_bone = Creature.skin(BONE_COLOR, BodyMaterial.Pattern.SCALES, Grid.ART_PX)
 	_narrow = Creature.skin(NARROW_COLOR, BodyMaterial.Pattern.SCALES, Grid.ART_PX)

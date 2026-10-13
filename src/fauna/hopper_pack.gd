@@ -55,6 +55,7 @@ const RETREAT_S := 6.0
 const LUNGE_S := 0.3
 const LUNGE_LEN := 0.42
 const STUN_S := 1.0
+const BUMP_LEN := 1.6                    ## танк отшвыривает стаю на столько тайлов
 const PATROL_PAUSE_MIN_S := 1.0          ## на точке патруля стая стоит столько…
 const PATROL_PAUSE_MAX_S := 2.5          ## …до стольких секунд
 const PATROL_STUCK_S := 1.0              ## не продвинулась столько — точка недоступна, берёт следующую
@@ -62,6 +63,8 @@ const RAM_R := 0.2                       ## радиус тела особи п�
 const PUFF_COLOR := Color(0.42, 0.39, 0.55)   ## облачко гибели — светлее хитина
 ## Места в строю (x, z) относительно центра стаи; перед — по −z, первый — передний (он и кусает).
 const FORMATION: Array[Vector2] = [Vector2(0, -0.2), Vector2(-0.17, 0.07), Vector2(0.17, 0.07), Vector2(0, 0.28)]
+
+static var _kit := {}                    ## меши особи: строятся раз за игру, общие у всех стай (_build_kit)
 
 var state := State.IDLE
 var home := Vector2.ZERO
@@ -75,7 +78,6 @@ var _spent: Variant = null               ## шум, на который уже �
 ## склон набок; yaw/yaw_to — разворот корпуса, crouch/crouch_t — присед, rear — дыбы, jaw_open — пасть,
 ## step — переступает, twitch — хвост, react — запаздывание крика).
 var _members: Array[Dictionary] = []
-var _kit := {}                           ## меши особи: строятся раз на стаю, общие у всех её зверей
 var _prev_pos := Vector2.ZERO
 var _speed := 0.0                        ## сглаженная скорость стаи — темп бега
 var _heading := Vector2(0, -1)
@@ -262,13 +264,15 @@ func _bite(vp: Vector2) -> void:
 	vehicle.rock(Vehicle.ROCK_BITE, (vp - pos).normalized())
 
 
-## Танк на ходу расшвыривает стаю массой — только на одном с ней уровне (не через уступ).
+## Танк на ходу расшвыривает стаю массой — только на одном с ней уровне (не через уступ). Толчок на
+## BUMP_LEN — шагами меньше тайла (Creature.move_on_grid) по склонам вида: в воду и с обрыва не улетает,
+## остаётся у края.
 func _tank_bump(vp: Vector2) -> void:
 	if vehicle.cls.mass < 2.0 or vehicle.state.vel.length() < 1.5 or pos.distance_to(vp) > 0.7 \
 			or not Creature.same_level(query, pos, vp):
 		return
 	var away := (pos - vp).normalized() if pos.distance_to(vp) > 0.01 else Vector2.RIGHT
-	pos = Creature.move_on_grid(query, FlowField.Mode.HOPPER, pos, pos + away * 1.6)
+	pos = Creature.move_on_grid(query, FlowField.Mode.HOPPER, pos, pos + away * BUMP_LEN)
 	_stun = STUN_S
 
 
@@ -470,7 +474,7 @@ static func _ease(dt: float, rate: float) -> float:
 
 
 ## Особь из 14 частей; шарниры — сами части (корпус, голова, челюсть, хвост, лапки, звенья ног), меши — общие
-## на стаю. Тень отбрасывают только крупные: корпус, голова, хвост.
+## у всех стай. Тень отбрасывают только крупные: корпус, голова, хвост.
 func _build_model() -> Dictionary:
 	if _kit.is_empty():
 		_build_kit()
@@ -503,10 +507,13 @@ func _part(parent: Node3D, mesh: StringName, at: Vector3, shadow: bool = false) 
 	return mi
 
 
-## Меши особи — раз на стаю. Каждая часть — в осях своего шарнира, из плоскогранных труб; цвет — в
-## вершинах (хитин, кромка, кость — один материал с пиксельным узором хитина, пиксель — пиксель мира с
-## поправкой на SIZE), у глаз и пасти — свои материалы.
-func _build_kit() -> void:
+## Меши особи — раз за игру, общие у всех стай: стаи появляются каждые пару секунд, а ~12 мешей и
+## материал на каждую — заминка в вебе. Делить их можно: мигание тарана — наложение material_overlay на
+## MeshInstance3D особи (RamBody), гибель — скрытие её узла; сами меши и материалы не меняются.
+## Каждая часть — в осях своего шарнира, из плоскогранных труб; цвет — в вершинах (хитин, кромка, кость —
+## один материал с пиксельным узором хитина, пиксель — пиксель мира с поправкой на SIZE), у глаз и пасти —
+## свои материалы.
+static func _build_kit() -> void:
 	# Хитин с мягким отливом: блик неширокий и неяркий.
 	var skin := BodyMaterial.tinted(BodyMaterial.Pattern.CHITIN, Grid.ART_PX / SIZE, 0.6, 0.3, 0.35)
 	var eye := StandardMaterial3D.new()

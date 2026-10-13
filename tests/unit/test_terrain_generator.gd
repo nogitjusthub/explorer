@@ -37,6 +37,28 @@ func test_seams_between_chunks() -> void:
 	assert_eq(mismatches, 0, "apron tiles differ from neighbour data")
 
 
+func test_prep_stage_reads_cached_pads() -> void:
+	# Этап 0 генерации: сначала площадки всех нужных блоков (по одной за шаг), потом гнёзда и лужи —
+	# они только читают кэш площадок (иначе одна проба считала бы до 9 площадок — шип кадра в вебе).
+	# Порции не меняют результат.
+	var dune_chunks := {1: Vector2i(-25, 7), 7: Vector2i(-35, 32)}     # гряды ищут площадки рядом
+	for run_seed: int in [1, 7]:
+		var gen := TerrainGenerator.new(run_seed, TerrainParams.new())
+		for coord: Vector2i in [Vector2i(0, 0), Vector2i(2, -3), dune_chunks[run_seed]]:
+			var job := gen.begin(coord)
+			while job.stage == 0 and job.row < job.prep_blocks.size():
+				gen.step(job, 0)                  # дедлайн прошёл: одна единица работы за шаг
+			var cached := gen._pads.size()
+			while job.stage == 0:
+				gen.step(job, 0)
+			assert_eq(gen._pads.size(), cached, "seed %d chunk %s: pads computed after the prep steps" % [run_seed, coord])
+			while not gen.step(job, 0):
+				pass
+			var whole := TerrainGenerator.new(run_seed, TerrainParams.new()).generate(coord)
+			assert_true(job.data.corners == whole.corners and job.data.flags == whole.flags \
+					and job.data.water_level == whole.water_level, "seed %d chunk %s: sliced == whole" % [run_seed, coord])
+
+
 func test_tiles_valid() -> void:
 	# Внутри тайла разброс углов ≤ 1; на рёбрах нет «крестов».
 	var gen := TerrainGenerator.new(12345, TerrainParams.new())

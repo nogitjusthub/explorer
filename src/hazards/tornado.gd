@@ -80,6 +80,8 @@ static func throw_target(q: TerrainQuery, from: Vector2, dist: float, start_dir:
 func step(dt: float) -> void:
 	if finished:
 		return
+	if _audio.stream == null:
+		_start_sound()
 	_spin += dt * 9.0
 	_funnel.rotation.y = _spin
 	if _fade >= 0.0:
@@ -234,7 +236,12 @@ func _build() -> void:
 	dust.mesh = PixelFx.quad(4, Color(COLOR_FUNNEL, 1.0))
 	add_child(dust)
 	_audio = AudioStreamPlayer.new()
-	_audio.stream = Sfx.howl_loop(6.0)
 	_audio.volume_db = -40.0
 	add_child(_audio)
+
+
+## Вой включается с первым шагом: образец смерча в прогреве шейдеров (Warmup) не шагает — молчит и не
+## заставляет синтезировать вой раньше очереди (Sfx).
+func _start_sound() -> void:
+	_audio.stream = Sfx.named(&"howl")
 	_audio.play()

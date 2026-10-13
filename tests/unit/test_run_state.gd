@@ -84,6 +84,21 @@ func test_ship_emergency_and_score() -> void:
 	assert_eq(rs.hp, 100)
 
 
+func test_no_shipping_after_the_end() -> void:
+	var rs := _run()
+	rs.offer_cargo(_kind(&"core"))
+	rs.end(&"fall")
+	var shipped := []
+	rs.score_changed.connect(func(s: int) -> void: shipped.append(s))
+	assert_eq(rs.ship_cargo(), 0, "the shuttle menu left open after death gives nothing")
+	assert_eq(rs.emergency_ship(20.0, 10), 0, "no emergency exchange after the end")
+	assert_eq(rs.banked, 0)
+	assert_eq(rs.shipments, 0)
+	assert_eq(rs.emergency_calls, 0)
+	assert_eq(rs.final_score, 0)
+	assert_eq(shipped.size(), 0, "no score updates after the end")
+
+
 func test_evacuation_bonus_and_lost_cargo_on_death() -> void:
 	var rs := _run()
 	rs.offer_cargo(_kind(&"core"))

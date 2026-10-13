@@ -24,6 +24,7 @@ const SHADOW_COLOR := Color(0.05, 0.03, 0.06, 0.5)
 const SHADOW_R := Grid.ART_PX * 13.0     ## радиус тени капсулы у земли — целые пиксели мира
 const NOZZLES := 3
 const PX := Grid.ART_PX / POD_SCALE      ## пиксель обшивки — как у рельефа (капсула уменьшена — в меше крупнее)
+const SHAKE_EVERY_S := 0.12              ## торможение трясёт камеру толчками с таким шагом по времени капсулы
 
 var _t := 0.0
 var _ground := Vector3.ZERO
@@ -40,6 +41,7 @@ var _blast: CPUParticles3D               ## пыль, которую струи 
 var _dust: CPUParticles3D                ## кольцо пыли при касании
 var _roar: AudioStreamPlayer
 var _burning := false
+var _shake_at := 0.0                     ## время (_t) следующего толчка тряски
 
 
 func _init() -> void:
@@ -98,9 +100,11 @@ func _update() -> void:
 		_marker_mat.albedo_color.a = MARK_COLOR.a * (0.5 + 0.5 * float(fmod(_t, 0.4) < 0.25))
 		if _t >= FREE_FALL_S and not _burning:
 			_burning = true
-			_roar.play()
+			_shake_at = _t
+			_roar.play(maxf(Sfx.THRUST_S - (burn_s() + 0.2), 0.0))   # хвост общего рёва: стихает к касанию
 		if _burning:
 			_burn(h)
+			_shake(h)
 		if _t >= total_s():
 			_touchdown()
 	elif _phase == 1:
@@ -128,8 +132,17 @@ func _burn(h: float) -> void:
 	_flame_light.light_energy = 1.2 + 1.5 * near
 	_blast.emitting = h < BURN_H * 0.7
 	_blast.initial_velocity_max = lerpf(1.5, 4.5, near)      # ниже — струи бьют сильнее
-	if fmod(_t, 0.12) < 0.02:
-		EventBus.camera_shake_requested.emit(0.15 + 0.25 * near, 0.15)
+
+
+## Тряска от тормозных двигателей: толчок, когда время капсулы перешло очередную отметку (шаг SHAKE_EVERY_S), —
+## частота толчков не зависит от FPS; долгий кадр даёт один толчок, без «догоняющей» серии.
+func _shake(h: float) -> void:
+	if _t < _shake_at:
+		return
+	while _shake_at <= _t:
+		_shake_at += SHAKE_EVERY_S
+	var near := 1.0 - clampf(h / BURN_H, 0.0, 1.0)
+	EventBus.camera_shake_requested.emit(0.15 + 0.25 * near, 0.15)
 
 
 func _touchdown() -> void:
@@ -321,7 +334,7 @@ func _build() -> void:
 	_dust.emitting = false
 
 	_roar = AudioStreamPlayer.new()
-	_roar.stream = Sfx.thrust(burn_s() + 0.2)
+	_roar.stream = Sfx.named(&"thrust")             # общий рёв (синтез в фоне, пока игрок в трюме) — играет его хвост
 	_roar.volume_db = -6.0
 	add_child(_roar)
 

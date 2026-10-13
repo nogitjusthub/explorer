@@ -13,6 +13,9 @@ extends RefCounted
 ##   соседи релаксируют к их краю.
 ## - Вода: тайл, поднятый над своей водой целиком, осушается; сухой тайл, опустившийся ниже уровня
 ##   соседней воды, затапливается (волна идёт дальше по таким же тайлам, но не дальше FLOOD_LIMIT).
+## - Временный подъём (вал червя) возвращается по записям исходных высот; угол тайла незагруженного
+##   чанка вернуть нельзя — запись уходит в TerrainData.pending_restores и возвращается, когда чанк
+##   загрузится снова (restore_pending из WorldStreamer).
 
 const LOWER := -1
 const RAISE := 1
@@ -26,6 +29,10 @@ const DIRTY_WATER := 1 << 4
 ## Тайлы вокруг вершины: (dx, dz, угол) — у вершины (vx, vz) это NW-угол тайла (vx, vz) и т. д.
 const VERTEX_TILES: Array[Vector3i] = [Vector3i(-1, -1, 2), Vector3i(0, -1, 3), Vector3i(-1, 0, 1), Vector3i(0, 0, 0)]
 const CORNER_OFFSETS: Array[Vector2i] = [Vector2i(0, 0), Vector2i(1, 0), Vector2i(1, 1), Vector2i(0, 1)]
+
+## Тайлов с разбросом углов ≥ 2, оставшихся после релаксации (за всё время; тесты сбрасывают в 0).
+## Не ноль — релаксация упёрлась в неподвижные вершины с обеих сторон или в RELAX_LIMIT.
+static var relax_leftovers := 0
 
 
 ## Рабочая копия углов и воды затронутых тайлов.
@@ -104,7 +111,8 @@ static func crater(terrain: TerrainData, center: Vector2, radius: float, depth: 
 
 ## Борозда вдоль отрезка: вершины ближе half_width к отрезку опускаются на ярус. На скалах
 ## (материал ROCK у любого тайла вокруг вершины) следа не остаётся. done — вершины, уже опущенные этим
-## же источником (смерч): их не трогаем, иначе медленный смерч выкопал бы каньон.
+## же источником (смерч): их не трогаем, иначе медленный смерч выкопал бы каньон. Вершина попадает
+## в done, только когда действительно сдвинулась: неподвижную (сосед не загружен) возьмёт следующий проход.
 ## height — сдвиг вершин: −1 — борозда (смерч), +1 — вал (червь под песком).
 static func furrow(terrain: TerrainData, from: Vector2, to: Vector2, half_width: float, done: Dictionary = {},
 		height: int = -1) -> PackedInt64Array:
@@ -120,8 +128,8 @@ static func furrow(terrain: TerrainData, from: Vector2, to: Vector2, half_width:
 			var v := Vector2i(vx, vz)
 			if done.has(v) or _vertex_on_rock(terrain, v):
 				continue
-			done[v] = true
-			_shift_vertex(w, v, height, LOWER if height < 0 else RAISE, queue)
+			if _shift_vertex(w, v, height, LOWER if height < 0 else RAISE, queue):
+				done[v] = true
 	_relax(w, queue)
 	return _commit(w)
 
@@ -141,12 +149,12 @@ static func vertices_near_segment(from: Vector2, to: Vector2, half_width: float)
 
 ## Временный подъём (вал червя): вершины поднимаются на ярус, релаксация поднимает соседей; исходные
 ## высоты всех изменённых углов запоминаются в originals (Vector3i(tx, tz, угол) → ярус). Вершины, у
-## которых угол уже записан, не трогаем — вал не растёт выше яруса.
+## которых угол уже записан (здесь или в отложенных возвратах), не трогаем — вал не растёт выше яруса.
 static func raise_vertices(terrain: TerrainData, verts: Array[Vector2i], originals: Dictionary) -> PackedInt64Array:
 	var w := Work.new(terrain)
 	var queue: Array[Vector3i] = []
 	for v in verts:
-		if _vertex_recorded(v, originals):
+		if _vertex_recorded(v, originals) or _vertex_recorded(v, terrain.pending_restores):
 			continue
 		_shift_vertex(w, v, 1, RAISE, queue)
 	_relax(w, queue)
@@ -164,22 +172,55 @@ static func raise_vertices(terrain: TerrainData, verts: Array[Vector2i], origina
 
 ## Возврат временного подъёма: у вершин из verts углы получают исходные высоты из originals (и
 ## забываются), соседи релаксируют вниз — без стенок, не ниже исходного рельефа.
+## Вершина возвращается целиком или никак: если хоть один её записанный тайл в незагруженном чанке,
+## все её записи уходят в terrain.pending_restores (и из originals) — их вернёт restore_pending, когда
+## чанк загрузится снова. Иначе подъём остался бы в DiffStore навсегда, а на шве — стенка.
 static func restore_vertices(terrain: TerrainData, verts: Array[Vector2i], originals: Dictionary) -> PackedInt64Array:
 	var w := Work.new(terrain)
 	var queue: Array[Vector3i] = []
+	var pending := is_same(originals, terrain.pending_restores)
+	var keys: Array[Vector3i] = []
 	for v in verts:
+		keys.clear()
+		var ready := true
 		for o in VERTEX_TILES:
 			var key := Vector3i(v.x + o.x, v.y + o.y, o.z)
-			if not originals.has(key):
-				continue
+			if originals.has(key):
+				keys.append(key)
+				if not terrain.is_loaded(key.x, key.y):
+					ready = false
+		if not ready:
+			if not pending:
+				for key in keys:
+					terrain.pending_restores[key] = originals[key]
+					originals.erase(key)
+			continue
+		for key in keys:
 			var target: int = originals[key]
 			originals.erase(key)
 			if not w.load_tile(key.x, key.y):
-				continue
+				continue            # площадка: подъём её не трогает, записи у неё не бывает
 			w.set_corner(key.x, key.y, key.z, target)
 			queue.append(Vector3i(key.x, key.y, LOWER))
+	if queue.is_empty():
+		return PackedInt64Array()
 	_relax(w, queue)
 	return _commit(w)
+
+
+## Отложенные возвраты подъёмов (terrain.pending_restores): возвращает вершины, чьи тайлы снова
+## загружены. Зовётся после загрузки чанка; пока записей нет — ничего не стоит.
+static func restore_pending(terrain: TerrainData) -> PackedInt64Array:
+	if terrain.pending_restores.is_empty():
+		return PackedInt64Array()
+	var verts: Array[Vector2i] = []
+	var seen := {}
+	for key: Vector3i in terrain.pending_restores:
+		var v := recorded_vertex(key)
+		if not seen.has(v):
+			seen[v] = true
+			verts.append(v)
+	return restore_vertices(terrain, verts, terrain.pending_restores)
 
 
 ## Вершина записанного угла (обратное к VERTEX_TILES).
@@ -305,19 +346,22 @@ static func _vertex_on_rock(terrain: TerrainData, v: Vector2i) -> bool:
 
 
 ## Сдвиг общей вершины у всех подвижных тайлов вокруг неё (поверхность остаётся непрерывной).
-static func _shift_vertex(w: Work, v: Vector2i, delta: int, mode: int, queue: Array[Vector3i]) -> void:
+## false — вершина неподвижна (площадка или незагруженный сосед), ничего не сдвинуто.
+static func _shift_vertex(w: Work, v: Vector2i, delta: int, mode: int, queue: Array[Vector3i]) -> bool:
 	if w.vertex_fixed(v):
-		return
+		return false
 	for o in VERTEX_TILES:
 		var tx := v.x + o.x
 		var tz := v.y + o.y
 		w.set_corner(tx, tz, o.z, w.corner(tx, tz, o.z) + delta)
 		queue.append(Vector3i(tx, tz, mode))
+	return true
 
 
 ## Релаксация до Δ ≤ 1 внутри каждого тайла. LOWER — опускаем высокие углы, RAISE — поднимаем
-## низкие; неподвижную вершину не трогаем, тогда двигаем другую сторону. Сдвиг угла переносится на
-## соседей, у которых в этой вершине та же высота (непрерывная поверхность); стенки остаются стенками.
+## низкие; неподвижную вершину не трогаем, тогда двигаем другую сторону. Если неподвижные вершины
+## есть с обеих сторон — углы сводятся к ним (_relax_to_fixed). Сдвиг угла переносится на соседей,
+## у которых в этой вершине та же высота (непрерывная поверхность); стенки остаются стенками.
 static func _relax(w: Work, queue: Array[Vector3i]) -> void:
 	var guard := 0
 	while not queue.is_empty() and guard < RELAX_LIMIT:
@@ -331,6 +375,7 @@ static func _relax(w: Work, queue: Array[Vector3i]) -> void:
 		if hi - lo <= 1:
 			continue
 		var mode := item.z
+		var moved := false
 		for attempt in 2:
 			var target := lo + 1 if mode == LOWER else hi - 1
 			var blocked := false
@@ -346,7 +391,33 @@ static func _relax(w: Work, queue: Array[Vector3i]) -> void:
 				var off := value > target if mode == LOWER else value < target
 				if off:
 					_move_corner(w, Vector2i(item.x, item.y), ci, target, mode, queue)
+			moved = true
 			break
+		if not moved:
+			_relax_to_fixed(w, Vector2i(item.x, item.y), item.z, queue)
+
+
+## Обе попытки упёрлись в неподвижные вершины (площадка, край загруженного) — высокие с одной стороны,
+## низкие с другой. Неподвижные углы не менялись, их разброс ≤ 1, поэтому есть окно [a, a + 1], которое
+## их вмещает (при LOWER — нижнее из возможных, при RAISE — верхнее): подвижные углы выше окна
+## опускаются в него, ниже — поднимаются.
+static func _relax_to_fixed(w: Work, tile: Vector2i, mode: int, queue: Array[Vector3i]) -> void:
+	var f_lo := 1 << 20
+	var f_hi := -(1 << 20)
+	for ci in 4:
+		if w.vertex_fixed(tile + CORNER_OFFSETS[ci]):
+			var value := w.corner(tile.x, tile.y, ci)
+			f_lo = mini(f_lo, value)
+			f_hi = maxi(f_hi, value)
+	if f_hi - f_lo > 1:
+		return      # неподвижные углы сами круче яруса — поправить нечем (учтёт relax_leftovers)
+	var a := f_hi - 1 if mode == LOWER else f_lo
+	for ci in 4:
+		var value := w.corner(tile.x, tile.y, ci)
+		if value > a + 1:
+			_move_corner(w, tile, ci, a + 1, LOWER, queue)
+		elif value < a:
+			_move_corner(w, tile, ci, a, RAISE, queue)
 
 
 static func _move_corner(w: Work, tile: Vector2i, ci: int, target: int, mode: int, queue: Array[Vector3i]) -> void:
@@ -403,6 +474,8 @@ static func _commit(w: Work) -> PackedInt64Array:
 		var c := w.cur[k]
 		if c == w.orig[k] and w.water[k] == w.orig_water[k]:
 			continue
+		if maxi(maxi(c[0], c[1]), maxi(c[2], c[3])) - mini(mini(c[0], c[1]), mini(c[2], c[3])) > 1:
+			relax_leftovers += 1
 		var t := DiffStore.key_tile(k)
 		var d := w.terrain.owner_of(t.x, t.y)
 		var record := d.read_record(d.local_index(t.x, t.y))

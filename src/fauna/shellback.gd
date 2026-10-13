@@ -160,12 +160,15 @@ func calm_down() -> void:
 	_give_up()
 
 
-## Отстал: shellback_calm_s не слышит машину и уходит к своему месту.
+## Отстал: shellback_calm_s не слышит машину и уходит к своему месту. Сорванные рытьё и рывок (испуг —
+## calm_down) не оставляют ни пыли, ни дрожи корпуса.
 func _give_up() -> void:
 	state = State.IDLE
 	aggressive = false
 	_calm = rules.shellback_calm_s
 	_goal = _home
+	_dust.emitting = false
+	_model.rotation.z = 0.0
 
 
 func _stun() -> void:

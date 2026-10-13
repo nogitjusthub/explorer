@@ -137,6 +137,24 @@ func test_hover_over_water_is_shocked() -> void:
 	v.free()
 
 
+## Рельеф под троеглазкой изменился (землетрясение, воронка) — тело ложится на новое дно не позже PLACE_S:
+## и когда машина рядом, и когда далеко.
+func test_body_follows_the_bottom_after_a_quake() -> void:
+	for near: bool in [true, false]:
+		var f := _pond()
+		var r := BalanceRules.new()
+		var v := _vehicle(f, "rover", Vector2(7.7, 10.5) if near else Vector2(1.0, 10.5))
+		var ray := _ray(f, r, v, Vector2(10.5, 10.5))
+		var hits: Array = []
+		_run(ray, 0.5, hits)
+		var before := ray._root.position.y
+		f.set_flat(10, 10, 3)                              # дно ушло на ярус вниз
+		_run(ray, Stargazer.PLACE_S + 0.1, hits)
+		assert_near(ray._root.position.y, before - Grid.TIER_H, 0.02, "lies on the new bottom (near: %s)" % near)
+		ray.free()
+		v.free()
+
+
 func test_no_shock_on_shore_eyes_watch() -> void:
 	var f := _pond()
 	var r := BalanceRules.new()

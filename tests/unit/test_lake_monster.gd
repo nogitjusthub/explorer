@@ -172,6 +172,76 @@ func test_leaving_the_line_dodges_and_shore_rover_is_rocked() -> void:
 	rover.free()
 
 
+## Удар перепроверяет уровень: ровер, пока Несса в позе, заехал на уступ рядом (всё ещё под головой) —
+## мимо; съехал вбок по ровному — удар.
+func test_no_strike_on_a_vehicle_that_drove_up_a_ledge() -> void:
+	for ledge: bool in [true, false]:
+		var f := TerrainFixture.new(4)
+		_lake(f, 0, 0, 20, 20)
+		if ledge:
+			f.set_block(21, 11, 25, 14, 6)             # уступ в два яруса вбок от ровера
+		var rover := _vehicle(f, "rover", Vector2(22.2, 10.5))
+		var m := _monster(f, rover, Vector2(19.5, 10.5))
+		var hits: Array = []
+		m.damaged.connect(func(amount: int, _s: StringName) -> void: hits.append(amount))
+		m.start_hunt()
+		var moved := false
+		for _i in 180:
+			m.step(DT)
+			if m.state == LakeMonster.State.POSE and not moved:
+				moved = true
+				rover.state.pos = Vector2(22.2, 11.1)       # вбок на 0,6 — голова всё ещё накрывает
+				rover.state.y = f.query.surface_y(rover.state.pos.x, rover.state.pos.y)
+		assert_true(moved, "posed (ledge: %s)" % ledge)
+		assert_eq(hits.size(), 0 if ledge else 1, "strikes only on the level of the impact (ledge: %s)" % ledge)
+		m.free()
+		rover.free()
+
+
+## Рельеф под Нессой изменился (землетрясение обмелило озеро): рядом есть глубокая вода — плывёт туда и
+## продолжает подход; нет — уходит (а не стоит на мели до потери интереса); затаившаяся — пропадает.
+func test_shallowed_lake_does_not_freeze_her() -> void:
+	var f := TerrainFixture.new(4)
+	_lake(f, 0, 0, 20, 20)
+	var v := _vehicle(f, "rover", Vector2(28.5, 10.5))
+	var m := _monster(f, v, Vector2(10.5, 10.5))
+	m.start_hunt()
+	m.step(DT)
+	for tz in range(9, 12):
+		for tx in range(9, 12):
+			f.set_flat(tx, tz, 3)                       # мель вокруг неё, глубина рядом осталась
+	var t := 0.0
+	while t < 1.5:
+		m.step(DT)
+		t += DT
+	assert_eq(m.state, LakeMonster.State.APPROACH, "still approaching")
+	assert_true(LakeMonster.habitat(f.query, Grid.tile_of_world(m.pos.x, m.pos.y)), "back on deep water: %s" % m.pos)
+	m.free()
+	# Всё озеро обмелело — уходит сразу.
+	var g := TerrainFixture.new(4)
+	_lake(g, 0, 0, 20, 20)
+	var w := _vehicle(g, "rover", Vector2(28.5, 10.5))
+	var n := _monster(g, w, Vector2(10.5, 10.5))
+	n.start_hunt()
+	n.step(DT)
+	g.set_block(0, 0, 20, 20, 3)
+	t = 0.0
+	while t < 3.0 and not n.finished:
+		n.step(DT)
+		t += DT
+	assert_true(n.finished, "leaves the shallowed lake")
+	assert_true(t < LakeMonster.LEAVE_S + 0.5, "at once, not after fauna_give_up_s: %.1f s" % t)
+	n.free()
+	# Затаилась, а озеро обмелело — пропадает при проверке.
+	var l := _monster(g, w, Vector2(10.5, 10.5))
+	for _i in ceili(LakeMonster.LURK_CHECK_S / DT) + 2:
+		l.step(DT)
+	assert_true(l.finished, "a lurking one goes away")
+	l.free()
+	v.free()
+	w.free()
+
+
 ## Машина ушла далеко, пока Несса появлялась: не бьёт — стоит с поднятой головой и следит; вернулась —
 ## удар; не вернулась — погружается и снова идёт на сближение.
 func test_does_not_strike_a_vehicle_that_ran_off() -> void:

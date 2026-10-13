@@ -18,10 +18,11 @@ rem Угрозы
 rem   --no-threats       без угроз (погода, землетрясения, смерчи)
 rem   --no-fauna         без фауны
 rem   --threat=N         уровень угрозы не ниже N (1–6)
-rem   --event=K@S,...    событие K на S-й секунде: storm, strike, fog, acid, dust, tornado,
+rem   --event=K@S,...    событие K на S-й секунде: storm, strike, fog, acid, dust, murk, tornado,
 rem                        quake, whirlpool, hoppers, worm, shellback, shark, ray, nessie
-rem                        (strike — молния в машину; червь — если рядом песок или равнина;
-rem                        водные — если рядом зыбун, мелкая или глубокая вода)
+rem                        (strike — молния в машину; murk — непогода по биому; червь — если рядом
+rem                        песок или равнина; водные — если рядом зыбун, мелкая или глубокая вода;
+rem                        опечатка в имени — предупреждение в консоли)
 rem Сценарии без рук
 rem   --idle             без стартового экрана и автопилота: машина стоит
 rem   --select           показать трюм с выбором машины и при --idle или --shots
@@ -69,10 +70,11 @@ echo  Угрозы
 echo   --no-threats       без угроз (погода, землетрясения, смерчи)
 echo   --no-fauna         без фауны
 echo   --threat=N         уровень угрозы не ниже N (1–6)
-echo   --event=K@S,...    событие K на S-й секунде: storm, strike, fog, acid, dust, tornado,
+echo   --event=K@S,...    событие K на S-й секунде: storm, strike, fog, acid, dust, murk, tornado,
 echo                        quake, whirlpool, hoppers, worm, shellback, shark, ray, nessie
-echo                        (strike — молния в машину; червь — если рядом песок или равнина;
-echo                        водные — если рядом зыбун, мелкая или глубокая вода)
+echo                        (strike — молния в машину; murk — непогода по биому; червь — если рядом
+echo                        песок или равнина; водные — если рядом зыбун, мелкая или глубокая вода;
+echo                        опечатка в имени — предупреждение в консоли)
 echo.
 echo  Сценарии без рук
 echo   --idle             без стартового экрана и автопилота: машина стоит

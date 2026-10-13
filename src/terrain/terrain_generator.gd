@@ -16,7 +16,8 @@ extends RefCounted
 ## - вода: у каждой области свой уровень, между областями с разными уровнями — пологая дамба;
 ##   на ровных полках — лужи вровень с краем. Вода нигде не «висит» над сухим соседом;
 ## - дюны: посреди части пустынь — поперечные гряды из пологих склонов в ярус, поле гаснет к краям.
-##   Вершину гряды, при которой тайл стал бы круче яруса, правка сдвигает на ярус — стенок в дюнах нет.
+##   Вершину гряды, при которой тайл стал бы круче яруса, правка сдвигает на ярус (если сдвиг не делает
+##   седловину) — стенок в дюнах нет.
 ##
 ## Против ям без выхода (стенку вверх не проезжает никто):
 ## - сеть «проездов» — решётка коридоров, где рельеф пологий; любая замкнутая стена крупнее
@@ -29,6 +30,9 @@ const EXT := VERTS + 2              ## вершины окна + по одной
 const NO_PAD := -999                ## ярус-маркер: в блоке нет годной площадки
 const NO_NEST := Vector2i(-999999, -999999)
 const NO_PUDDLE := Vector4(0, 0, 0, -999)
+## Тайлы вокруг вершины — смещение их NW-угла от вершины; углы тайла — смещения от NW-угла (0–3).
+const VERTEX_TILES: Array[Vector2i] = [Vector2i(-1, -1), Vector2i(0, -1), Vector2i(0, 0), Vector2i(-1, 0)]
+const TILE_CORNERS: Array[Vector2i] = [Vector2i(0, 0), Vector2i(1, 0), Vector2i(1, 1), Vector2i(0, 1)]
 
 var seed: int
 var p: TerrainParams
@@ -72,6 +76,7 @@ class GenJob:
 	var nests: Array[Vector2i] = []     ## гнёзда рядом с окном
 	var puddles: Array[Vector4] = []    ## лужи рядом с окном
 	var dunes := PackedByteArray()      ## тайлы окна на дюнах (1) — для свойств грунта
+	var prep_blocks: Array[Vector2i] = []     ## блоки, чьи площадки читают гнёзда и лужи (кэш заранее)
 	var pad_blocks: Array[Vector2i] = []      ## что проверить на этапе подготовки
 	var puddle_cells: Array[Vector2i] = []
 	var stage: int = 0
@@ -139,27 +144,55 @@ func begin(coord: Vector2i) -> GenJob:
 	for cz in range(c0.y, c1.y + 1):
 		for cx in range(c0.x, c1.x + 1):
 			job.puddle_cells.append(Vector2i(cx, cz))
+	# Гнездо и лужа ищут место по высотам с площадками и по расстоянию до площадок — площадки соседних
+	# блоков без кэша посчитались бы внутри одной пробы (до 9 блоков × 60 высот — мимо бюджета кадра).
+	# Поэтому сначала — площадки всех блоков, которые они могут задеть: блоки вокруг блока гнезда и
+	# вокруг ячейки лужи с запасом в блок (досягаемость проб меньше блока).
+	var prep := {}
+	_add_blocks(prep, b0, b1)
+	for cell in job.puddle_cells:
+		_add_blocks(prep, _block_of(cell.x * p.puddle_cell, cell.y * p.puddle_cell),
+				_block_of((cell.x + 1) * p.puddle_cell, (cell.y + 1) * p.puddle_cell))
+	job.prep_blocks.assign(prep.keys())
 	return job
+
+
+func _block_of(tx: int, tz: int) -> Vector2i:
+	return Vector2i(floori(tx / float(p.pad_block)), floori(tz / float(p.pad_block)))
+
+
+## Блоки [b0, b1] с запасом в блок — в множество blocks.
+static func _add_blocks(blocks: Dictionary, b0: Vector2i, b1: Vector2i) -> void:
+	for bz in range(b0.y - 1, b1.y + 2):
+		for bx in range(b0.x - 1, b1.x + 2):
+			blocks[Vector2i(bx, bz)] = true
 
 
 ## Выполняет работу до дедлайна (Time.get_ticks_usec()). Возвращает true, когда чанк готов.
 func step(job: GenJob, deadline_usec: int) -> bool:
 	var origin := job.data.window_origin()
 	while job.stage == 0:
-		# Подготовка: площадки (сначала — лужи от них зависят) и лужи вокруг окна, по одной за шаг.
-		if job.row < job.pad_blocks.size():
-			var pad := pad_of_block(job.pad_blocks[job.row])
-			if pad.z != NO_PAD:
-				job.pads.append(pad)
-			var nest := nest_of_block(job.pad_blocks[job.row])
-			if nest != NO_NEST:
-				job.nests.append(nest)
+		# Подготовка, по одной единице за шаг: площадки всех нужных блоков (в кэш — гнёзда и лужи от них
+		# зависят), затем площадки и гнёзда окна, затем лужи вокруг окна. Гнёзда и лужи площадки уже
+		# только читают.
+		var k := job.row
+		if k < job.prep_blocks.size():
+			pad_of_block(job.prep_blocks[k])
 		else:
-			var puddle := puddle_of_cell(job.puddle_cells[job.row - job.pad_blocks.size()])
-			if puddle.w != NO_PUDDLE.w:
-				job.puddles.append(puddle)
+			k -= job.prep_blocks.size()
+			if k < job.pad_blocks.size():
+				var pad := pad_of_block(job.pad_blocks[k])
+				if pad.z != NO_PAD:
+					job.pads.append(pad)
+				var nest := nest_of_block(job.pad_blocks[k])
+				if nest != NO_NEST:
+					job.nests.append(nest)
+			else:
+				var puddle := puddle_of_cell(job.puddle_cells[k - job.pad_blocks.size()])
+				if puddle.w != NO_PUDDLE.w:
+					job.puddles.append(puddle)
 		job.row += 1
-		if job.row >= job.pad_blocks.size() + job.puddle_cells.size():
+		if job.row >= job.prep_blocks.size() + job.pad_blocks.size() + job.puddle_cells.size():
 			job.stage = 1
 			job.row = 0
 		if Time.get_ticks_usec() >= deadline_usec:
@@ -220,7 +253,8 @@ func step(job: GenJob, deadline_usec: int) -> bool:
 ## - неровный: россыпи камней по шуму (на скалах чаще, в лесу и у воды реже) и осыпи у подножия
 ##   обрывов от talus_tiers ярусов.
 ## Площадки, гнёзда и вода — без свойств, дюны — без россыпей (чистый песок). Соседи — в пределах
-## одного тайла, все есть в окне чанка.
+## одного тайла; у тайлов фартука часть соседей за окном — их не видно, поэтому свойства тайлов
+## фартука потом берутся у чанка-владельца (TerrainData._sync_ground_flags).
 func _ground_flags_row(data: ChunkData, dunes: PackedByteArray, lz: int) -> void:
 	var n := Grid.WINDOW
 	var origin := data.window_origin()
@@ -255,7 +289,7 @@ func _ground_flags_row(data: ChunkData, dunes: PackedByteArray, lz: int) -> void
 		if wet or dunes[i] != 0:
 			continue                                   # кромку воды и дюны россыпью не покрываем
 		var talus := false
-		for o: Vector2i in [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)]:
+		for o in Grid.DIR_OFFSETS:
 			var x := lx + o.x
 			var z := lz + o.y
 			if x < 0 or z < 0 or x >= n or z >= n:
@@ -492,7 +526,7 @@ func pad_near_tile(tx: int, tz: int, extra: int = 0) -> Variant:
 func _fix_saddle_vertex(ext: PackedInt32Array, ex: int, ez: int) -> int:
 	var v := ext[ez * EXT + ex]
 	var low_of_saddle := false
-	for t: Vector2i in [Vector2i(-1, -1), Vector2i(0, -1), Vector2i(0, 0), Vector2i(-1, 0)]:
+	for t in VERTEX_TILES:
 		var a := ext[(ez + t.y) * EXT + ex + t.x]
 		var b := ext[(ez + t.y) * EXT + ex + t.x + 1]
 		var c := ext[(ez + t.y + 1) * EXT + ex + t.x + 1]
@@ -502,10 +536,10 @@ func _fix_saddle_vertex(ext: PackedInt32Array, ex: int, ez: int) -> int:
 			break
 	if not low_of_saddle:
 		return v
-	for t: Vector2i in [Vector2i(-1, -1), Vector2i(0, -1), Vector2i(0, 0), Vector2i(-1, 0)]:
+	for t in VERTEX_TILES:
 		var lo := v + 1
 		var hi := v + 1
-		for k: Vector2i in [Vector2i(0, 0), Vector2i(1, 0), Vector2i(1, 1), Vector2i(0, 1)]:
+		for k in TILE_CORNERS:
 			var px := ex + t.x + k.x
 			var pz := ez + t.y + k.y
 			if px == ex and pz == ez:
@@ -520,17 +554,34 @@ func _fix_saddle_vertex(ext: PackedInt32Array, ex: int, ez: int) -> int:
 
 ## Вершина на грядах дюн: если у одного из четырёх её тайлов разброс углов ≥ 2 (гряда круче яруса на
 ## тайл — бывает на краю поля, где сходятся склон гряды, край маски и уклон базы), вершина сдвигается
-## на ярус, когда это выравнивает все четыре тайла. Иначе тайл уплощился бы в стенку посреди дюн.
+## на ярус, когда это выравнивает все четыре тайла и не делает ни один из них седловиной («песочные
+## часы» — их правка седловин уже не увидит). Иначе тайл уплощился бы в стенку посреди дюн.
 ## Как и у седловин, решение — по вершинам на расстоянии 1 (одинаково во всех окнах).
 func _fix_dune_vertex(ext: PackedInt32Array, ex: int, ez: int) -> int:
 	var v := ext[ez * EXT + ex]
 	if _vertex_tiles_ok(ext, ex, ez, v):
 		return v
-	if _vertex_tiles_ok(ext, ex, ez, v - 1):
+	if _vertex_tiles_ok(ext, ex, ez, v - 1) and not _makes_saddle(ext, ex, ez, v - 1):
 		return v - 1
-	if _vertex_tiles_ok(ext, ex, ez, v + 1):
+	if _vertex_tiles_ok(ext, ex, ez, v + 1) and not _makes_saddle(ext, ex, ez, v + 1):
 		return v + 1
 	return v
+
+
+## Станет ли седловиной (противоположные углы равны, пары разные) один из четырёх тайлов вокруг
+## вершины (ex, ez), если её высота — v. Углы тайлов — по часовой от NW.
+func _makes_saddle(ext: PackedInt32Array, ex: int, ez: int, v: int) -> bool:
+	var c := ez * EXT + ex
+	var w := ext[c - 1]
+	var e := ext[c + 1]
+	var n := ext[c - EXT]
+	var s := ext[c + EXT]
+	var nw := ext[c - EXT - 1]
+	var ne := ext[c - EXT + 1]
+	var se := ext[c + EXT + 1]
+	var sw := ext[c + EXT - 1]
+	return (nw == v and n == w and nw != n) or (n == e and ne == v and n != ne) \
+			or (v == se and e == s and v != e) or (w == s and v == sw and w != v)
 
 
 ## Разброс углов ≤ 1 у всех четырёх тайлов вокруг вершины (ex, ez), если её высота — v. Соседи по
@@ -824,23 +875,33 @@ func _region_level(region: Vector2i) -> int:
 
 ## Дамбы: у границы областей с разными уровнями рельеф поднимается выше обоих уровней и плавно
 ## (dam_slope ярусов на тайл) спускается вглубь области — вода разных уровней не соприкасается.
+## Горячий путь (каждая высота): четыре границы — без массивов, только скаляры.
 func _apply_dams(x: float, z: float, h: float) -> float:
 	var w := _water_warped(x, z)
 	var region := Vector2i(floori(w.x / p.water_region), floori(w.y / p.water_region))
-	var level := _region_level(region)
 	var fx := w.x - region.x * p.water_region
 	var fz := w.y - region.y * p.water_region
-	var borders: Array[Vector3] = [
-		Vector3(-1, 0, fx), Vector3(1, 0, p.water_region - fx),
-		Vector3(0, -1, fz), Vector3(0, 1, p.water_region - fz),
-	]
-	for b in borders:
-		if b.z >= p.dam_width:
-			continue
-		var other := _region_level(region + Vector2i(int(b.x), int(b.y)))
-		if other != level:
-			h = maxf(h, maxi(level, other) + 1.0 - p.dam_slope * b.z)
+	var dw := p.dam_width
+	if fx >= dw and p.water_region - fx >= dw and fz >= dw and p.water_region - fz >= dw:
+		return h        # почти всегда: до границ областей далеко
+	var level := _region_level(region)
+	if fx < dw:
+		h = _dam(h, level, Vector2i(region.x - 1, region.y), fx)
+	if p.water_region - fx < dw:
+		h = _dam(h, level, Vector2i(region.x + 1, region.y), p.water_region - fx)
+	if fz < dw:
+		h = _dam(h, level, Vector2i(region.x, region.y - 1), fz)
+	if p.water_region - fz < dw:
+		h = _dam(h, level, Vector2i(region.x, region.y + 1), p.water_region - fz)
 	return h
+
+
+## Дамба у границы с областью other на расстоянии dist тайлов (если уровни воды разные).
+func _dam(h: float, level: int, other_region: Vector2i, dist: float) -> float:
+	var other := _region_level(other_region)
+	if other == level:
+		return h
+	return maxf(h, maxi(level, other) + 1.0 - p.dam_slope * dist)
 
 
 ## Место под лужу: ровная полка (все пробы в кольцах вокруг на одном ярусе), выше воды области,

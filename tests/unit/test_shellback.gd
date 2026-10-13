@@ -17,8 +17,12 @@ class StubDirector:
 func _field(f: TerrainFixture, target: Vector2i) -> FlowField:
 	var result: Array[FlowField] = []
 	var job := FlowField.build(f.query, FlowField.Mode.SHELLBACK, target, func(field: FlowField) -> void: result.append(field))
+	var steps := 0
 	while not job.step(Time.get_ticks_usec() + 1_000_000):
-		pass
+		steps += 1
+		if steps >= 64:              # с бюджетом в секунду поле строится за шаг — зависшая задача не вечна
+			fail("FlowField.build: job not done after %d steps" % steps)
+			return null
 	job.on_done()
 	return result[0]
 
@@ -80,6 +84,32 @@ func test_rams_once_then_backs_off_home() -> void:
 		assert_false(s.aggressive, "calm for shellback_calm_s")
 	assert_true(s.pos.distance_to(home) < maxf(far, Shellback.WANDER_R + 0.5), "went back home")
 	assert_eq(hits[0], 1, "no second ram")
+	_dispose(s)
+
+
+## Испуг (calm_down) посреди рытья: пыль стихает, корпус перестаёт дрожать — и не дрожит потом.
+func test_calm_down_mid_dig_stops_the_dust_and_the_tremble() -> void:
+	var f := TerrainFixture.new(4)
+	var s := _make(f, Vector2(5.5, 10.5), Vector2(8.5, 10.5))
+	s.state = Shellback.State.APPROACH
+	s.aggressive = true
+	var t := 0.0
+	while s.state != Shellback.State.DIG and t < 2.0:
+		s.step(DT)
+		t += DT
+	assert_eq(s.state, Shellback.State.DIG, "digs before the charge")
+	for _i in 5:
+		s.step(DT)
+	assert_true(s._dust.emitting, "dust while digging")
+	assert_true(absf(s._model.rotation.z) > 0.0, "trembles while digging")
+	s.calm_down()
+	assert_false(s._dust.emitting, "the dust stops")
+	assert_eq(s._model.rotation.z, 0.0, "the shell stops trembling")
+	for _i in 30:
+		s.step(DT)
+	assert_eq(s.state, Shellback.State.IDLE, "calm")
+	assert_false(s._dust.emitting, "no dust afterwards")
+	assert_eq(s._model.rotation.z, 0.0, "no tremble afterwards")
 	_dispose(s)
 
 

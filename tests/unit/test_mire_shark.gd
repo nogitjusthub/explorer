@@ -1,8 +1,9 @@
 extends TestCase
 ## Илозуб (GDD §5.6): ареал — зыбун и вода у него (не дальше shark_home_r); в зыбуне — засада на месте, из
-## засады — только прыжком; в воде — плавает вокруг своего места, гонится по ареалу не дальше shark_chase_r
-## от него; замах запирает цель, укус при пролёте рядом с машиной, возврат в ареал после прыжка на сушу,
-## потеря интереса.
+## засады — только прыжком; в воде — ждёт у поверхности или патрулирует вокруг своего места (может заплыть
+## или запрыгнуть в зыбун — и снова засада), с глубокой воды — к мелководью у берега (там новое место);
+## гонится по воде ареала не дальше shark_chase_r от места; замах запирает цель, укус — при пролёте рядом с
+## машиной на высоте её корпуса, возврат в ареал после прыжка на сушу (с уступа — прыжком), потеря интереса.
 
 const DT := 1.0 / 60.0
 
@@ -112,13 +113,16 @@ func test_ambush_in_quicksand() -> void:
 
 
 ## Засада не сходит с зыбуна: машина шумит вокруг (у его места, вне досягаемости) — не двигается; бросок —
-## единственный выход; машина ушла дальше shark_chase_r — сдаётся и в покое снова сидит в зыбуне.
+## единственный выход. Выманило прыжком на глубокую воду, машина ушла дальше shark_chase_r — сдаётся, с
+## глубины плывёт к берегу (мелководья нет — в зыбун) и снова сидит в засаде; в зыбуне ни в покое, ни в
+## охоте не двигается.
 func test_ambush_never_leaves_quicksand_except_to_leap() -> void:
 	var f := TerrainFixture.new(4)
 	_mire(f, 4, 4, 8, 10)
 	_lake(f, 9, 4, 14, 10, 2)
 	var den := Vector2(7.5, 7.5)
 	var s := _make(f, den, Vector2(30.5, 7.5))
+	assert_eq(s.rest, MireShark.Rest.AMBUSH, "in the quicksand — an ambush")
 	var t := 0.0
 	while t < 8.0:
 		var at := den + Vector2.from_angle(t * 0.8) * 5.0      # кружит вокруг, шумит
@@ -152,6 +156,8 @@ func test_ambush_never_leaves_quicksand_except_to_leap() -> void:
 	for _i in 120:
 		s.step(DT)
 	assert_true(s.pos.distance_to(rest) < 0.001, "lurks there again")
+	assert_eq(s.rest, MireShark.Rest.AMBUSH, "an ambush again")
+	assert_true(s._sink > MireShark.SINK_STALK, "only the eyes above the mud: sink %.2f" % s._sink)
 	_dispose(s)
 
 
@@ -210,7 +216,7 @@ func test_stalks_through_water_and_gives_up() -> void:
 ## CALM_S не слышит её, даже вернувшуюся.
 func test_breaks_off_beyond_the_chase_radius() -> void:
 	var f := TerrainFixture.new(4)
-	_banked_lake(f, 2, 4, 26, 10, 1)
+	_banked_lake(f, 2, 4, 26, 10, 3)                               # мелководье: место — в воде
 	var den := Vector2(4.5, 7.5)
 	var near := Vector2(10.5, 7.5)
 	var s := _make(f, den, near, "hover")
@@ -240,6 +246,7 @@ func test_breaks_off_beyond_the_chase_radius() -> void:
 		farthest = maxf(farthest, s.pos.distance_to(den))
 		assert_false(s.aggressive, "no immediate re-aggro")
 	assert_true(s.pos.distance_to(den) <= MireShark.WANDER_R + 0.6, "swam back home: %s" % s.pos)
+	assert_true(s._den == den, "its place is still where it appeared: %s" % s._den)
 	t = 0.0
 	while not s.aggressive and t < 1.5:
 		s.step(DT)
@@ -351,48 +358,303 @@ func test_swim_speed_against_vehicles() -> void:
 	assert_true(MireShark.CRAWL_SPEED < tank.max_speed)
 
 
-## В покое плавает вокруг своего места (не дальше WANDER_R, в зыбун не заплывает); ховер на воде у зыбуна —
-## слышит его, плывёт, прыгает и кусает.
-func test_cruises_home_water_and_hunts_a_hover() -> void:
+## Ховер на воде у зыбуна — илозуб в воде слышит его, плывёт, прыгает и кусает.
+func test_hunts_a_hover_from_the_water() -> void:
 	var f := TerrainFixture.new(4)
-	_banked_lake(f, 2, 4, 14, 10, 1)
-	var den := Vector2(4.5, 7.5)
-	var s := _make(f, den, Vector2(30.5, 7.5), "hover")
+	_banked_lake(f, 2, 4, 14, 10, 3)
+	var s := _make(f, Vector2(4.5, 7.5), Vector2(11.5, 7.5), "hover")
 	s.noise.update_vehicle(s.vehicle.state.pos, 7.5, 7.5)    # полный ход — слышно в 12 тайлах
 	var hits := [0]
 	s.damaged.connect(func(_amount: int, _source: StringName) -> void: hits[0] += 1)
-	var t := 0.0
-	var cruised := 0.0
-	var farthest := 0.0
-	var outside := 0
-	while t < 6.0:
-		var before := s.pos
-		s.step(DT)
-		t += DT
-		cruised += before.distance_to(s.pos)
-		farthest = maxf(farthest, s.pos.distance_to(den))
-		if not _in_habitat(f, s.pos) or _in_mire(f, s.pos):
-			outside += 1
-	assert_eq(s.state, MireShark.State.IDLE, "out of earshot — cruises")
-	assert_true(cruised > 1.0, "swims about, not frozen: %.2f" % cruised)
-	assert_true(farthest <= MireShark.WANDER_R + 0.6, "stays around its place: %.2f" % farthest)
-	assert_eq(outside, 0, "only in the water, never into the quicksand")
-	# Ховер у его места — илозуб слышит его и идёт на сближение.
-	s.vehicle.state.pos = Vector2(11.5, 7.5)
-	s.noise.update_vehicle(s.vehicle.state.pos, 7.5, 7.5)
 	var leap_at := -1.0
-	t = 0.0
+	var outside := 0
+	var t := 0.0
 	while t < 6.0 and hits[0] == 0:
 		s.step(DT)
 		t += DT
-		if (s.state == MireShark.State.STALK or s.state == MireShark.State.IDLE) and not _in_habitat(f, s.pos):
+		if (s.state == MireShark.State.STALK or s.state == MireShark.State.IDLE) \
+				and (not _in_habitat(f, s.pos) or _in_mire(f, s.pos)):
 			outside += 1
 		if leap_at < 0.0 and s.state == MireShark.State.WINDUP:
 			leap_at = t
 	assert_true(leap_at > 0.0, "winds up in the water")
 	assert_true(leap_at < 3.0, "closes in quickly: %.1f s" % leap_at)
 	assert_eq(hits[0], 1, "bites the hover")
-	assert_eq(outside, 0, "stays in its water")
+	assert_eq(outside, 0, "chases through its water")
+	_dispose(s)
+
+
+## Широкое мелкое озеро, зыбун дальше WANDER_R от места (ареал — shark_home_r 6). Записывает покой
+## seconds секунд: отрезки [rest, начало, конец, путь, наибольшая скорость после первых 0,3 с]; проверяет,
+## что он в воде у места.
+func _rest_log(seconds: float) -> Array:
+	var f := TerrainFixture.new(4)
+	_lake(f, 2, 4, 14, 12, 3)
+	_mire(f, 2, 3, 14, 3)
+	_mire(f, 2, 13, 14, 13)
+	var den := Vector2(6.5, 8.5)
+	var v := Vehicle.new(load("res://data/vehicles/rover.tres"), f.query)
+	v.state.pos = Vector2(40.5, 8.5)
+	var s := MireShark.new()
+	s.rules = BalanceRules.new()
+	s.rules.shark_home_r = 6
+	s.vehicle = v
+	s.query = f.query
+	s.terrain = f.terrain
+	s.noise = NoiseField.new()
+	s.rng = RandomNumberGenerator.new()
+	s.rng.seed = 7
+	s.setup(den)
+	var segs: Array = []
+	var t := 0.0
+	var farthest := 0.0
+	var wet := true
+	var lie_sink := -1.0
+	while t < seconds:
+		var before := s.pos
+		s.step(DT)
+		t += DT
+		var step := before.distance_to(s.pos)
+		if segs.is_empty() or segs[segs.size() - 1][0] != s.rest:
+			segs.append([s.rest, t, t, 0.0, 0.0])
+		var seg: Array = segs[segs.size() - 1]
+		seg[2] = t
+		seg[3] += step
+		if t - seg[1] > 0.3:
+			seg[4] = maxf(seg[4], step / DT)                   # из патруля в покой — гасит ход плавно
+		if s.rest == MireShark.Rest.LIE and t - seg[1] > 1.5:
+			lie_sink = s._sink
+		farthest = maxf(farthest, s.pos.distance_to(den))
+		var tile := Grid.tile_of_world(s.pos.x, s.pos.y)
+		wet = wet and f.query.water_tier(tile.x, tile.y) != TerrainQuery.NO_WATER and not _in_mire(f, s.pos)
+	assert_eq(s.state, MireShark.State.IDLE, "nothing to hunt — rests")
+	assert_true(wet, "rests in the water")
+	assert_true(farthest <= MireShark.WANDER_R + 0.6, "around its place: %.2f" % farthest)
+	if lie_sink >= 0.0:
+		assert_near(lie_sink, MireShark.SINK_LIE, 0.02, "lying at the surface: back and eyes above the water")
+	v.free()
+	s.free()
+	return segs
+
+
+## В воде (не в зыбуне) покой чередуется: LIE — ждёт у поверхности, лишь изредка чуть сдвигается, PATROL —
+## плавает вокруг места; длительности — из LIE_MIN_S…LIE_MAX_S и PATROL_MIN_S…PATROL_MAX_S, от rng (тот же
+## сид — тот же распорядок).
+func test_water_rest_alternates_lying_and_patrolling() -> void:
+	var segs := _rest_log(60.0)
+	var lies := 0
+	var patrols := 0
+	for i in segs.size():
+		var seg: Array = segs[i]
+		var length: float = seg[2] - seg[1] + DT
+		var full := i > 0 and i < segs.size() - 1
+		match seg[0]:
+			MireShark.Rest.LIE:
+				lies += 1
+				assert_true(seg[4] <= MireShark.SHIFT_SPEED + 0.05, "lying still, slow shifts: %.2f t/s" % seg[4])
+				assert_true(seg[3] <= MireShark.SHIFT_R * (length / MireShark.SHIFT_MIN_S + 1.0) + 0.1,
+						"shifts only a little: %.2f in %.1f s" % [seg[3], length])
+				if full:
+					assert_true(length >= MireShark.LIE_MIN_S - 0.05 and length <= MireShark.LIE_MAX_S + 0.05,
+							"lies %.1f s" % length)
+			MireShark.Rest.PATROL:
+				patrols += 1
+				if full:
+					assert_true(seg[3] > 1.0, "patrols around: %.2f" % seg[3])
+					assert_true(length >= MireShark.PATROL_MIN_S - 0.05 and length <= MireShark.PATROL_MAX_S + 0.05,
+							"patrols %.1f s" % length)
+			_:
+				fail("no ambush in the water")
+	assert_true(lies >= 2 and patrols >= 2, "alternates: %d lie, %d patrol" % [lies, patrols])
+	var again := _rest_log(60.0)
+	assert_eq(again.size(), segs.size(), "the same schedule from the same seed")
+	if again.size() == segs.size():
+		for i in segs.size():
+			assert_near(again[i][1], segs[i][1], 1e-6, "segment %d starts the same" % i)
+
+
+## Выманило в воду — может патрулем заплыть обратно в зыбун: там засада, с места не сходит (машина шумит
+## вне досягаемости), выходит только прыжком.
+func test_patrols_back_into_the_quicksand_and_ambushes() -> void:
+	var f := TerrainFixture.new(4)
+	_lake(f, 2, 4, 14, 5, 3)                                   # узкая мелкая протока…
+	_mire(f, 2, 3, 14, 3)                                      # …меж двух полос зыбуна
+	_mire(f, 2, 6, 14, 6)
+	var s := _make(f, Vector2(6.5, 4.5), Vector2(40.5, 4.5))
+	var t := 0.0
+	while t < 90.0 and s.rest != MireShark.Rest.AMBUSH:
+		s.step(DT)
+		t += DT
+	assert_eq(s.rest, MireShark.Rest.AMBUSH, "patrolled into the quicksand: %s" % s.pos)
+	assert_true(_in_mire(f, s.pos), "sits in the quicksand: %s" % s.pos)
+	var at := s.pos
+	var loud := s.pos + Vector2(0.0, 6.0)                       # шумит вне досягаемости
+	s.vehicle.state.pos = loud
+	s.noise.update_vehicle(loud, 10.0, 10.0)
+	for _i in int(8.0 / DT):
+		s.step(DT)
+		assert_true(s.pos.distance_to(at) < 0.001, "does not leave the quicksand")
+	assert_true(s.aggressive, "heard the vehicle and watches it")
+	s.vehicle.state.pos = s.pos + Vector2(0.0, 2.0)
+	var leaped := false
+	for _i in 60:
+		s.step(DT)
+		leaped = leaped or s.state == MireShark.State.LEAP
+	assert_true(leaped, "leaves it only by the leap")
+	_dispose(s)
+
+
+## Из воды может запрыгнуть в зыбун: прыжок кончился в зыбуне — ныряет туда и сидит в засаде.
+func test_leaps_from_the_water_into_the_quicksand() -> void:
+	var f := TerrainFixture.new(4)
+	_lake(f, 2, 4, 14, 5, 3)
+	_mire(f, 2, 3, 14, 3)
+	_mire(f, 2, 6, 14, 8)
+	var s := _make(f, Vector2(6.5, 4.5), Vector2(6.5, 6.8))    # тихая машина на зыбуне в зоне прыжка
+	s.step(DT)
+	assert_eq(s.state, MireShark.State.WINDUP, "winds up from the water")
+	s.vehicle.state.pos = Vector2(40.5, 40.5)                  # увернулась
+	var t := 0.0
+	while t < 5.0 and not (s.state == MireShark.State.IDLE and s.rest == MireShark.Rest.AMBUSH):
+		s.step(DT)
+		t += DT
+	assert_true(_in_mire(f, s.pos), "landed in the quicksand: %s" % s.pos)
+	assert_eq(s.rest, MireShark.Rest.AMBUSH, "and lurks there")
+	var at := s.pos
+	for _i in 180:
+		s.step(DT)
+	assert_true(s.pos.distance_to(at) < 0.001, "still")
+	_dispose(s)
+
+
+## Оказался на глубокой воде (2+ яруса) — плывёт к ближайшему мелководью у берега; там теперь его место.
+## Мелководья нет — к ближайшему зыбуну, и там засада.
+func test_from_deep_water_to_the_shallows_its_new_place() -> void:
+	var f := TerrainFixture.new(4)
+	_lake(f, 2, 2, 12, 12, 1)                                  # глубоко…
+	_lake(f, 2, 2, 2, 12, 3)                                   # …мелководье у западного берега…
+	_lake(f, 12, 2, 12, 12, 3)                                 # …и у восточного
+	_mire(f, 13, 2, 13, 12)
+	var s := _make(f, Vector2(6.5, 7.5), Vector2(40.5, 7.5))
+	s.rules.shark_home_r = 12
+	var t := 0.0
+	while t < 6.0:
+		s.step(DT)
+		t += DT
+	assert_true(s._den.distance_to(Vector2(2.5, 7.5)) < 0.01, "the nearest shallows are its place now: %s" % s._den)
+	var tile := Grid.tile_of_world(s.pos.x, s.pos.y)
+	assert_eq(tile.x, 2, "in the shallows: %s" % s.pos)
+	for _i in int(20.0 / DT):
+		s.step(DT)
+	assert_true(s.pos.distance_to(s._den) <= MireShark.WANDER_R + 0.6, "lives around it: %s" % s.pos)
+	assert_true(f.query.water_depth(floorf(s.pos.x) + 0.5, floorf(s.pos.y) + 0.5) < MireShark.DEEP_WATER,
+			"not back on the deep: %s" % s.pos)
+	_dispose(s)
+	# Мелководья нет — в зыбун.
+	var g := TerrainFixture.new(4)
+	_lake(g, 2, 2, 12, 12, 1)
+	_mire(g, 13, 2, 13, 12)
+	var m := _make(g, Vector2(9.5, 7.5), Vector2(40.5, 7.5))
+	m.rules.shark_home_r = 12
+	t = 0.0
+	while t < 8.0 and m.rest != MireShark.Rest.AMBUSH:
+		m.step(DT)
+		t += DT
+	assert_true(_in_mire(g, m.pos), "no shallows — into the quicksand bank: %s" % m.pos)
+	assert_eq(m.rest, MireShark.Rest.AMBUSH, "an ambush there")
+	_dispose(m)
+
+
+## Укус — только на высоте корпуса машины: тело илозуба от середины корпуса над поверхностью под машиной не
+## дальше BITE_DY. Пролёт над крышей на вершине дуги — мимо (раньше кусал и так).
+func test_bite_only_at_the_height_of_the_hull() -> void:
+	var g := 4 * Grid.TIER_H
+	assert_true(MireShark.at_bite_height(g + 0.25, g), "level with the hull")
+	assert_true(MireShark.at_bite_height(g + 0.45, g), "low over the hull")
+	assert_false(MireShark.at_bite_height(g + MireShark.APEX, g), "over the roof at the apex")
+	assert_false(MireShark.at_bite_height(g - 0.1, g), "below the vehicle")
+	assert_false(MireShark.at_bite_height(g + 0.25, g + Grid.TIER_H), "a vehicle a tier higher")
+	for over: bool in [true, false]:
+		var f := TerrainFixture.new(4)
+		_mire(f, 4, 4, 16, 16)
+		var s := _make(f, Vector2(8.5, 10.5), Vector2(9.75, 10.5))   # под вершиной дуги
+		var hits := [0]
+		s.damaged.connect(func(_amount: int, _source: StringName) -> void: hits[0] += 1)
+		s.start_hunt()
+		s.step(DT)
+		assert_eq(s.state, MireShark.State.WINDUP, "wind-up")
+		if over:
+			s.vehicle.state.pos = Vector2(9.75, 11.15)            # вбок: рядом с дугой только у её вершины
+		var t := 0.0
+		while t < 2.0:
+			s.step(DT)
+			t += DT
+		assert_eq(hits[0], 0 if over else 1, "bites only at the hull's height (over the roof: %s)" % over)
+		_dispose(s)
+
+
+## Бросок — тоже на поводке: машина в зоне прыжка, но дальше shark_chase_r от его места — не бросается.
+func test_no_leap_at_a_vehicle_beyond_the_leash() -> void:
+	for beyond: bool in [true, false]:
+		var f := TerrainFixture.new(4)
+		_banked_lake(f, 2, 4, 26, 10, 3)
+		var den := Vector2(4.5, 7.5)
+		var s := _make(f, den, Vector2(40.5, 7.5))
+		s.pos = den + Vector2(s.rules.shark_chase_r - 1.0, 0.0)       # прыжок унёс к краю поводка
+		var off := 2.0 if beyond else 0.5
+		s.vehicle.state.pos = s.pos + Vector2(off, 0.0)              # тихая, в зоне прыжка
+		var windup := false
+		for _i in 30:
+			s.step(DT)
+			windup = windup or s.state == MireShark.State.WINDUP
+		assert_eq(windup, not beyond, "leaps only within shark_chase_r of its place (beyond: %s)" % beyond)
+		_dispose(s)
+
+
+## Землетрясение подняло грунт под ним — сухой уступ выше воды на три яруса: не сползает, а прыгает с него
+## в воду и ныряет.
+func test_jumps_off_a_quake_ledge_into_the_water() -> void:
+	var f := TerrainFixture.new(4)
+	_banked_lake(f, 2, 4, 14, 10, 3)
+	var s := _make(f, Vector2(8.5, 7.5), Vector2(40.5, 7.5))
+	for _i in 10:
+		s.step(DT)
+	for tz in range(6, 9):
+		for tx in range(7, 10):
+			f.set_flat(tx, tz, 7)
+			f.set_water(tx, tz, -Grid.HEIGHT_OFFSET)          # воды здесь больше нет
+	s.pos = Vector2(8.5, 7.5)
+	var crawled := 0
+	var leaped := false
+	var t := 0.0
+	while t < 3.0 and not (leaped and s.state == MireShark.State.IDLE):
+		s.step(DT)
+		t += DT
+		if s.state == MireShark.State.CRAWL and not leaped:
+			crawled += 1
+		leaped = leaped or s.state == MireShark.State.LEAP
+	assert_true(leaped, "jumps off the ledge")
+	assert_true(crawled <= 1, "without crawling over the edge: %d frames" % crawled)
+	var tile := Grid.tile_of_world(s.pos.x, s.pos.y)
+	assert_true(f.query.water_tier(tile.x, tile.y) != TerrainQuery.NO_WATER, "in the water: %s" % s.pos)
+	assert_eq(s.state, MireShark.State.IDLE, "and rests there")
+	_dispose(s)
+
+
+## Память ареала забывается раз в GROUND_MEMO_S: рельеф изменился (зыбун пропал) — ареал считается заново.
+func test_habitat_memory_forgets_terrain_changes() -> void:
+	var f := TerrainFixture.new(4)
+	_banked_lake(f, 2, 4, 14, 10, 3)
+	var s := _make(f, Vector2(8.5, 7.5), Vector2(40.5, 7.5))
+	var tile := Vector2i(8, 7)
+	assert_true(s._habitat(tile), "water by the quicksand")
+	for tx in range(2, 15):
+		f.set_flags(tx, 3, 0)
+		f.set_flags(tx, 11, 0)
+	assert_true(s._habitat(tile), "remembered for now")
+	for _i in ceili(MireShark.GROUND_MEMO_S / DT) + 1:
+		s.step(DT)
+	assert_false(s._habitat(tile), "forgotten — the quicksand is gone")
 	_dispose(s)
 
 
@@ -502,7 +764,7 @@ func test_no_bite_after_the_vehicle_left_its_level() -> void:
 		s.start_hunt()
 		s.step(DT)
 		assert_eq(s.state, MireShark.State.WINDUP, "vehicle on its level — wind-up")
-		s.vehicle.state.pos = Vector2(12.4, 10.5) if left else Vector2(11.7, 10.5)
+		s.vehicle.state.pos = Vector2(12.4, 10.5) if left else Vector2(11.6, 10.5)
 		var r := _strikes(s, 2.0)
 		assert_eq(r[1], 0 if left else 1, "bites only on its level (left: %s)" % left)
 		_dispose(s)

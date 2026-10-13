@@ -3,47 +3,34 @@ extends Node
 ## Звуки событий (GDD §9): молния — треск телеграфа и гром, землетрясение — нарастающий гул и раскат
 ## при толчке, урон — удар по корпусу, разряд по машине — гудение помех. Громкость падает с расстоянием до машины. Слушает EventBus;
 ## двигатель машины звучит сам (EngineSound).
+## Звуки синтезируются заранее, порциями — не дольше SYNTH_BUDGET_USEC за кадр, пока игрок в трюме
+## (Sfx.prepare, Sfx.pump), а не на старте: в браузере все сразу — почти секунда чёрного экрана, а даже
+## один звук целиком за кадр — заметная запинка. Порядок — какой вероятнее понадобится раньше;
+## понадобился до очереди — досинтезируется сразу (Sfx.named). Синтезированные живут всю сессию.
 
 const VOICES := 6
 const HEAR_TILES := 30.0               ## дальше — не слышно (гром, гул землетрясения)
 const FAUNA_HEAR_TILES := 14.0         ## звуки фауны — чуть дальше края экрана (~8 тайлов от машины)
 const THUNDER_SPEED := 30.0            ## тайлов в секунду — гром приходит позже вспышки
 const SHUTTLE_HEAR_TILES := 45.0       ## челнок слышно издалека — прилёт к площадке за краем экрана
-const THRUST_S := 3.0                  ## реактивный рёв спуска и взлёта челноков (тот же, что у капсулы)
+const SYNTH_BUDGET_USEC := 3000        ## фоновый синтез звуков за кадр, мкс
+const SOUNDS: Array[StringName] = [&"hit", &"rumble_hit", &"pager", &"chime", &"crackle", &"thunder", &"screech",
+		&"buzz", &"rumble_build", &"dust", &"wind", &"bellow", &"bellow_low", &"stomp", &"thrust", &"tractor",
+		&"howl"]
+const DUST_DB := -6.0                  ## гул пылевой бури в массе; вдали — тише (lerp от 0,12 по амплитуде)
 
 var vehicle: Vehicle
 
 var _players: Array[AudioStreamPlayer] = []
 var _next := 0
 var _quake_heard := false              ## гул телеграфа текущего землетрясения уже запущен
-var _sounds: Dictionary[StringName, AudioStreamWAV] = {}
 var _dust_wind: AudioStreamPlayer      ## гул пылевой бури — петля ветра, громкость по плотности у машины
-var _makers: Dictionary[StringName, Callable] = {}
+var _dust_level := 0.0                 ## плотность пылевой бури у машины (последний weather_changed)
 
 
 func _ready() -> void:
 	name = "AudioDirector"
-	# Звуки синтезируются по одному за кадр, пока игрок в трюме, — не на старте: в браузере все сразу —
-	# это почти секунда чёрного экрана. Понадобился раньше — синтезируется сразу (_sfx).
-	_makers = {
-		&"crackle": func() -> AudioStreamWAV: return Sfx.crackle(1.2),
-		&"thunder": func() -> AudioStreamWAV: return Sfx.thunder(2.2),
-		&"hit": func() -> AudioStreamWAV: return Sfx.hit(0.3),
-		&"rumble_build": func() -> AudioStreamWAV: return Sfx.rumble(2.5, true),
-		&"rumble_hit": func() -> AudioStreamWAV: return Sfx.rumble(2.4, false),
-		&"wind": func() -> AudioStreamWAV: return Sfx.wind_loop(2.0),    # гул водоворота — в кэш Sfx заранее
-		&"howl": func() -> AudioStreamWAV: return Sfx.howl_loop(6.0),    # вой смерча — тоже
-		&"dust": func() -> AudioStreamWAV: return Sfx.dust_loop(3.0),    # ровный гул пылевой бури
-		&"screech": func() -> AudioStreamWAV: return Sfx.screech(0.75),
-		&"buzz": func() -> AudioStreamWAV: return Sfx.buzz(1.2),
-		&"bellow": func() -> AudioStreamWAV: return Sfx.bellow(1.1),
-		&"bellow_low": func() -> AudioStreamWAV: return Sfx.bellow(1.1, true),
-		&"stomp": func() -> AudioStreamWAV: return Sfx.stomp(1.3),
-		&"thrust": func() -> AudioStreamWAV: return Sfx.thrust(THRUST_S),
-		&"chime": func() -> AudioStreamWAV: return Sfx.chime(0.6),
-		&"pager": func() -> AudioStreamWAV: return Sfx.pager_beep(),
-		&"tractor": func() -> AudioStreamWAV: return Sfx.tractor(1.4),
-	}
+	Sfx.prepare(SOUNDS)
 	for _i in VOICES:
 		var p := AudioStreamPlayer.new()
 		add_child(p)
@@ -64,18 +51,13 @@ func _ready() -> void:
 	EventBus.controls_inverted.connect(func(_seconds: float) -> void: _play(_sfx(&"buzz"), -8.0))
 
 
+## Фоновый синтез звуков (свои и чужие — люк трюма, гул угроз): очередь общая, в Sfx.
 func _process(_dt: float) -> void:
-	for key in _makers:
-		if not _sounds.has(key):
-			_sounds[key] = _makers[key].call()
-			return
-	set_process(false)
+	Sfx.pump(SYNTH_BUDGET_USEC)
 
 
 func _sfx(key: StringName) -> AudioStreamWAV:
-	if not _sounds.has(key):
-		_sounds[key] = _makers[key].call()
-	return _sounds[key]
+	return Sfx.named(key)
 
 
 func _on_telegraphed(kind: StringName, at: Vector3, _seconds: float, _dir: Vector2) -> void:
@@ -84,6 +66,13 @@ func _on_telegraphed(kind: StringName, at: Vector3, _seconds: float, _dir: Vecto
 	elif kind == &"quake" and not _quake_heard:
 		_quake_heard = true
 		_play(_sfx(&"rumble_build"), -2.0)
+	elif kind == &"dust" and not _dust_wind.playing and is_inside_tree():
+		# Буря идёт (её телеграф — каждый кадр, пока она не кончилась): гул. Включает его только
+		# телеграф — сводка плотности (weather_changed) лишь задаёт громкость и после конца бури
+		# (threat_ended) гул не воскрешает.
+		_dust_wind.stream = _sfx(&"dust")
+		_dust_wind.volume_db = _dust_db(_dust_level)
+		_dust_wind.play()
 
 
 ## Посадка капсулы десанта — глухой удар опор о грунт и короткий гул.
@@ -131,7 +120,7 @@ func _on_shuttle_sound(event: StringName, at: Vector3, small: bool, seconds: flo
 	var volume := -3.0 if small else 0.0
 	match event:
 		&"descend":
-			_play_at(_sfx(&"thrust"), at, volume, pitch, SHUTTLE_HEAR_TILES, maxf(THRUST_S - seconds * pitch, 0.0))
+			_play_at(_sfx(&"thrust"), at, volume, pitch, SHUTTLE_HEAR_TILES, maxf(Sfx.THRUST_S - seconds * pitch, 0.0))
 		&"land":
 			_play_at(_sfx(&"hit"), at, volume + 4.0, 0.55 * pitch, SHUTTLE_HEAR_TILES)
 			_play_at(_sfx(&"rumble_hit"), at, volume - 6.0, 1.1 * pitch, SHUTTLE_HEAR_TILES)
@@ -148,19 +137,23 @@ func _on_pickup(kind: StringName, _value: int) -> void:
 
 
 ## Пылевая буря гудит, пока идёт: фронт вдали — едва слышно, машина в массе — в полную силу (ровный
-## гул без нарастаний). Кончилась — гул стихает (threat_ended).
+## гул без нарастаний). Гул включает телеграф бури (_on_telegraphed), здесь — только громкость;
+## кончилась — гул стихает (threat_ended).
 func _on_weather(kind: StringName, intensity: float) -> void:
-	if kind != &"dust" or not is_inside_tree():
-		return                             # при закрытии сцены буря шлёт «стихла» уже без нас
-	if not _dust_wind.playing:
-		_dust_wind.stream = _sfx(&"dust")
-		_dust_wind.play()
-	_dust_wind.volume_db = linear_to_db(lerpf(0.12, 1.0, clampf(intensity, 0.0, 1.0))) - 6.0
+	if kind != &"dust":
+		return
+	_dust_level = intensity
+	_dust_wind.volume_db = _dust_db(intensity)
+
+
+static func _dust_db(intensity: float) -> float:
+	return linear_to_db(lerpf(0.12, 1.0, clampf(intensity, 0.0, 1.0))) + DUST_DB
 
 
 func _on_threat_ended(kind: StringName) -> void:
 	if kind == &"dust":
 		_dust_wind.stop()
+		_dust_level = 0.0
 	if kind == &"quake":
 		_quake_heard = false
 		_play(_sfx(&"rumble_hit"), 2.0)
@@ -171,20 +164,22 @@ func _on_lightning(at: Vector3) -> void:
 	_delayed(_sfx(&"thunder"), at, 0.0, 0.85 + 0.3 * fmod(at.x * 0.37 + at.z * 0.61, 1.0))
 
 
+## Звук с задержкой по расстоянию. Таймер дерева зовёт метод узла (bind), а не лямбду: «Заново» удаляет
+## директор вместе со сценой — связь с таймером рвётся сама, и гром не играет на удалённом узле.
 func _delayed(stream: AudioStream, at: Vector3, volume_db: float, pitch: float) -> void:
-	if vehicle == null:
+	if not is_instance_valid(vehicle):
 		return
 	var delay := Vector2(at.x, at.z).distance_to(vehicle.state.pos) / THUNDER_SPEED
 	if delay < 0.05:
 		_play_at(stream, at, volume_db, pitch)
 	else:
-		get_tree().create_timer(delay).timeout.connect(func() -> void: _play_at(stream, at, volume_db, pitch))
+		get_tree().create_timer(delay).timeout.connect(_play_at.bind(stream, at, volume_db, pitch))
 
 
 ## Звук в точке: дальше hear — не слышно, громкость падает по квадрату (за краем экрана — уже тихо).
 func _play_at(stream: AudioStream, at: Vector3, volume_db: float, pitch: float = 1.0, hear: float = HEAR_TILES,
 		from: float = 0.0) -> void:
-	if vehicle == null:
+	if not is_instance_valid(vehicle) or not is_inside_tree():
 		return
 	var d := Vector2(at.x, at.z).distance_to(vehicle.state.pos)
 	if d > hear:

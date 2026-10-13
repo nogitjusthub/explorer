@@ -141,15 +141,17 @@ func step(dt: float) -> void:
 	_layers.update(Vector3(s.pos.x, s.y, s.pos.y), _clear_r(), fade)
 
 
+## Конец: массы нет. Сначала последняя сводка («плотность 0», ветер стих), потом «угроза кончилась» —
+## кто гасит свои эффекты по концу угрозы (гул бури), после него сводок не получает.
 func _end() -> void:
 	ended = true
 	finished = true
 	RenderingServer.global_shader_parameter_set(&"weather_radius", 0.0)
 	RenderingServer.global_shader_parameter_set(&"weather_gloom", 0.0)
-	EventBus.threat_ended.emit(kind())
 	EventBus.weather_changed.emit(kind(), 0.0)
 	if variant == Variant.DUST:
 		EventBus.wind_changed.emit(wind, 0.0)
+	EventBus.threat_ended.emit(kind())
 
 
 func _update_globals() -> void:
@@ -157,6 +159,8 @@ func _update_globals() -> void:
 	RenderingServer.global_shader_parameter_set(&"weather_radius", 0.0 if ended else radius)
 
 
+## Сцену закрыли посреди непогоды («Заново»): глобальные параметры шейдеров живут дольше сцены — без
+## сброса масса осталась бы и в новом забеге.
 func _exit_tree() -> void:
 	if not finished:
 		_end()

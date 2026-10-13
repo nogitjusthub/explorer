@@ -184,12 +184,11 @@ func _ready() -> void:
 	_fade.set_anchors_preset(Control.PRESET_FULL_RECT)
 	_fade.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(_fade)
-	_toggle_snd = AudioStreamPlayer.new()
-	_toggle_snd.stream = Sfx.toggle()                 # выбор машины — щелчок механического тумблера
+	_toggle_snd = AudioStreamPlayer.new()             # выбор машины — щелчок механического тумблера (_click)
 	_toggle_snd.volume_db = -10.0
 	add_child(_toggle_snd)
 	_lift_snd = AudioStreamPlayer.new()
-	_lift_snd.stream = Sfx.hatch_lift()
+	Sfx.prepare([&"toggle", &"hatch_lift"], true)    # синтез в фоне, первыми (нужны по нажатию, см. _click, _start)
 	_lift_snd.volume_db = -6.0
 	add_child(_lift_snd)
 	_light_k.resize(vehicle_ids.size())
@@ -653,8 +652,20 @@ func _process(dt: float) -> void:
 	if _leave_t >= 0.0:
 		_leave(dt)
 		return
+	if not HelpScreen.shown(get_tree()):     # справка поверх — клавиши её (и Esc, закрывший её в этом кадре)
+		_keys()
+	_models[selected].root.rotation.y += SPIN * dt
+	for m in _models:
+		for rotor in m.spinners:
+			rotor.rotation.z += 6.0 * dt * float(m == _models[selected])
+	_apply_lights(dt)
+	_ui.queue_redraw()
+
+
+## Клавиши трюма: A / D — машина, F / Enter — высадка. Пока открыто окошко громкости: A / D — громкость,
+## Esc — закрыть; выбор машины и высадка ждут.
+func _keys() -> void:
 	if _vol_panel.visible:
-		# Окошко громкости: A / D — громкость, Esc — закрыть; выбор машины и высадка ждут.
 		if Input.is_action_just_pressed(&"move_left") or Input.is_action_just_pressed(&"ui_left"):
 			_vol_slider.nudge(-1)
 			_vol_button.queue_redraw()
@@ -663,19 +674,13 @@ func _process(dt: float) -> void:
 			_vol_button.queue_redraw()
 		elif Input.is_action_just_pressed(&"pause") or Input.is_action_just_pressed(&"ui_cancel"):
 			_toggle_volume()
-	elif not HelpScreen.shown(get_tree()):
-		if Input.is_action_just_pressed(&"move_left") or Input.is_action_just_pressed(&"ui_left"):
-			_step(-1)
-		elif Input.is_action_just_pressed(&"move_right") or Input.is_action_just_pressed(&"ui_right"):
-			_step(1)
-		elif Input.is_action_just_pressed(&"radio") or Input.is_action_just_pressed(&"ui_accept"):
-			_start()
-	_models[selected].root.rotation.y += SPIN * dt
-	for m in _models:
-		for rotor in m.spinners:
-			rotor.rotation.z += 6.0 * dt * float(m == _models[selected])
-	_apply_lights(dt)
-	_ui.queue_redraw()
+		return
+	if Input.is_action_just_pressed(&"move_left") or Input.is_action_just_pressed(&"ui_left"):
+		_step(-1)
+	elif Input.is_action_just_pressed(&"move_right") or Input.is_action_just_pressed(&"ui_right"):
+		_step(1)
+	elif Input.is_action_just_pressed(&"radio") or Input.is_action_just_pressed(&"ui_accept"):
+		_start()
 
 
 ## Тап или клик по машине — выбрать её.
@@ -703,7 +708,7 @@ func _step(d: int) -> void:
 
 func _select(i: int) -> void:
 	selected = i
-	_toggle_snd.play()
+	_click()
 	vehicle_changed.emit(vehicle_ids[selected])
 
 
@@ -722,11 +727,18 @@ func _apply_lights(dt: float) -> void:
 		_bay_lamps[i].albedo_color = COLOR_BAY_OFF.lerp(COLOR_BAY_ON, k * flick)
 
 
+## Щелчок тумблера: звук берётся при нажатии — не успел в фоне, досинтезируется сейчас (~5 мс, один раз).
+func _click() -> void:
+	_toggle_snd.stream = Sfx.toggle()
+	_toggle_snd.play()
+
+
 func _start() -> void:
 	if _leave_t >= 0.0 or HelpScreen.shown(get_tree()):
 		return
 	_leave_t = 0.0
-	_toggle_snd.play()
+	_click()
+	_lift_snd.stream = Sfx.hatch_lift()               # не успел в фоне — досинтезируется сейчас
 	_lift_snd.play()
 	_shaft_glow.position = Vector3(_doors[selected].position.x, -1.5, 0)
 	_shaft_glow.light_energy = 0.0

@@ -3,7 +3,8 @@ extends Control
 ## Регулятор общей громкости (Settings.master_volume): значок динамика, шкала из STEPS делений и проценты.
 ## Мышь (и тап): клик или протяжка по шкале — уровень, колесо — на деление, клик по значку — выключить
 ## звук и вернуть прежний уровень. Клавиши — через nudge (A / D у владельца экрана). Каждое изменение
-## сохраняется сразу и отзывается коротким щелчком — слышно, какой уровень.
+## отзывается коротким щелчком — слышно, какой уровень — и сразу сохраняется; при протяжке громкость
+## меняется на ходу, а в файл (в браузере — IndexedDB) пишется один раз, по отпусканию.
 
 signal changed(volume: float)
 
@@ -16,6 +17,7 @@ const BAR_W := STEPS * (SEG_W + 1) - 1
 
 var _restore := 1.0                      ## уровень, к которому вернёт клик по значку
 var _dragging := false
+var _unsaved := false                    ## протяжка поменяла уровень — сохранить по отпусканию
 var _tick: AudioStreamPlayer
 
 
@@ -23,8 +25,7 @@ func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_STOP
 	custom_minimum_size = Vector2(BAR_X + BAR_W + 6.0 + _percent_w(), 11.0)
 	size = custom_minimum_size
-	_tick = AudioStreamPlayer.new()
-	_tick.stream = Sfx.toggle()
+	_tick = AudioStreamPlayer.new()                  # щелчок тумблера — звук берётся при первом щелчке
 	_tick.volume_db = -12.0
 	_tick.process_mode = Node.PROCESS_MODE_ALWAYS   # слышно и на паузе
 	add_child(_tick)
@@ -48,14 +49,30 @@ func _gui_input(event: InputEvent) -> void:
 				_toggle_mute()
 			elif _dragging:
 				_set_from_x(mb.position.x)
+			elif not mb.pressed:
+				_end_drag()
 		accept_event()
 	elif event is InputEventMouseMotion and _dragging:
 		_set_from_x((event as InputEventMouseMotion).position.x)
 		accept_event()
 
 
+## Отпустили кнопку (или регулятор пропал из дерева посреди протяжки): сохранить, если уровень менялся.
+func _end_drag() -> void:
+	_dragging = false
+	if _unsaved:
+		_unsaved = false
+		Settings.save_settings()
+
+
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_EXIT_TREE:
+		_end_drag()
+
+
+## Уровень по точке шкалы; при протяжке — на ходу, без записи в файл.
 func _set_from_x(x: float) -> void:
-	_set_level(ceilf(clampf((x - BAR_X) / (BAR_W + 1.0), 0.0, 1.0) * STEPS) / STEPS)
+	_set_level(ceilf(clampf((x - BAR_X) / (BAR_W + 1.0), 0.0, 1.0) * STEPS) / STEPS, not _dragging)
 
 
 func _toggle_mute() -> void:
@@ -66,13 +83,15 @@ func _toggle_mute() -> void:
 		_set_level(maxf(_restore, 1.0 / STEPS))
 
 
-func _set_level(v: float) -> void:
-	var before := Settings.master_volume
-	Settings.set_master_volume(v)
-	if not is_equal_approx(before, Settings.master_volume):
-		queue_redraw()
-		changed.emit(Settings.master_volume)
-		_tick.play()
+## Новый уровень. Тот же, что был, — ничего не делаем (протяжка шлёт движение мыши на каждый пиксель).
+func _set_level(v: float, persist: bool = true) -> void:
+	if not Settings.set_master_volume(v, persist):
+		return
+	_unsaved = _unsaved or not persist
+	queue_redraw()
+	changed.emit(Settings.master_volume)
+	_tick.stream = Sfx.toggle()
+	_tick.play()
 
 
 func _percent_w() -> float:

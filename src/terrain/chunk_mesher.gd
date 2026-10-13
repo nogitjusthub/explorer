@@ -45,7 +45,7 @@ static func ground_alpha(flags: int) -> float:
 	return 0.0
 
 
-static func build_section(data: ChunkData, s: int, _run_seed: int = 0) -> Array:
+static func build_section(data: ChunkData, s: int) -> Array:
 	var i0 := (s % 2) * SECTION + Grid.APRON
 	var j0 := (s / 2) * SECTION + Grid.APRON
 	var n := ChunkData.N

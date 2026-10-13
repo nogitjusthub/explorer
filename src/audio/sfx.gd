@@ -1,18 +1,248 @@
 class_name Sfx
 extends RefCounted
-## Процедурные звуки без ассетов (как и двигатель): AudioStreamWAV 16 бит, моно. Генерируются один
-## раз при старте. Звуков угроз по GDD немного: молния (треск телеграфа и гром), гул землетрясения,
-## смерч (вой с завываниями), гул пылевой бури, урон; у фауны — крик скакунов, мычание и топот панцирника; реактивный рёв капсулы и челноков,
+## Процедурные звуки без ассетов (как и двигатель): AudioStreamWAV 16 бит, моно. Звуков угроз по GDD
+## немного: молния (треск телеграфа и гром), гул землетрясения, смерч (вой с завываниями), гул пылевой
+## бури, урон; у фауны — крик скакунов, мычание и топот панцирника; реактивный рёв капсулы и челноков,
 ## луч захвата; «дзынь» подбора находки и «би-бип» пейджера; щелчок механического тумблера в интерфейсе; лязг люка
 ## и гул гидропривода подъёмника в трюме на старте.
+##
+## Звуки — по именам (named, рецепты — _recipe), каждый синтезируется один раз за сессию (и после
+## «Заново» не заново). Синтез в GDScript небыстрый, а в браузере всё в одном потоке: звук целиком за
+## кадр — заметная запинка (вой смерча — около 130 тыс. сэмплов). Поэтому звуки синтезируются заранее
+## и порциями (prepare, pump — не дольше бюджета за кадр), пока игрок в трюме; понадобился раньше —
+## досинтезируется сразу. Генератор — сопрограмма над Synth: каждые CHUNK сэмплов ждёт следующей порции.
 
 const RATE := 22050
+const CHUNK := 256                       ## сэмплов генератора за порцию фонового синтеза…
+const CHUNK_HEAVY := 32                  ## …у самых тяжёлых (десятки синусов на сэмпл) — меньше
+const WRITE_CHUNK := 2048                ## сэмплов шва петли, поиска пика и записи в 16 бит за порцию
+const THRUST_S := 3.0                    ## реактивный рёв спуска и взлёта челноков (тот же, что у капсулы)
 
-static var _cache: Dictionary[StringName, AudioStreamWAV] = {}
+static var _cache: Dictionary[StringName, AudioStreamWAV] = {}   ## готовые звуки по именам
+static var _queue: Array[StringName] = []                        ## фоновый синтез: первый — в работе
+static var _jobs: Dictionary[StringName, Synth] = {}             ## начатые в фоне, ещё не готовые
+
+
+## Синтез одного звука — порциями. Генератор — сопрограмма gen(s, …): в фоне (chunked) каждые CHUNK
+## сэмплов ждёт s.resume, в конце отдаёт сэмплы (output, output_loop). Потом шов петли, поиск пика и
+## запись в 16 бит с нормировкой по пику — тоже порциями, по WRITE_CHUNK сэмплов.
+class Synth:
+	extends RefCounted
+
+	signal resume
+
+	enum Stage { IDLE, GEN, SEAM, PEAK, WRITE, DONE }
+
+	var chunked := true                  ## false — без пауз: остаток работы — за один шаг
+	var wav: AudioStreamWAV              ## готовый звук; null — ещё синтезируется
+
+	var _gen: Callable
+	var _stage := Stage.IDLE
+	var _data := PackedFloat32Array()
+	var _loop_n := 0                     ## петля: n сэмплов, хвост m сверх них плавно вводится в начало —
+	var _loop_m := 0                     ## шов не слышен
+	var _i := 0
+	var _peak := 0.001
+	var _bytes := PackedByteArray()
+
+
+	func _init(gen: Callable) -> void:
+		_gen = gen
+
+
+	## Одна порция работы (без пауз — вся оставшаяся стадия).
+	func step() -> void:
+		match _stage:
+			Stage.IDLE:
+				_stage = Stage.GEN
+				_gen.call(self)              # до первой паузы (без пауз — до конца)
+			Stage.GEN:
+				resume.emit()
+			Stage.SEAM:
+				var to := _until(_loop_m)
+				for i in range(_i, to):
+					_data[i] = lerpf(_data[_loop_n + i], _data[i], float(i) / _loop_m)
+				_i = to
+				if _i >= _loop_m:
+					_data.resize(_loop_n)
+					_next(Stage.PEAK)
+			Stage.PEAK:
+				var d := _data
+				var to := _until(d.size())
+				var peak := _peak
+				for i in range(_i, to):
+					peak = maxf(peak, absf(d[i]))
+				_peak = peak
+				_i = to
+				if _i >= d.size():
+					_bytes.resize(d.size() * 2)
+					_next(Stage.WRITE)
+			Stage.WRITE:
+				var d := _data
+				var to := _until(d.size())
+				var peak := _peak
+				for i in range(_i, to):
+					_bytes.encode_s16(i * 2, int(clampf(d[i] / peak, -1.0, 1.0) * 26000.0))
+				_i = to
+				if _i >= d.size():
+					_make_wav()
+
+
+	## Досинтезировать сразу, без пауз.
+	func finish() -> AudioStreamWAV:
+		chunked = false
+		while wav == null:
+			step()
+		return wav
+
+
+	## Конец генератора: сэмплы звука.
+	func output(data: PackedFloat32Array) -> void:
+		_data = data
+		_next(Stage.PEAK)
+
+
+	## Конец генератора: петля из n сэмплов, хвост raw (m сэмплов сверх n) плавно вводится в начало.
+	func output_loop(raw: PackedFloat32Array, n: int, m: int) -> void:
+		_data = raw
+		_loop_n = n
+		_loop_m = m
+		_next(Stage.SEAM)
+
+
+	func _next(stage: Stage) -> void:
+		_stage = stage
+		_i = 0
+
+
+	func _until(size: int) -> int:
+		return mini(_i + WRITE_CHUNK, size) if chunked else size
+
+
+	func _make_wav() -> void:
+		wav = AudioStreamWAV.new()
+		wav.format = AudioStreamWAV.FORMAT_16_BITS
+		wav.mix_rate = RATE
+		wav.stereo = false
+		if _loop_n > 0:
+			wav.loop_mode = AudioStreamWAV.LOOP_FORWARD
+			wav.loop_begin = 0
+			wav.loop_end = _loop_n
+		wav.data = _bytes
+		_data = PackedFloat32Array()
+		_bytes = PackedByteArray()
+		_stage = Stage.DONE
+
+
+## Звук по имени: готов — сразу; синтезируется в фоне — досинтезировать сейчас; иначе — целиком сейчас.
+static func named(key: StringName) -> AudioStreamWAV:
+	if _cache.has(key):
+		return _cache[key]
+	var job: Synth = _jobs.get(key, null)
+	if job == null:
+		job = Synth.new(_recipe(key))
+	_cache[key] = job.finish()
+	_jobs.erase(key)
+	_queue.erase(key)
+	return _cache[key]
+
+
+## Звук готов (синтезирован).
+static func is_ready(key: StringName) -> bool:
+	return _cache.has(key)
+
+
+## Звук со своим синтезом (двигатель — EngineSound): make() — один раз за сессию, дальше из кэша.
+static func cached(key: StringName, make: Callable) -> AudioStreamWAV:
+	if not _cache.has(key):
+		_cache[key] = make.call()
+	return _cache[key]
+
+
+## Поставить звуки в фоновый синтез (готовые и уже стоящие в очереди — пропускаются); first — в начало
+## очереди: нужны раньше прочих (начатый звук доделается потом).
+static func prepare(keys: Array[StringName], first: bool = false) -> void:
+	var at := 0
+	for key in keys:
+		if _cache.has(key) or (_queue.has(key) and not first):
+			continue
+		if first:
+			_queue.erase(key)
+			_queue.insert(at, key)
+			at += 1
+		else:
+			_queue.append(key)
+
+
+## Фоновый синтез: порции, пока не выйдет budget_usec (одна порция — доли миллисекунды). Зовётся каждый
+## кадр. true — в очереди ещё есть работа.
+static func pump(budget_usec: int) -> bool:
+	var t0 := Time.get_ticks_usec()
+	while not _queue.is_empty():
+		var key := _queue[0]
+		var job: Synth = _jobs.get(key, null)
+		if job == null:
+			job = Synth.new(_recipe(key))
+			_jobs[key] = job
+		job.step()
+		if job.wav != null:
+			_cache[key] = job.wav
+			_jobs.erase(key)
+			_queue.remove_at(0)
+		if Time.get_ticks_usec() - t0 >= budget_usec:
+			break
+	return not _queue.is_empty()
+
+
+## Синтез звука по рецепту: генератор-сопрограмма с параметрами (для тестов и фонового синтеза).
+static func job(key: StringName) -> Synth:
+	return Synth.new(_recipe(key))
+
+
+## Щелчок тумблера (интерфейс).
+static func toggle() -> AudioStreamWAV:
+	return named(&"toggle")
+
+
+## Люк и подъёмник трюма (старт).
+static func hatch_lift() -> AudioStreamWAV:
+	return named(&"hatch_lift")
+
+
+## Рецепты звуков по именам: генератор и его параметры.
+static func _recipe(key: StringName) -> Callable:
+	match key:
+		&"crackle": return _crackle.bind(1.2)
+		&"thunder": return _thunder.bind(2.2)
+		&"hit": return _hit.bind(0.3)
+		&"rumble_build": return _rumble.bind(2.5, true)
+		&"rumble_hit": return _rumble.bind(2.4, false)
+		&"wind": return _wind_loop.bind(2.0)      # гул водоворота
+		&"howl": return _howl_loop.bind(6.0)      # вой смерча
+		&"dust": return _dust_loop.bind(3.0)      # ровный гул пылевой бури
+		&"screech": return _screech.bind(0.75)
+		&"buzz": return _buzz.bind(1.2)
+		&"bellow": return _bellow.bind(1.1, false)
+		&"bellow_low": return _bellow.bind(1.1, true)
+		&"stomp": return _stomp.bind(1.3)
+		&"thrust": return _thrust.bind(THRUST_S)
+		&"chime": return _chime.bind(0.6)
+		&"pager": return _pager_beep
+		&"tractor": return _tractor.bind(1.4)
+		&"toggle": return _toggle
+		&"hatch_lift": return _hatch_lift
+	push_error("Sfx: unknown sound %s" % key)
+	return _silence
+
+
+static func _silence(s: Synth) -> void:
+	var data := PackedFloat32Array()
+	data.resize(1)
+	s.output(data)
 
 
 ## Треск телеграфа молнии: щелчки чаще и громче к удару.
-static func crackle(seconds: float) -> AudioStreamWAV:
+static func _crackle(s: Synth, seconds: float) -> void:
 	var n := int(seconds * RATE)
 	var data := PackedFloat32Array()
 	data.resize(n)
@@ -20,17 +250,19 @@ static func crackle(seconds: float) -> AudioStreamWAV:
 	rng.seed = 101
 	var lp := 0.0
 	for i in n:
+		if i % CHUNK == 0 and s.chunked:
+			await s.resume
 		var k := float(i) / n
 		var click := 0.0
 		if rng.randf() < 0.002 + 0.03 * k * k:
 			click = rng.randf_range(-1.0, 1.0)
 		lp = lerpf(lp, click + rng.randf_range(-0.08, 0.08) * k, 0.6)
 		data[i] = lp * (0.25 + 0.75 * k)
-	return _wav(data)
+	s.output(data)
 
 
 ## Гром: резкий щелчок разряда и низкий раскат, затухающий за seconds.
-static func thunder(seconds: float) -> AudioStreamWAV:
+static func _thunder(s: Synth, seconds: float) -> void:
 	var n := int(seconds * RATE)
 	var data := PackedFloat32Array()
 	data.resize(n)
@@ -39,6 +271,8 @@ static func thunder(seconds: float) -> AudioStreamWAV:
 	var lp1 := 0.0
 	var lp2 := 0.0
 	for i in n:
+		if i % CHUNK == 0 and s.chunked:
+			await s.resume
 		var t := float(i) / RATE
 		var noise := rng.randf_range(-1.0, 1.0)
 		var crack := noise * exp(-t * 40.0)
@@ -46,12 +280,12 @@ static func thunder(seconds: float) -> AudioStreamWAV:
 		lp2 = lerpf(lp2, lp1, 0.08)
 		var roll := lp2 * 9.0 * exp(-t * 2.2) * (0.6 + 0.4 * sin(t * 7.0 + sin(t * 2.3) * 3.0))
 		data[i] = crack * 0.9 + roll
-	return _wav(data)
+	s.output(data)
 
 
 ## Гул землетрясения: низкий шум с инфразвуковой «волной». rising — нарастает к концу (телеграф),
 ## иначе — резкий толчок и затухание.
-static func rumble(seconds: float, rising: bool) -> AudioStreamWAV:
+static func _rumble(s: Synth, seconds: float, rising: bool) -> void:
 	var n := int(seconds * RATE)
 	var data := PackedFloat32Array()
 	data.resize(n)
@@ -62,6 +296,8 @@ static func rumble(seconds: float, rising: bool) -> AudioStreamWAV:
 	var mid := 0.0
 	var phase := 0.0
 	for i in n:
+		if i % CHUNK == 0 and s.chunked:
+			await s.resume
 		var t := float(i) / RATE
 		var k := t / seconds
 		var noise := rng.randf_range(-1.0, 1.0)
@@ -74,14 +310,12 @@ static func rumble(seconds: float, rising: bool) -> AudioStreamWAV:
 		var body := lp2 * 14.0 + sin(phase) * 0.35 * (0.7 + 0.3 * sin(t * 9.0)) + rattle * 0.9
 		var env := pow(k, 1.4) if rising else minf(t / 0.04, 1.0) * exp(-t * 1.6)
 		data[i] = body * env
-	return _wav(data)
+	s.output(data)
 
 
-## Гул смерча — бесшовная петля: шумовой «вой», который то нарастает, то стихает.
-## Один на все смерчи (генерация не бесплатна — кэш).
-static func wind_loop(seconds: float) -> AudioStreamWAV:
-	if _cache.has(&"wind"):
-		return _cache[&"wind"]
+## Гул ветра — бесшовная петля: шумовой «вой», который то нарастает, то стихает (водоворот играет его
+## ниже тоном).
+static func _wind_loop(s: Synth, seconds: float) -> void:
 	var n := int(seconds * RATE)
 	var m := RATE / 8                      # перекрытие для бесшовной петли
 	var raw := PackedFloat32Array()
@@ -92,32 +326,20 @@ static func wind_loop(seconds: float) -> AudioStreamWAV:
 	var lp2 := 0.0
 	var mid := 0.0
 	for i in n + m:
+		if i % CHUNK == 0 and s.chunked:
+			await s.resume
 		var t := float(i) / RATE
 		var noise := rng.randf_range(-1.0, 1.0)
 		lp1 = lerpf(lp1, noise, 0.04)
 		lp2 = lerpf(lp2, lp1, 0.06)
 		mid = lerpf(mid, noise, 0.12 + 0.06 * sin(t * TAU * 1.5))
 		raw[i] = lp2 * 8.0 + (mid - lp1) * (0.6 + 0.4 * sin(t * TAU * 0.5))
-	var data := PackedFloat32Array()
-	data.resize(n)
-	for i in n:
-		data[i] = raw[i]
-	for i in m:
-		var k := float(i) / m
-		data[i] = lerpf(raw[n + i], raw[i], k)
-	var wav := _wav(data)
-	wav.loop_mode = AudioStreamWAV.LOOP_FORWARD
-	wav.loop_begin = 0
-	wav.loop_end = n
-	_cache[&"wind"] = wav
-	return wav
+	s.output_loop(raw, n, m)
 
 
 ## Гул пылевой бури — бесшовная петля: ровный, без нарастаний — низкий гул ветра и шорох песка
-## (полоса ~300–1500 Гц) на постоянной громкости. Кэш.
-static func dust_loop(seconds: float) -> AudioStreamWAV:
-	if _cache.has(&"dust"):
-		return _cache[&"dust"]
+## (полоса ~300–1500 Гц) на постоянной громкости.
+static func _dust_loop(s: Synth, seconds: float) -> void:
 	var n := int(seconds * RATE)
 	var m := RATE / 4                      # перекрытие для бесшовной петли
 	var raw := PackedFloat32Array()
@@ -129,23 +351,21 @@ static func dust_loop(seconds: float) -> AudioStreamWAV:
 	var hi := 0.0
 	var lo := 0.0
 	for i in n + m:
+		if i % CHUNK == 0 and s.chunked:
+			await s.resume
 		var noise := rng.randf_range(-1.0, 1.0)
 		lp1 = lerpf(lp1, noise, 0.03)
 		lp2 = lerpf(lp2, lp1, 0.05)
 		hi = lerpf(hi, noise, 0.35)
 		lo = lerpf(lo, noise, 0.08)
 		raw[i] = lp2 * 9.0 + (hi - lo) * 0.35
-	var wav := _loop(raw, n, m)
-	_cache[&"dust"] = wav
-	return wav
+	s.output_loop(raw, n, m)
 
 
 ## Вой смерча — бесшовная петля: гул ветра, над ним завывания — шум через узкий резонансный фильтр,
 ## частота которого то взлетает, то опадает (300–750 Гц, «у-у-у»), и вой громче на подъёмах.
-## Все колебания укладываются в петлю целым числом периодов. Кэш.
-static func howl_loop(seconds: float) -> AudioStreamWAV:
-	if _cache.has(&"howl"):
-		return _cache[&"howl"]
+## Все колебания укладываются в петлю целым числом периодов.
+static func _howl_loop(s: Synth, seconds: float) -> void:
 	var n := int(seconds * RATE)
 	var m := RATE / 4
 	var raw := PackedFloat32Array()
@@ -157,6 +377,8 @@ static func howl_loop(seconds: float) -> AudioStreamWAV:
 	var low := 0.0
 	var band := 0.0
 	for i in n + m:
+		if i % CHUNK == 0 and s.chunked:
+			await s.resume
 		var t := float(i) / RATE
 		var noise := rng.randf_range(-1.0, 1.0)
 		lp1 = lerpf(lp1, noise, 0.04)
@@ -169,28 +391,11 @@ static func howl_loop(seconds: float) -> AudioStreamWAV:
 		band += f * high
 		var howl := band * 0.35 * (0.3 + 0.7 * clampf(sweep, 0.0, 1.0))
 		raw[i] = lp2 * 5.0 + howl
-	var wav := _loop(raw, n, m)
-	_cache[&"howl"] = wav
-	return wav
-
-
-## Петля из n сэмплов: хвост длиной m (сверх n) плавно вводится в начало — шов не слышен.
-static func _loop(raw: PackedFloat32Array, n: int, m: int) -> AudioStreamWAV:
-	var data := PackedFloat32Array()
-	data.resize(n)
-	for i in n:
-		data[i] = raw[i]
-	for i in m:
-		data[i] = lerpf(raw[n + i], raw[i], float(i) / m)
-	var wav := _wav(data)
-	wav.loop_mode = AudioStreamWAV.LOOP_FORWARD
-	wav.loop_begin = 0
-	wav.loop_end = n
-	return wav
+	s.output_loop(raw, n, m)
 
 
 ## Электрошок по машине: гудение сети с треском разрядов, к концу стихает.
-static func buzz(seconds: float) -> AudioStreamWAV:
+static func _buzz(s: Synth, seconds: float) -> void:
 	var n := int(seconds * RATE)
 	var data := PackedFloat32Array()
 	data.resize(n)
@@ -199,6 +404,8 @@ static func buzz(seconds: float) -> AudioStreamWAV:
 	var phase := 0.0
 	var lp := 0.0
 	for i in n:
+		if i % CHUNK == 0 and s.chunked:
+			await s.resume
 		var t := float(i) / RATE
 		var k := t / seconds
 		phase += TAU * 110.0 / RATE
@@ -207,14 +414,14 @@ static func buzz(seconds: float) -> AudioStreamWAV:
 		var click := rng.randf_range(-1.0, 1.0) if rng.randf() < 0.01 * (1.0 - k) + 0.002 else 0.0
 		lp = lerpf(lp, click, 0.5)
 		data[i] = (hum + lp * 1.4) * minf(t / 0.01, 1.0) * (1.0 - k * k)
-	return _wav(data)
+	s.output(data)
 
 
 ## Реактивный рёв (тормозные двигатели капсулы десанта, спуск и взлёт челноков): ровный низкий рокот —
 ## шум через три фильтра (основная энергия ниже ~200 Гц), суббас 45–52 Гц, медленно и неровно
 ## «дышащая» громкость; немного полосы 200–600 Гц, чтобы рёв был слышен и на маленьких динамиках.
 ## Без треска и быстрой модуляции.
-static func thrust(seconds: float) -> AudioStreamWAV:
+static func _thrust(s: Synth, seconds: float) -> void:
 	var n := int(seconds * RATE)
 	var data := PackedFloat32Array()
 	data.resize(n)
@@ -226,6 +433,8 @@ static func thrust(seconds: float) -> AudioStreamWAV:
 	var sway := 0.0
 	var sub := 0.0
 	for i in n:
+		if i % CHUNK == 0 and s.chunked:
+			await s.resume
 		var t := float(i) / RATE
 		var k := t / seconds
 		var noise := rng.randf_range(-1.0, 1.0)
@@ -237,13 +446,13 @@ static func thrust(seconds: float) -> AudioStreamWAV:
 		var roar := lp3 * 9.0 + (lp1 - lp3) * 0.6 + sin(sub) * 0.3
 		var env := minf(t / 0.12, 1.0) * (1.0 - smoothstep(0.85, 1.0, k))
 		data[i] = tanh(roar * (0.85 + sway * 6.0) * env * 1.4)
-	return _wav(data)
+	s.output(data)
 
 
 ## Крик скакуна — хищный: резкий визг, как у ястреба (высокий тон с быстрым подъёмом и долгим спадом,
 ## хрип и дрожание), и под ним низкий хриплый рык — как имитировали крик рапторов. Перегружен по краям
 ## (tanh) — звучит грубо, «живо».
-static func screech(seconds: float) -> AudioStreamWAV:
+static func _screech(s: Synth, seconds: float) -> void:
 	var n := int(seconds * RATE)
 	var data := PackedFloat32Array()
 	data.resize(n)
@@ -254,6 +463,8 @@ static func screech(seconds: float) -> AudioStreamWAV:
 	var air_lp := 0.0
 	var air_hp := 0.0
 	for i in n:
+		if i % CHUNK == 0 and s.chunked:
+			await s.resume
 		var t := float(i) / RATE
 		var k := t / seconds
 		# Визг: 2,4 кГц → 3,4 кГц за первую десятую, потом сползает к 1,9 кГц; дрожание 38 Гц.
@@ -275,14 +486,14 @@ static func screech(seconds: float) -> AudioStreamWAV:
 		var env_lo := minf(t / 0.05, 1.0) * (1.0 - smoothstep(0.55, 1.0, k))
 		var x := shriek * 0.55 * env_hi + growl * 0.6 * env_lo
 		data[i] = tanh(x * 1.8)
-	return _wav(data)
+	s.output(data)
 
 
 ## Мычание панцирника — низкое, модулированное: пила 95 → 125 → 80 Гц (подъём и долгий спад, «мууу»),
 ## через два фильтра-форманты, которые раскрываются к середине («му» → «ооо»); дрожание 7 Гц по тону и
 ## громкости, хрип на половине тона. Перегружено (tanh) — грубо, по-звериному. low — октавой ниже той же
 ## длины (рёв перед рывком), форманты — те же.
-static func bellow(seconds: float, low: bool = false) -> AudioStreamWAV:
+static func _bellow(s: Synth, seconds: float, low: bool) -> void:
 	var n := int(seconds * RATE)
 	var data := PackedFloat32Array()
 	data.resize(n)
@@ -292,6 +503,8 @@ static func bellow(seconds: float, low: bool = false) -> AudioStreamWAV:
 	var lp1 := 0.0
 	var lp2 := 0.0
 	for i in n:
+		if i % CHUNK == 0 and s.chunked:
+			await s.resume
 		var t := float(i) / RATE
 		var k := t / seconds
 		var f := lerpf(95.0, 125.0, smoothstep(0.0, 0.3, k)) if k < 0.3 else lerpf(125.0, 80.0, (k - 0.3) / 0.7)
@@ -308,12 +521,12 @@ static func bellow(seconds: float, low: bool = false) -> AudioStreamWAV:
 		var rasp := rng.randf_range(-1.0, 1.0) * 0.25 * maxf(sin(ph * 0.5), 0.0)
 		var env := minf(t / 0.12, 1.0) * (1.0 - smoothstep(0.7, 1.0, k)) * (0.75 + 0.25 * wobble)
 		data[i] = tanh((voice + rasp) * env * 1.8)
-	return _wav(data)
+	s.output(data)
 
 
 ## Топот панцирника в рывке: ровные глухие удары лап (~7 в секунду) по тихому рокоту бега; к концу
 ## рывка стихают.
-static func stomp(seconds: float) -> AudioStreamWAV:
+static func _stomp(s: Synth, seconds: float) -> void:
 	var n := int(seconds * RATE)
 	var data := PackedFloat32Array()
 	data.resize(n)
@@ -323,6 +536,8 @@ static func stomp(seconds: float) -> AudioStreamWAV:
 	var lp2 := 0.0
 	var beat := 0.14
 	for i in n:
+		if i % CHUNK == 0 and s.chunked:
+			await s.resume
 		var t := float(i) / RATE
 		var k := t / seconds
 		var ht := fmod(t, beat)
@@ -333,28 +548,30 @@ static func stomp(seconds: float) -> AudioStreamWAV:
 		lp2 = lerpf(lp2, lp1, 0.06)
 		var env := minf(t / 0.04, 1.0) * exp(-k * 1.8)
 		data[i] = tanh((thump + lp2 * 3.0) * env * 1.2)
-	return _wav(data)
+	s.output(data)
 
 
 ## «Дзынь» подбора находки: два чистых тона в квинту (1760 и 2637 Гц, второй вступает через 40 мс) и
 ## короткий негармоничный призвук 5,4 кГц — металлический блеск; быстрая атака, затухание.
-static func chime(seconds: float) -> AudioStreamWAV:
+static func _chime(s: Synth, seconds: float) -> void:
 	var n := int(seconds * RATE)
 	var data := PackedFloat32Array()
 	data.resize(n)
 	for i in n:
+		if i % CHUNK == 0 and s.chunked:
+			await s.resume
 		var t := float(i) / RATE
 		var t2 := maxf(t - 0.04, 0.0)
 		var a := sin(TAU * 1760.0 * t) * exp(-t * 7.0)
 		var b := sin(TAU * 2637.0 * t2) * exp(-t2 * 6.0) * (1.0 if t >= 0.04 else 0.0)
 		var c := sin(TAU * 5400.0 * t) * exp(-t * 25.0) * 0.3
 		data[i] = (a * 0.6 + b * 0.5 + c) * minf(t / 0.003, 1.0)
-	return _wav(data)
+	s.output(data)
 
 
 ## «Би-бип» пейджера: два коротких писка (1,25 и 1,56 кГц) почти прямоугольной формы, слегка хриплые —
 ## дребезг 70 Гц по громкости, немного шума и мягкое ограничение.
-static func pager_beep() -> AudioStreamWAV:
+static func _pager_beep(s: Synth) -> void:
 	var n := int(0.26 * RATE)
 	var data := PackedFloat32Array()
 	data.resize(n)
@@ -363,6 +580,8 @@ static func pager_beep() -> AudioStreamWAV:
 	var ph := 0.0
 	var lp := 0.0
 	for i in n:
+		if i % CHUNK == 0 and s.chunked:
+			await s.resume
 		var t := float(i) / RATE
 		var on := 0.0
 		var f := 1250.0
@@ -377,7 +596,7 @@ static func pager_beep() -> AudioStreamWAV:
 		var x := tanh(square * rasp * 1.6) * on
 		lp = lerpf(lp, x, 0.5)                   # смягчает щелчки краёв
 		data[i] = lp
-	return _wav(data)
+	s.output(data)
 
 
 ## Луч захвата: среднечастотное волнообразное гудение — тон около 420 Гц с обертонами, громкость и
@@ -385,7 +604,7 @@ static func pager_beep() -> AudioStreamWAV:
 ## перегруженно и рычит: субгармоника октавой ниже, «рык» — рваная амплитудная модуляция ~38 Гц, сигнал
 ## загнан в несимметричный клип, срезан жёстко и огрублён по разрядности; раз в 0,3–0,7 с — броски
 ## перегруза (громче, треск, разрядность ещё ниже). Нарастает и гаснет плавно.
-static func tractor(seconds: float) -> AudioStreamWAV:
+static func _tractor(s: Synth, seconds: float) -> void:
 	var n := int(seconds * RATE)
 	var data := PackedFloat32Array()
 	data.resize(n)
@@ -399,6 +618,8 @@ static func tractor(seconds: float) -> AudioStreamWAV:
 	var growl_ph := 0.0                                 # фаза «рыка»: частота гуляет 30…46 Гц
 	var growl_f := 38.0
 	for i in n:
+		if i % CHUNK == 0 and s.chunked:
+			await s.resume
 		var t := float(i) / RATE
 		var k := t / seconds
 		var wave := sin(TAU * 3.2 * t)
@@ -424,15 +645,13 @@ static func tractor(seconds: float) -> AudioStreamWAV:
 		y = roundf(y * bits) / bits
 		var env := smoothstep(0.0, 0.2, t) * (1.0 - smoothstep(0.82, 1.0, k))
 		data[i] = y * env
-	return _wav(data)
+	s.output(data)
 
 
 ## Старый механический тумблер: тихий взвод рычага, через 18 мс — главный щелчок защёлки, ещё через 9 мс —
 ## дребезг пружины. Каждое событие — корпус (низ ~190 Гц) и металл (1,2–4 кГц), затухающие с разной
 ## скоростью, плюс короткий шумовой удар.
-static func toggle() -> AudioStreamWAV:
-	if _cache.has(&"toggle"):
-		return _cache[&"toggle"]
+static func _toggle(s: Synth) -> void:
 	var n := int(0.09 * RATE)
 	var data := PackedFloat32Array()
 	data.resize(n)
@@ -446,30 +665,28 @@ static func toggle() -> AudioStreamWAV:
 	for m in modes.size() * events.size():
 		phases.append(rng.randf() * TAU)
 	for i in n:
+		if i % CHUNK_HEAVY == 0 and s.chunked:
+			await s.resume
 		var t := float(i) / RATE
 		var v := 0.0
 		for e in events.size():
 			var dt := t - events[e].x
 			if dt < 0.0:
 				continue
-			var s := rng.randf_range(-1.0, 1.0) * exp(-dt * 1800.0) * 0.8
+			var x := rng.randf_range(-1.0, 1.0) * exp(-dt * 1800.0) * 0.8
 			for m in modes.size():
 				var md := modes[m]
-				s += md.z * sin(TAU * md.x * dt + phases[e * modes.size() + m]) * exp(-dt * md.y)
-			v += s * events[e].y
+				x += md.z * sin(TAU * md.x * dt + phases[e * modes.size() + m]) * exp(-dt * md.y)
+			v += x * events[e].y
 		data[i] = tanh(v * 0.8)
-	var wav := _wav(data)
-	_cache[&"toggle"] = wav
-	return wav
+	s.output(data)
 
 
 ## Люк и подъёмник трюма на старте (около 1,25 с), как сервисный подъёмник: лязг защёлки люка с дребезгом,
 ## шипение сброса давления, гул гидропривода — мотор насоса раскручивается до ~100 Гц (жужжащие нечётные
 ## обертоны), пульсация поршней и вой шестерён насоса, шум масла в трубах; в конце хода — мотор сбегает
 ## вниз, платформа глухо встаёт на упор.
-static func hatch_lift() -> AudioStreamWAV:
-	if _cache.has(&"hatch_lift"):
-		return _cache[&"hatch_lift"]
+static func _hatch_lift(s: Synth) -> void:
 	var n := int(1.25 * RATE)
 	var data := PackedFloat32Array()
 	data.resize(n)
@@ -490,19 +707,21 @@ static func hatch_lift() -> AudioStreamWAV:
 	var hiss_prev := 0.0
 	var flow := 0.0
 	for i in n:
+		if i % CHUNK_HEAVY == 0 and s.chunked:
+			await s.resume
 		var t := float(i) / RATE
 		var v := 0.0
 		for h in hits.size():
 			var dt := t - hits[h].x
 			if dt < 0.0:
 				continue
-			var s := rng.randf_range(-1.0, 1.0) * exp(-dt * 700.0) * 0.9
+			var x := rng.randf_range(-1.0, 1.0) * exp(-dt * 700.0) * 0.9
 			for m in modes.size():
 				var md := modes[m]
-				s += md.z * sin(TAU * md.x * hits[h].z * dt + phases[h * modes.size() + m]) * exp(-dt * md.y)
+				x += md.z * sin(TAU * md.x * hits[h].z * dt + phases[h * modes.size() + m]) * exp(-dt * md.y)
 			if h == hits.size() - 1:
-				s += 1.4 * sin(TAU * 55.0 * dt) * exp(-dt * 11.0)       # упор — глухой низ
-			v += s * hits[h].y
+				x += 1.4 * sin(TAU * 55.0 * dt) * exp(-dt * 11.0)       # упор — глухой низ
+			v += x * hits[h].y
 		# Шипение: белый шум без низа, вспыхивает при отпирании и гаснет за ~0,3 с.
 		var noise := rng.randf_range(-1.0, 1.0)
 		hiss_hp = 0.85 * (hiss_hp + noise - hiss_prev)
@@ -519,13 +738,11 @@ static func hatch_lift() -> AudioStreamWAV:
 		flow = lerpf(flow, noise, 0.08)                                  # масло в трубах — глухой шум
 		v += run * (buzz * ripple * 0.42 + sin(gear) * 0.12 + flow * 0.9)
 		data[i] = tanh(v * 0.9)
-	var wav := _wav(data)
-	_cache[&"hatch_lift"] = wav
-	return wav
+	s.output(data)
 
 
 ## Удар по корпусу: глухой низкий «бум» со щелчком.
-static func hit(seconds: float) -> AudioStreamWAV:
+static func _hit(s: Synth, seconds: float) -> void:
 	var n := int(seconds * RATE)
 	var data := PackedFloat32Array()
 	data.resize(n)
@@ -533,26 +750,12 @@ static func hit(seconds: float) -> AudioStreamWAV:
 	rng.seed = 303
 	var phase := 0.0
 	for i in n:
+		if i % CHUNK == 0 and s.chunked:
+			await s.resume
 		var t := float(i) / RATE
 		var f := lerpf(140.0, 45.0, minf(t / seconds, 1.0))
 		phase += TAU * f / RATE
 		var body := sin(phase) * exp(-t * 14.0)
 		var click := rng.randf_range(-1.0, 1.0) * exp(-t * 120.0)
 		data[i] = body * 0.9 + click * 0.5
-	return _wav(data)
-
-
-static func _wav(samples: PackedFloat32Array) -> AudioStreamWAV:
-	var peak := 0.001
-	for s in samples:
-		peak = maxf(peak, absf(s))
-	var bytes := PackedByteArray()
-	bytes.resize(samples.size() * 2)
-	for i in samples.size():
-		bytes.encode_s16(i * 2, int(clampf(samples[i] / peak, -1.0, 1.0) * 26000.0))
-	var wav := AudioStreamWAV.new()
-	wav.format = AudioStreamWAV.FORMAT_16_BITS
-	wav.mix_rate = RATE
-	wav.stereo = false
-	wav.data = bytes
-	return wav
+	s.output(data)

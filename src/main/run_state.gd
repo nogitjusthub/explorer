@@ -155,10 +155,11 @@ func offer_cargo(kind: PickupKind) -> CargoOffer:
 	return offer
 
 
-## Сдача груза основному челноку (полная цена). Возвращает засчитанные очки.
+## Сдача груза основному челноку (полная цена). Возвращает засчитанные очки; после конца забега — 0
+## (счёт уже итоговый, меню челнока могло не успеть закрыться).
 func ship_cargo() -> int:
 	var value := cargo_value()
-	if cargo.is_empty():
+	if is_over() or cargo.is_empty():
 		return 0
 	banked += value
 	shipments += 1
@@ -168,8 +169,11 @@ func ship_cargo() -> int:
 
 
 ## Сдача аварийному челноку: груз за полцены, штраф 500 × 2^(n−1); челнок привёз fuel_units
-## топлива и parts единиц запчастей (1 ед. — 1 HP). Возвращает изменение счёта (может быть отрицательным).
+## топлива и parts единиц запчастей (1 ед. — 1 HP). Возвращает изменение счёта (может быть отрицательным);
+## после конца забега обмена нет — 0.
 func emergency_ship(fuel_units: float, parts: int) -> int:
+	if is_over():
+		return 0
 	emergency_calls += 1
 	var delta := roundi(cargo_value() * rules.emergency_cargo_mult) \
 			- rules.emergency_penalty_base * int(pow(2.0, emergency_calls - 1))

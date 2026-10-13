@@ -2,8 +2,11 @@
 
 Отдаёт build/web как статику и принимает:
   POST /log   — строка текста, дописывается в build/web_log.txt;
-  POST /shot  — PNG в теле запроса, сохраняется в build/web_shots/shot_NN.png.
-Игра шлёт туда результаты бенчмарка (?bench=N в адресе страницы) и скриншоты.
+  POST /shot  — PNG в теле запроса, сохраняется в build/web_shots/shot_NN.png (номер — следующий
+                после самого большого из уже лежащих: старые снимки не перезаписываются).
+Игра шлёт туда результаты бенчмарка (?bench=N в адресе страницы) и скриншоты. Параметры вроде
+?bench, ?seed, ?shots игра берёт из адреса только в debug-экспорте (export_web.ps1 -Debug); release-сборка
+принимает лишь ?log-slow и ?shader-audit.
 
 Запуск: python tools/scripts/web_server.py [порт]
 """
@@ -12,11 +15,19 @@ import functools
 import http.server
 import pathlib
 import sys
+import threading
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 WEB = ROOT / "build" / "web"
 LOG = ROOT / "build" / "web_log.txt"
 SHOTS = ROOT / "build" / "web_shots"
+_shot_lock = threading.Lock()   # сервер многопоточный: два снимка разом не должны взять один номер
+
+
+def next_shot_path():
+    """Следующий свободный снимок: номер на единицу больше самого большого из shot_NN.png."""
+    taken = [int(p.stem[5:]) for p in SHOTS.glob("shot_*.png") if p.stem[5:].isdigit()]
+    return SHOTS / f"shot_{max(taken, default=-1) + 1:02d}.png"
 
 
 class Handler(http.server.SimpleHTTPRequestHandler):
@@ -28,8 +39,9 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 f.write(body.decode("utf-8", "replace") + "\n")
         elif self.path == "/shot":
             SHOTS.mkdir(parents=True, exist_ok=True)
-            index = len(list(SHOTS.glob("shot_*.png")))
-            (SHOTS / f"shot_{index:02d}.png").write_bytes(body)
+            with _shot_lock:
+                with next_shot_path().open("xb") as f:   # "x" — никогда не перезаписать существующий
+                    f.write(body)
         else:
             self.send_error(404)
             return

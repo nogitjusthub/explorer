@@ -171,6 +171,117 @@ func test_temporary_ridge_settles_back_exactly() -> void:
 	assert_eq(diff, 0, "terrain fully restored")
 
 
+## Снимок углов прямоугольника тайлов.
+func _corners(f: TerrainFixture, x0: int, z0: int, x1: int, z1: int) -> Dictionary:
+	var snap := {}
+	for tz in range(z0, z1 + 1):
+		for tx in range(x0, x1 + 1):
+			for c in 4:
+				snap[Vector3i(tx, tz, c)] = f.query.corner(tx, tz, c)
+	return snap
+
+
+## Чанк заново, как его загружает стример: база (здесь — ровная) плюс правки из DiffStore.
+func _reload_flat(f: TerrainFixture, coord: Vector2i, tier: int) -> void:
+	var data := ChunkData.new(coord)
+	for i in ChunkData.N * ChunkData.N:
+		for c in 4:
+			data.set_corner(i, c, tier)
+	f.terrain.add_chunk(data)
+
+
+func test_ridge_on_unloaded_chunk_restored_on_reload() -> void:
+	# Вал червя через шов чанков (0,0)–(1,0); правый чанк выгружают раньше, чем вал осел. Возврат его
+	# вершин откладывается (а не теряется) и выполняется после повторной загрузки чанка.
+	var f := TerrainFixture.new(6)
+	var before := _corners(f, 24, 6, 40, 14)
+	var originals := {}
+	Deformation.raise_vertices(f.terrain, Deformation.vertices_near_segment(Vector2(27.0, 10.0), Vector2(37.0, 10.0), 0.7), originals)
+	assert_eq(f.query.corner(34, 10, 0), 7, "ridge raised on the right chunk")
+	var verts: Array[Vector2i] = []
+	for key: Vector3i in originals:
+		verts.append(Deformation.recorded_vertex(key))
+	f.terrain.remove_chunk(Vector2i(1, 0))
+	Deformation.restore_vertices(f.terrain, verts, originals)
+	assert_true(originals.is_empty(), "the worm forgets the ridge — the terrain keeps what is left")
+	assert_false(f.terrain.pending_restores.is_empty(), "unloaded part deferred")
+	assert_eq(f.query.corner(28, 10, 0), 6, "loaded part settled")
+	assert_true(_max_delta(f, 24, 6, 31, 14) <= 1, "loaded side valid")
+	_reload_flat(f, Vector2i(1, 0), 6)
+	assert_eq(f.query.corner(34, 10, 0), 7, "reloaded chunk got the ridge back from DiffStore")
+	Deformation.restore_pending(f.terrain)
+	assert_true(f.terrain.pending_restores.is_empty(), "deferred restores done")
+	var diff := 0
+	for key: Vector3i in before:
+		if f.query.corner(key.x, key.y, key.z) != before[key]:
+			diff += 1
+	assert_eq(diff, 0, "terrain fully restored after the reload")
+	assert_eq(_walls(f, 24, 6, 40, 14), 0, "no walls left on the seam")
+
+
+func test_furrow_retries_vertex_next_to_unloaded_chunk() -> void:
+	# Вершина на шве с незагруженным чанком неподвижна — смерч не должен считать её пройденной.
+	var f := TerrainFixture.new(6)
+	f.terrain.remove_chunk(Vector2i(1, 0))
+	var done := {}
+	Deformation.furrow(f.terrain, Vector2(30.0, 10.0), Vector2(32.0, 10.0), 0.6, done)
+	assert_eq(f.query.corner(30, 10, 0), 5, "loaded vertex lowered")
+	assert_false(done.has(Vector2i(32, 10)), "fixed seam vertex not marked as done")
+	_reload_flat(f, Vector2i(1, 0), 6)
+	Deformation.furrow(f.terrain, Vector2(30.0, 10.0), Vector2(32.0, 10.0), 0.6, done)
+	assert_eq(f.query.corner(31, 10, 1), 5, "seam vertex lowered on the next pass")
+	assert_eq(f.query.corner(32, 10, 0), 5, "both sides of the seam")
+	assert_eq(f.query.corner(30, 10, 0), 5, "already lowered vertex not lowered again")
+	assert_true(_max_delta(f, 26, 6, 36, 14) <= 1)
+
+
+func test_typical_deformations_leave_no_steep_tiles() -> void:
+	# Релаксация доводит каждый тайл до разброса ≤ 1 (счётчик остатков — ноль).
+	Deformation.relax_leftovers = 0
+	for run_seed: int in [11, 7]:
+		var terrain := TerrainData.new()
+		var gen := TerrainGenerator.new(run_seed, TerrainParams.new())
+		for cz in range(-1, 2):
+			for cx in range(-1, 2):
+				terrain.add_chunk(gen.generate(Vector2i(cx, cz)))
+		Deformation.fault(terrain, Vector2i(-10, 3), true, 20, 3, 2)
+		Deformation.fault_path(terrain, PackedVector2Array([Vector2(-25, -20), Vector2(-5, -12), Vector2(10, -24)]), 2, 2)
+		Deformation.crater(terrain, Vector2(20.5, -12.5), 2.0, 2)
+		Deformation.crater(terrain, Vector2(-14.5, 18.5), 3.0, 3)
+		Deformation.furrow(terrain, Vector2(-20.0, -20.0), Vector2(5.0, 25.0), 0.6)
+		var originals := {}
+		Deformation.raise_vertices(terrain, Deformation.vertices_near_segment(Vector2(5.0, 40.0), Vector2(25.0, 44.0), 0.7), originals)
+		var verts: Array[Vector2i] = []
+		for key: Vector3i in originals:
+			verts.append(Deformation.recorded_vertex(key))
+		Deformation.restore_vertices(terrain, verts, originals)
+		# Разлом через край загруженного (x = −32): вершины на краю неподвижны.
+		Deformation.fault(terrain, Vector2i(-33, -10), false, 30, 2, 2)
+	assert_eq(Deformation.relax_leftovers, 0, "tiles left with corner range > 1")
+
+
+func test_relax_between_fixed_vertices() -> void:
+	# Высокий и низкий углы тайла между двумя неподвижными (площадки по диагонали): обе обычные попытки
+	# упираются в неподвижные вершины — углы сводятся к их высоте, без остатков.
+	var f := TerrainFixture.new(6)
+	f.set_flags(9, 9, ChunkData.FLAG_PAD)
+	f.set_flags(11, 11, ChunkData.FLAG_PAD)
+	var w := Deformation.Work.new(f.terrain)
+	var queue: Array[Vector3i] = []
+	assert_true(Deformation._shift_vertex(w, Vector2i(11, 10), 2, Deformation.RAISE, queue))
+	assert_true(Deformation._shift_vertex(w, Vector2i(10, 11), -2, Deformation.LOWER, queue))
+	assert_false(Deformation._shift_vertex(w, Vector2i(10, 10), -1, Deformation.LOWER, queue), "pad vertex is fixed")
+	queue.clear()
+	Deformation._relax_to_fixed(w, Vector2i(10, 10), Deformation.LOWER, queue)
+	var c: PackedInt32Array = w.cur[DiffStore.key(10, 10)]
+	assert_eq(c, PackedInt32Array([6, 6, 6, 5]), "tile fits between its fixed corners")
+	Deformation.relax_leftovers = 0
+	Deformation._relax(w, queue)
+	Deformation._commit(w)
+	assert_eq(Deformation.relax_leftovers, 0)
+	assert_true(_max_delta(f, 5, 5, 15, 15) <= 1, "neighbours relaxed too")
+
+
 func test_fault_path_curve_has_walls_and_tapers() -> void:
 	# Разлом по ломаной (GDD §5.3): вдоль линии — стенки, у концов сдвиг сходит на нет, тайлы валидны.
 	var f := TerrainFixture.new(10)

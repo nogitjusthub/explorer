@@ -9,6 +9,9 @@ const DIRTY_SPRITES := 1 << 6           ## мелочь на земле — ст
 
 var chunks: Dictionary[Vector2i, ChunkData] = {}
 var diffs := DiffStore.new()
+## Временные подъёмы (вал червя), которые не удалось вернуть: чанк тайла был выгружен.
+## Vector3i(tx, tz, угол) → исходный ярус; Deformation.restore_pending вернёт их после загрузки чанка.
+var pending_restores: Dictionary = {}
 
 
 func add_chunk(data: ChunkData) -> void:

@@ -5,8 +5,12 @@ extends Node3D
 ## Потом живёт whirlpool_life_min…max_s: тянет к центру, как смерч, но только машину на воде —
 ## a(r) = pull / масса × (1 − r / pull_r), с закруткой (машину ведёт по спирали). В ядре
 ## (whirlpool_core_r) топит: машина уходит в воду (VehicleState.pull_under — только модель) и получает
-## whirlpool_core_dps урона в секунду, пока не вырвется. Спасение — пройти по краю на полном ходу или
-## выйти на берег. На пейджере его нет — видно и так.
+## whirlpool_core_dps урона в секунду, пока не вырвется. Ховер (а на глубокую воду заходит только он)
+## уходит в воду лишь отчасти — до HOVER_SINK полного погружения, и его болтает, как на неровном грунте
+## (VehicleState.churn → VehicleRide); машина без подушки — целиком. Вырвалась — всплывает; воронка
+## угасает — глубина ядра слабеет вместе с ней, живую машину отпускает плавно. Погибла в ядре (утонула) —
+## уходит под воду целиком и там остаётся. Спасение — пройти по краю на полном ходу или выйти на берег.
+## На пейджере его нет — видно и так.
 ## Не стоит на месте: плавно ходит по петле (эллипс до DRIFT_R тайлов, период DRIFT_PERIOD_S), не сходя
 ## с глубокой воды — петля выбирается так, чтобы на всём пути под ним было 2×2 глубоких тайла.
 ## Всё крутится в одну сторону — к убыванию угла atan(z, x): закрутка тяги, пена по краю (узел частиц
@@ -20,6 +24,7 @@ const SWIRL := 0.45                      ## закрутка: доля тяги 
 const DAMAGE_STEP := 5                   ## урон ядра порциями, как у смерча
 const SINK_S := 1.5                      ## за столько в ядре машину затягивает полностью…
 const SURFACE_S := 0.8                   ## …и за столько выносит на поверхность, когда вырвалась
+const HOVER_SINK := 0.4                  ## ховер в ядре уходит в воду лишь на эту долю полного погружения
 const FADE_S := 1.5
 const HEAR_TILES := 25.0
 const SPOT_TRIES := 24
@@ -50,6 +55,7 @@ var _drift := Transform2D()              ## петля смещения: элл�
 var _drift_t := 0.0
 var _drift_phase := 0.0
 var _origin := Vector2.ZERO              ## точка появления (вершина сетки)
+var _lost: VehicleState = null           ## машина погибла (её состояние) — воронка её не отпускает
 var _mat: ShaderMaterial
 var _foam: CPUParticles3D
 var _audio: AudioStreamPlayer
@@ -110,19 +116,23 @@ func begin(center: Vector2) -> void:
 	var t := Grid.tile_of_world(pos.x, pos.y)
 	position = Vector3(pos.x, Grid.tier_to_y(query.water_tier(t.x, t.y)) + 0.02, pos.y)
 	_build()
+	EventBus.vehicle_died.connect(_on_vehicle_died)
 
 
 func step(dt: float) -> void:
 	if finished:
 		return
+	if _audio.stream == null:
+		_start_sound()
 	var k := 1.0                           # сила: телеграф — растёт, конец — гаснет
 	if _fade >= 0.0:
 		_fade -= dt
 		k = maxf(_fade / FADE_S, 0.0)
 		if _fade <= 0.0:
-			finished = true
-			if not vehicle.wrecked and vehicle.control_enabled:
-				vehicle.state.pull_under = 0.0     # утонувшая машина так и остаётся под водой
+			# Угасла. Глубина ядра слабела вместе с воронкой — живая машина почти всплыла, всплывает до
+			# конца; утонувшая (погибла в ядре) или разбитая так и остаётся под водой.
+			_affect_vehicle(dt, 0.0)
+			finished = vehicle.state.pull_under <= 0.0 or _gone()
 			return
 	elif _form > 0.0:
 		_form -= dt
@@ -174,23 +184,54 @@ func _drift_at(t: float) -> Vector2:
 
 
 ## Тяга по воде к центру с закруткой (сила k — гаснет к концу); ядро топит — машина уходит в воду
-## и получает урон, пока не вырвется.
+## (ховер — отчасти, и его болтает) и получает урон, пока не вырвется.
 func _affect_vehicle(dt: float, k: float) -> void:
+	if _gone():
+		return                             # утонувшую и разбитую не трогаем: остаются под водой
 	var s := vehicle.state
 	var on_water := query.water_tier(s.tile.x, s.tile.y) != TerrainQuery.NO_WATER
 	var d := s.pos.distance_to(pos)
 	var in_core := k > 0.0 and on_water and d <= rules.whirlpool_core_r and not s.falling and not s.drowning
+	s.pull_under = sink_step(s.pull_under, sink_depth(vehicle.cls, k) if in_core else 0.0, dt)
+	s.churn = clampf(s.pull_under / HOVER_SINK, 0.0, 1.0) if vehicle.cls.hovers else 0.0
 	if in_core:
-		s.pull_under = minf(s.pull_under + dt / SINK_S, 1.0)
 		_damage_acc += rules.whirlpool_core_dps * dt
 		if _damage_acc >= DAMAGE_STEP:
 			_damage_acc -= DAMAGE_STEP
 			damaged.emit(DAMAGE_STEP, &"whirlpool")
-	else:
-		s.pull_under = maxf(s.pull_under - dt / SURFACE_S, 0.0)
 	if k <= 0.0 or not on_water or s.falling or s.drowning:
 		return
 	s.ext_accel += pull(rules, pos, s.pos, vehicle.cls.mass, k)
+
+
+## Глубина, на которую ядро воронки силы k затягивает машину класса cls (доля полного погружения):
+## ховер — до HOVER_SINK, без подушки — целиком; слабеющая воронка отпускает.
+static func sink_depth(cls: VehicleClass, k: float) -> float:
+	return (HOVER_SINK if cls.hovers else 1.0) * clampf(k, 0.0, 1.0)
+
+
+## Погружение за шаг: к depth — вниз за SINK_S на всю глубину, вверх за SURFACE_S.
+static func sink_step(pull_under: float, depth: float, dt: float) -> float:
+	if pull_under < depth:
+		return minf(pull_under + dt / SINK_S, depth)
+	return maxf(pull_under - dt / SURFACE_S, depth)
+
+
+## Машина погибла (утонула в ядре — или что угодно ещё) или разбита: воронка её больше не трогает.
+func _gone() -> bool:
+	return vehicle.wrecked or _lost == vehicle.state
+
+
+## Конец забега: погибла в ядре — уходит под воду целиком и там остаётся, болтанка стихает. Шаги угроз
+## после конца забега не идут — погружение доигрывает твин.
+func _on_vehicle_died(_cause: StringName) -> void:
+	if vehicle == null or finished or not is_inside_tree():
+		return
+	var s := vehicle.state
+	_lost = s
+	s.churn = 0.0
+	if s.pull_under > 0.0:
+		create_tween().tween_property(s, ^"pull_under", 1.0, (1.0 - s.pull_under) * SINK_S)
 
 
 ## Воронка — плоский диск со спиралью пены (шейдер), пена по кругу сбегается к центру, гул — петля
@@ -230,8 +271,13 @@ func _build() -> void:
 	_foam.position = Vector3(0, 0.03, 0)
 	add_child(_foam)
 	_audio = AudioStreamPlayer.new()
-	_audio.stream = Sfx.wind_loop(2.0)
 	_audio.pitch_scale = 0.55
 	_audio.volume_db = -40.0
 	add_child(_audio)
+
+
+## Гул включается с первым шагом: образец воронки в прогреве шейдеров (Warmup) не шагает — молчит и не
+## заставляет синтезировать гул раньше очереди (Sfx).
+func _start_sound() -> void:
+	_audio.stream = Sfx.named(&"wind")
 	_audio.play()

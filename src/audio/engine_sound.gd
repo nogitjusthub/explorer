@@ -10,7 +10,7 @@ const LOOP_S := 2.0              ## длина петли: каждая сост
 
 const VOLUME_TRIM_DB := -3.1     ## общая громкость двигателя: −30% по амплитуде (на фоне остальных звуков)
 
-var pitch_mult := 1.0            ## тон класса: танк ниже, ховер выше
+var pitch_mult := 1.0            ## тон класса (VehicleClass.engine_pitch, ставит Vehicle): танк ниже, ховер выше
 
 
 func _ready() -> void:
@@ -26,7 +26,13 @@ func update(speed_ratio: float, throttle: float, dt: float) -> void:
 	volume_db = lerpf(volume_db, lerpf(-22.0, -10.0, maxf(throttle, speed_ratio)) + VOLUME_TRIM_DB, k)
 
 
+## Петля гула двигателя — одна на все машины и забеги, в кэше звуков (Sfx): 44 тыс. сэмплов в GDScript —
+## в браузере заметная запинка, а машина создаётся заново на каждом забеге.
 static func make_loop() -> AudioStreamWAV:
+	return Sfx.cached(&"engine", _synth)
+
+
+static func _synth() -> AudioStreamWAV:
 	var n := int(RATE * LOOP_S)
 	var data := PackedByteArray()
 	data.resize(n * 2)

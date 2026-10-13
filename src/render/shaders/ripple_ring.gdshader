@@ -21,7 +21,7 @@ varying float fade;
 void vertex() {
 	world_pos = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
 	center = (floor(MODEL_MATRIX[3].xz / ART_PX) + 0.5) * ART_PX;
-	float r = length(MODEL_MATRIX[0].xyz);                      // меш — круг радиуса 1: радиус = масштаб
+	float r = length(MODEL_MATRIX[0].xyz);                      // кольцо — радиуса 1 в осях меша (квад 2,5×2,5 — с запасом): радиус = масштаб
 	ring_r = max(round(r / ART_PX), width_px + 1.0) * ART_PX;
 	fade = alpha * (1.0 - clamp((r - r0) / max(r1 - r0, 0.001), 0.0, 1.0));
 }

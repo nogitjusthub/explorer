@@ -142,6 +142,29 @@ func place(pos: Vector2, heading: float = 0.0) -> void:
 	reset_physics_interpolation()
 
 
+## Возрождение (песочница автопилота): машина снова цела, видна и управляема в точке pos. Модель
+## пересобирается — сплющенный челноком корпус (crush), потемневшая обшивка (wreck) и поворот в луче
+## эвакуации (lift) уходят вместе со старой; луч, разряд, раскачка и пустой бак сброшены, двигатель снова
+## заведён.
+func respawn(pos: Vector2, heading: float = 0.0) -> void:
+	_shock.set_active(false, _model.root)       # вспышки висят на старой модели — снять до её удаления
+	_model.root.visible = false                 # старая удаляется в конце кадра — не мелькнуть рядом с новой
+	_rebuild_model()
+	wrecked = false
+	out_of_fuel = false
+	inverted_left = 0.0
+	beacon_calling = false
+	_lift_t = -1.0
+	_rock = Vector2.ZERO
+	_rock_vel = Vector2.ZERO
+	_tumble = Vector2.ZERO
+	visible = true
+	control_enabled = true
+	place(pos, heading)
+	if not engine.playing:
+		engine.play()
+
+
 ## Раскачка корпуса от удара (укус, таран, стенка, дерево): push — куда толкнули (в мире, по
 ## плоскости); корпус кренится от удара и качается на пружине. Модель, не кинематика: машину это не двигает.
 func rock(strength: float, push: Vector2) -> void:

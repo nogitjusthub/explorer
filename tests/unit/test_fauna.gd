@@ -16,8 +16,12 @@ class StubDirector:
 func _field(f: TerrainFixture, mode: FlowField.Mode, target: Vector2i) -> FlowField:
 	var result: Array[FlowField] = []
 	var job := FlowField.build(f.query, mode, target, func(field: FlowField) -> void: result.append(field))
+	var steps := 0
 	while not job.step(Time.get_ticks_usec() + 1_000_000):
-		pass
+		steps += 1
+		if steps >= 64:              # с бюджетом в секунду поле строится за шаг — зависшая задача не вечна
+			fail("FlowField.build: job not done after %d steps" % steps)
+			return null
 	job.on_done()
 	return result[0]
 
@@ -221,6 +225,72 @@ func test_shellback_does_not_ram_across_a_cliff() -> void:
 	assert_eq(hits[0], 0, "no ram from the cliff top")
 	v.free()
 	s.free()
+
+
+## Сдвиг дальше соседнего тайла (толчок танка — 1,6 тайла) — шагами меньше тайла: первое непроходимое
+## ребро останавливает его; через воду или с обрыва не перескочить.
+func test_long_move_on_grid_stops_at_the_first_blocked_edge() -> void:
+	var f := TerrainFixture.new(4)
+	var from := Vector2(12.6, 10.5)
+	var to := Vector2(14.2, 10.5)                    # шаг по тайлам (2, 0)
+	assert_eq(Creature.move_on_grid(f.query, FlowField.Mode.HOPPER, from, to), to, "open ground — all the way")
+	var diag := Vector2(14.2, 12.3)                  # (2, 2)
+	assert_eq(Creature.move_on_grid(f.query, FlowField.Mode.HOPPER, from, diag), diag, "long diagonal over open ground")
+	f.set_flat(13, 10, 3)
+	f.set_water(13, 10, 4)                           # вода в соседнем тайле
+	assert_eq(Creature.move_on_grid(f.query, FlowField.Mode.HOPPER, from, to), from, "water next door — stays")
+	var g := TerrainFixture.new(4)
+	g.set_block(14, 0, 30, 20, 2)                    # обрыв в два яруса за соседним тайлом
+	var stop := Creature.move_on_grid(g.query, FlowField.Mode.HOPPER, from, to)
+	assert_eq(Grid.tile_of_world(stop.x, stop.y), Vector2i(13, 10), "stops at the edge: %s" % stop)
+
+
+## Танк расшвыривает стаю у воды и у обрыва: стая остаётся у края — не в воде и не внизу.
+func test_tank_bump_does_not_throw_the_pack_into_water_or_off_a_ledge() -> void:
+	for water: bool in [true, false]:
+		var f := TerrainFixture.new(4)
+		if water:
+			for tz in range(5, 16):
+				for tx in range(13, 16):
+					f.set_flat(tx, tz, 3)
+					f.set_water(tx, tz, 4)
+		else:
+			f.set_block(13, 0, 30, 30, 2)
+		var p := _pack(f, Vector2(12.6, 10.5), Vector2(12.0, 10.5))
+		p.vehicle.cls = load("res://data/vehicles/tank.tres")
+		p.vehicle.state.vel = Vector2(3.0, 0.0)
+		p._tank_bump(p.vehicle.state.pos)
+		assert_true(p._stun > 0.0, "the pack was bumped (water: %s)" % water)
+		assert_true(p.pos.x < 13.0, "stays at the edge, not thrown over it (water: %s): %s" % [water, p.pos])
+		_dispose(p)
+	# На ровном месте толчок — на всю длину.
+	var o := TerrainFixture.new(4)
+	var q := _pack(o, Vector2(12.6, 10.5), Vector2(12.0, 10.5))
+	q.vehicle.cls = load("res://data/vehicles/tank.tres")
+	q.vehicle.state.vel = Vector2(3.0, 0.0)
+	q._tank_bump(q.vehicle.state.pos)
+	assert_near(q.pos.x, 12.6 + HopperPack.BUMP_LEN, 0.01, "thrown BUMP_LEN on open ground")
+	_dispose(q)
+
+
+## Меши и материал особи — общие у всех стай (строятся раз); мигание тарана — наложение на узлах одной
+## особи, другие стаи не мигают.
+func test_hopper_kit_is_shared_between_packs() -> void:
+	var f := TerrainFixture.new(4)
+	var a := _pack(f, Vector2(5.5, 5.5), Vector2(20.5, 20.5))
+	var b := _pack(f, Vector2(9.5, 5.5), Vector2(20.5, 20.5))
+	var ma: Dictionary = a._members[0]
+	var mb: Dictionary = b._members[0]
+	var body_a := ma["body"] as MeshInstance3D
+	var body_b := mb["body"] as MeshInstance3D
+	assert_true(body_a.mesh == body_b.mesh, "the torso mesh is shared between packs")
+	assert_true(body_a.mesh.surface_get_material(0) == body_b.mesh.surface_get_material(0), "and its material")
+	(a.bodies[0] as RamBody).hit()
+	assert_true(body_a.material_overlay != null, "the rammed hopper flashes")
+	assert_true(body_b.material_overlay == null, "a hopper of another pack does not")
+	assert_true((a._members[1]["body"] as MeshInstance3D).material_overlay == null, "nor its pack mates")
+	_dispose(a)
+	_dispose(b)
 
 
 func test_rover_and_hover_outrun_fauna_tank_does_not() -> void:

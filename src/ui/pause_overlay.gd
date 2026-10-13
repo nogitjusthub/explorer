@@ -49,7 +49,9 @@ func _line(text: String, y: float, font_size: int, color: Color) -> Label:
 
 
 func _unhandled_input(event: InputEvent) -> void:
-	if visible and (event.is_action_pressed(&"move_left") or event.is_action_pressed(&"move_right")):
+	# Справка поверх паузы: A / D громкость не трогают.
+	if visible and not HelpScreen.shown(get_tree()) \
+			and (event.is_action_pressed(&"move_left") or event.is_action_pressed(&"move_right")):
 		_volume.nudge(-1 if event.is_action_pressed(&"move_left") else 1)
 		get_viewport().set_input_as_handled()
 		return

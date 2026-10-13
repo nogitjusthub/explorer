@@ -29,8 +29,11 @@ var enabled := true
 var level := 1
 var forced: Array[Dictionary] = []        ## отладка: [{kind, at}] — hoppers, worm, shellback, shark, ray, nessie
 var noise := NoiseField.new()
+## hits — атаки существ по машине (укусы, тараны панцирника, разряды, удары Нессы); rams — удары тараном
+## машины по зверям (урон ховеру за таран — tree_fell_damage — в hits не входит, его счёт — rams), kills —
+## убитые тараном.
 var stats := {"packs": 0, "worms": 0, "shellbacks": 0, "sharks": 0, "rays": 0, "nessies": 0, "hits": 0,
-		"rams": 0, "kills": 0}                ## hits — по машине; rams и kills — тараном по зверям
+		"rams": 0, "kills": 0}
 
 var _rng: RandomNumberGenerator
 var _creatures: Array[Creature] = []
@@ -148,7 +151,7 @@ func _ram() -> void:
 	vehicle.rock(Vehicle.ROCK_TREE, -s.forward())
 	EventBus.camera_shake_requested.emit(0.3, 0.15)
 	if vehicle.cls.tree_fell_damage > 0:
-		damaged.emit(vehicle.cls.tree_fell_damage, &"ram")
+		damaged.emit(vehicle.cls.tree_fell_damage, &"ram")     # мимо _on_creature_hit: не атака зверя (stats — rams)
 
 
 ## Отладка (--hunt): ближайшее к from живое тело под тараном (центр) не дальше reach, или null.
@@ -179,6 +182,8 @@ func _update_fields(dt: float) -> void:
 			continue
 		_field_timer[mode] = FIELD_EVERY_S
 		_field_busy[mode] = true
+		# Строится под бюджет кадра по часам: готово через разное число кадров. Тайминг фауны в детерминизм
+		# сида не входит — сид задаёт мир, а не ходы зверей.
 		var job := FlowField.build(query, mode, vehicle.state.tile, _on_field_ready)
 		scheduler.enqueue(job, -0.5)
 

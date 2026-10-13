@@ -359,3 +359,10 @@ func _update_shadow() -> void:
 	RenderingServer.global_shader_parameter_set(&"storm_center", Vector3(center.x, 0.0, center.y))
 	RenderingServer.global_shader_parameter_set(&"storm_radius", radius if _fade > 0.0 else 0.0)
 	RenderingServer.global_shader_parameter_set(&"storm_dark", rules.storm_dark * _fade)
+
+
+## Сцену закрыли посреди грозы («Заново»): глобальные параметры шейдеров живут дольше сцены — без сброса
+## тень туч и сами тучи остались бы и в новом забеге. Сброс — как после растаявшего фронта.
+func _exit_tree() -> void:
+	RenderingServer.global_shader_parameter_set(&"storm_radius", 0.0)
+	RenderingServer.global_shader_parameter_set(&"storm_dark", 0.0)

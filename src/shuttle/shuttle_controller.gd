@@ -59,10 +59,16 @@ func reset() -> void:
 	_em_craft.visible = false
 	_main_descending = false
 	_em_tile = EmergencyCall.NO_TILE
-	if _menu != null:
-		_close_menu()
-	if _call_menu != null:
-		_close_call_menu()
+	_close_menu()
+	_close_call_menu()
+
+
+## Конец забега: радио молчит, открытые меню челнока и вызова закрываются — после конца ни сдать груз,
+## ни вызвать аварийный.
+func stop() -> void:
+	active = false
+	_close_menu()
+	_close_call_menu()
 
 
 func _find_pad(pos: Vector2, distance: float) -> Vector3i:
@@ -116,6 +122,8 @@ func _on_radio() -> void:
 
 
 func _on_call_confirmed(fuel: int, parts: int) -> void:
+	if _call_menu == null or run.is_over():      # меню уже закрыто (конец забега) — сигнал запоздал
+		return
 	_close_call_menu()
 	if emergency.call_in(fuel, parts):
 		_em_tile = EmergencyCall.NO_TILE
@@ -124,6 +132,8 @@ func _on_call_confirmed(fuel: int, parts: int) -> void:
 
 
 func _close_call_menu() -> void:
+	if _call_menu == null:
+		return
 	_call_menu.queue_free()
 	_call_menu = null
 	vehicle.control_enabled = active and _menu == null
@@ -223,8 +233,7 @@ func _on_landed(_pad: Vector3i) -> void:
 func _on_departed() -> void:
 	_main_craft.ascend()
 	_main_descending = false
-	if _menu != null:
-		_close_menu()
+	_close_menu()
 
 
 ## Меню открывается, когда машина остановилась в зоне севшего челнока, и закрывается, если её
@@ -263,6 +272,8 @@ func _open_menu() -> void:
 
 
 func _close_menu() -> void:
+	if _menu == null:
+		return
 	_menu.queue_free()
 	_menu = null
 	vehicle.control_enabled = active and _call_menu == null
@@ -270,6 +281,8 @@ func _close_menu() -> void:
 
 ## Груз сдан — челнок сразу улетает.
 func _on_ship() -> void:
+	if _menu == null or run.is_over():           # меню уже закрыто (конец забега) — сигнал запоздал
+		return
 	var value := run.ship_cargo()
 	EventBus.cargo_shipped.emit(value, false)
 	hud.banner("ГРУЗ СДАН  +%d" % value, COLOR_GOOD)
@@ -278,6 +291,8 @@ func _on_ship() -> void:
 
 
 func _on_evacuate() -> void:
+	if _menu == null or run.is_over():
+		return
 	_close_menu()
 	vehicle.control_enabled = false
 	vehicle.lift(_pad_ground() + Vector3(0, ShuttleCraft.HATCH_Y, 0), LIFT_S)

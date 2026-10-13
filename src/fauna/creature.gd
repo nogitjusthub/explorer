@@ -168,13 +168,27 @@ func ground_y(p: Vector2) -> float:
 	return query.surface_y(p.x, p.y) if query.is_loaded(t.x, t.y) else 0.0
 
 
-## Сдвиг по плоскости с проверкой рёбер вида: в соседний тайл — только по проходимому ребру.
+## Сдвиг по плоскости с проверкой рёбер вида: в соседний тайл — только по проходимому ребру. Дальше
+## соседнего тайла (толчок, отлёт) — шагами не длиннее MOVE_STEP, каждый по проходимым рёбрам; первый
+## непроходимый шаг останавливает сдвиг там, куда дошёл (ни через уступ, ни в воду не перескочить).
+const MOVE_STEP := 0.9
+
+
 static func move_on_grid(q: TerrainQuery, mode: FlowField.Mode, from: Vector2, to: Vector2) -> Vector2:
 	var a := Grid.tile_of_world(from.x, from.y)
 	var b := Grid.tile_of_world(to.x, to.y)
 	if a == b:
 		return to
 	var step := b - a
+	if absi(step.x) > 1 or absi(step.y) > 1:
+		var n := ceili(from.distance_to(to) / MOVE_STEP)
+		var p := from
+		for i in range(1, n + 1):
+			var np := move_on_grid(q, mode, p, from.lerp(to, float(i) / n))
+			if np == p:
+				break
+			p = np
+		return p
 	if absi(step.x) + absi(step.y) == 1:
 		var dir := Grid.DIR_OFFSETS.find(step)
 		return to if FlowField.passable(q, mode, a, dir) else from

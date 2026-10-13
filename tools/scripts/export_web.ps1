@@ -20,7 +20,18 @@ $ErrorActionPreference = "Continue"
 
 $out = Join-Path $root "build\web"
 New-Item -ItemType Directory -Force $out | Out-Null
-& $godot --headless --path $root --import 2>&1 | Out-Null
+# Импорт ресурсов перед экспортом. Godot изредка падает на нём (access violation) — до трёх попыток;
+# не вышло — экспорт не запускаем: он собрал бы сборку на устаревших или неполных ресурсах.
+$imported = $false
+for ($try = 1; $try -le 3 -and -not $imported; $try++) {
+    & $godot --headless --path $root --import 2>&1 | Out-Null
+    $imported = ($LASTEXITCODE -eq 0)
+    if (-not $imported) { Write-Host "Import failed (exit code $LASTEXITCODE), attempt $try of 3" }
+}
+if (-not $imported) {
+    Write-Host "Import failed - export aborted"
+    exit 1
+}
 
 # Release-экспорт идёт на своём урезанном шаблоне: custom_template/release в export_presets.cfg,
 # собирает его tools\scripts\build_web_template.ps1. Если файла нет (свежий клон) — на время экспорта

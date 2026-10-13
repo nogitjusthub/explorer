@@ -553,7 +553,7 @@ func _on_run_ended(cause: StringName) -> void:
 	EventBus.run_ended.emit(result)
 	if sandbox:
 		dev.deaths += 1
-		vehicle.place(_spawn, SPAWN_HEADING)
+		vehicle.respawn(_spawn, SPAWN_HEADING)     # цела и управляема — и после челнока сверху, и после луча
 		_new_run()
 		shuttles.reset()
 		run.announce()
@@ -561,7 +561,7 @@ func _on_run_ended(cause: StringName) -> void:
 	phase = Phase.OVER
 	_pause.enabled = false
 	_help.pause_game = false
-	shuttles.active = false
+	shuttles.stop()                    # открытое меню челнока или вызова закрывается вместе с забегом
 	vehicle.control_enabled = false
 	if cause == &"whirlpool":
 		hud.banner("МАШИНА УТОНУЛА", Hud.COLOR_DAMAGE)     # затянуло под воду — корпус цел

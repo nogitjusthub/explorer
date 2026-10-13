@@ -12,6 +12,11 @@ const PART_TREES := 5
 const PART_SPRITES := 6
 const PART_WATER := 4
 const ALL_PARTS := 0x7F
+## Заливка ям после загрузки чанка — в его окрестности, а не по всему кругу загрузки: новая яма
+## задевает новый чанк или тайлы рядом с ним (раньше они были выходом). Запас — два чанка: яма без
+## выхода у генератора бывает до ~60 тайлов в поперечнике, и она должна целиком попасть в окно —
+## яму, задевшую край окна, заливка принимает за выезд.
+const PIT_MARGIN := 2 * Grid.CHUNK
 
 enum State { GENERATING, BUILDING, READY }
 
@@ -33,6 +38,9 @@ var _refreshed_at := Vector2(INF, INF)
 var _pit_job: TerrainRepair.PitFillJob = null
 var _pit_passes := 0
 var _pits_needed := false
+var _pit_area := Rect2i()          ## где проверить ямы (тайлы); действует, пока _pits_needed
+var _pit_full := false             ## проверить весь круг загрузки (после разлома)
+var _pit_rect := Rect2i()          ## окно текущего прохода — повторные проходы идут по нему же
 
 
 class Entry:
@@ -119,7 +127,14 @@ func preload_around(pos: Vector2) -> void:
 ## После разлома: проверить ямы без выхода вокруг центра загрузки и залить их.
 func request_pit_fill() -> void:
 	_pits_needed = true
+	_pit_full = true
 	_pit_passes = 0
+
+
+## Проверить ямы в прямоугольнике тайлов (добавляется к уже запрошенному).
+func _request_pits(area: Rect2i) -> void:
+	_pit_area = _pit_area.merge(area) if _pits_needed else area
+	_pits_needed = true
 
 
 func loaded_count() -> int:
@@ -217,13 +232,16 @@ func _unload(coord: Vector2i) -> void:
 
 func _on_generated(e: Entry, data: ChunkData) -> void:
 	terrain.add_chunk(data)
+	# Временные подъёмы, которые не вернулись, пока чанк был выгружен (меш соседей пересоберётся сам).
+	Deformation.restore_pending(terrain)
 	e.state = State.BUILDING
 	e.node = _take_node()
 	e.node.position = Vector3(e.coord.x * Grid.CHUNK, 0.0, e.coord.y * Grid.CHUNK)
 	e.node.visible = true
 	data.dirty_sections = 0
 	_start_build(e, data, ALL_PARTS, _chunk_distance(e.coord) - Grid.CHUNK)
-	_pits_needed = true
+	var origin := Grid.chunk_origin(e.coord)
+	_request_pits(Rect2i(origin - Vector2i(PIT_MARGIN, PIT_MARGIN), Vector2i.ONE * (Grid.CHUNK + 2 * PIT_MARGIN)))
 	_pit_passes = 0
 
 
@@ -239,8 +257,10 @@ func _on_built(e: Entry) -> void:
 func _on_pits_filled(changed: int) -> void:
 	_pit_job = null
 	_pit_passes += 1
-	# Заливка может открыть ещё одну яму; несколько проходов, пока есть изменения.
-	_pits_needed = changed > 0 and _pit_passes < 4
+	# Заливка может открыть ещё одну яму; несколько проходов по тому же окну, пока есть изменения.
+	# Запрос от чанков, загруженных за время прохода, остаётся в силе.
+	if changed > 0 and _pit_passes < 4:
+		_request_pits(_pit_rect)
 
 
 func _start_build(e: Entry, data: ChunkData, mask: int, priority: float) -> void:
@@ -257,7 +277,7 @@ func _start_build(e: Entry, data: ChunkData, mask: int, priority: float) -> void
 
 func _build_part(node: ChunkNode, data: ChunkData, part: int) -> void:
 	if part < 4:
-		node.set_section(part, ChunkMesher.build_section(data, part, run_seed))
+		node.set_section(part, ChunkMesher.build_section(data, part))
 	elif part == PART_WATER:
 		node.set_water(ChunkMesher.build_water(data))
 	elif part == PART_SPRITES:
@@ -282,11 +302,16 @@ func _maintain() -> void:
 			_start_build(e, data, mask, -1.0)
 	if _pits_needed and not generating and _pit_job == null:
 		_pits_needed = false
+		# Окно — запрошенная окрестность новых чанков, но не шире прямоугольника круга загрузки.
 		var c0 := Grid.chunk_of_world(_focus.x - R_LOAD, _focus.y - R_LOAD)
 		var c1 := Grid.chunk_of_world(_focus.x + R_LOAD, _focus.y + R_LOAD)
-		var origin := Grid.chunk_origin(c0)
-		var size := (c1 - c0 + Vector2i.ONE) * Grid.CHUNK
-		_pit_job = TerrainRepair.PitFillJob.new(terrain, origin.x, origin.y, size.x, size.y)
+		var load_rect := Rect2i(Grid.chunk_origin(c0), (c1 - c0 + Vector2i.ONE) * Grid.CHUNK)
+		_pit_rect = load_rect if _pit_full else _pit_area.intersection(load_rect)
+		_pit_full = false
+		if not _pit_rect.has_area():
+			return      # новые чанки уже за кругом загрузки — проверять нечего
+		_pit_job = TerrainRepair.PitFillJob.new(terrain, _pit_rect.position.x, _pit_rect.position.y,
+				_pit_rect.size.x, _pit_rect.size.y)
 		var job := PitJob.new()
 		job.streamer = self
 		job.fill = _pit_job

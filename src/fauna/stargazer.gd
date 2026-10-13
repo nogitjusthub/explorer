@@ -66,6 +66,7 @@ const LIGHT_S := 0.12
 const LID_UP_SPEED := 12.0               ## рад/с — крышка откидывается рывком…
 const LID_DOWN_SPEED := 0.9              ## …и ложится медленно
 const EMBER_S := 1.6
+const PLACE_S := 1.0                     ## тело ложится на дно заново раз в столько (рельеф меняется)
 
 const DOME_OFF := 0
 const DOME_GLINT := 1
@@ -81,6 +82,7 @@ var _fx_rng := RandomNumberGenerator.new()   ## для внешнего вида
 var _time := 0.0
 var _idle := true                        ## покой: заряжена, глаза закрыты, эффекты погасли
 var _far := true                         ## в прошлом шаге машина была далеко
+var _place_t := PLACE_S                  ## до следующей укладки тела на дно (_place)
 var _charge := 0.0                       ## до готовности разряда, с
 var _timer := 0.0
 var _order := PackedInt32Array()         ## открытые глаза — в порядке открытия
@@ -154,6 +156,7 @@ func setup(at: Vector2) -> void:
 	_phase = rng.randf() * TAU
 	_fx_rng.seed = rng.randi()
 	_glint_wait = _fx_rng.randf_range(0.0, GLINT_EVERY_MAX)
+	_place_t = _fx_rng.randf_range(0.0, PLACE_S)       # укладки троеглазок — вразнобой, не в одном кадре
 	for i in 3:
 		var a := _phase + TAU * i / 3.0
 		_dirs.append(Vector3(cos(a), 0.0, sin(a)))
@@ -170,14 +173,23 @@ func open_eyes() -> int:
 func step(dt: float) -> void:
 	var s := vehicle.state
 	var d2 := pos.distance_squared_to(s.pos)
+	# Рельеф могли изменить (воронка, землетрясение, борозда смерча) — тело ложится на дно заново раз в
+	# PLACE_S и вдали (оно видно и оттуда), и вблизи.
+	_place_t -= dt
+	var replace := _place_t <= 0.0
+	if replace:
+		_place_t = PLACE_S
+		_place()
 	if _idle and d2 > FAR_R * FAR_R:
 		_far = true
+		if replace:
+			_pose_glow()
 		if _tick_glint(dt):
 			_show_domes()
 		return
 	if _far:
 		_far = false
-		_place()                          # рельеф могли изменить (воронка, землетрясение)
+		_place()
 		_ensure_fx()
 	_time += dt
 	match state:

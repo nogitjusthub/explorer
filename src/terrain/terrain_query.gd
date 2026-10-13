@@ -89,7 +89,7 @@ func edge_drop(tx: int, tz: int, dir: int) -> int:
 	var da := data.owner_of(tx, tz)
 	var db := data.owner_of(tx + o.x, tz + o.y)
 	if da == null or db == null:
-		return 0
+		return 0        # обрыва нет, но и хода нет: въезд в незагруженный тайл уже запрещает edge_rise (WALL)
 	var ia := da.local_index(tx, tz)
 	var ib := db.local_index(tx + o.x, tz + o.y)
 	var own := Grid.EDGE_OWN[dir]

@@ -157,6 +157,68 @@ func test_dunes_sand_no_walls_seamless() -> void:
 		assert_eq(mismatches, 0, "seed %d: apron tiles differ in a dune field" % run_seed)
 
 
+## Седловина («песочные часы»): противоположные углы равны, пары разные.
+func _saddle(d: ChunkData, i: int) -> bool:
+	var a := d.get_corner(i, 0)
+	var b := d.get_corner(i, 1)
+	return a == d.get_corner(i, 2) and b == d.get_corner(i, 3) and a != b
+
+
+## Высоты 3×3 вокруг вершины (ex, ez) сетки EXT — по строкам с севера.
+func _set3x3(ext: PackedInt32Array, ex: int, ez: int, values: Array) -> void:
+	for k in 9:
+		ext[(ez + k / 3 - 1) * TerrainGenerator.EXT + ex + k % 3 - 1] = values[k]
+
+
+func test_dune_fix_rejects_shift_into_saddle() -> void:
+	var gen := TerrainGenerator.new(1, TerrainParams.new())
+	var ext := PackedInt32Array()
+	ext.resize(TerrainGenerator.EXT * TerrainGenerator.EXT)
+	# Вершина 2, северо-западный тайл круче яруса. Сдвиг вниз выровнял бы все четыре тайла, но сделал бы
+	# этот тайл седловиной (1 0 / 0 1); сдвиг вверх не выравнивает — вершина остаётся как есть.
+	_set3x3(ext, 5, 5, [1, 0, 0, 0, 2, 1, 1, 1, 1])
+	assert_eq(gen._fix_dune_vertex(ext, 5, 5), 2, "shift into a saddle rejected")
+	# Без седловины тот же сдвиг принимается.
+	_set3x3(ext, 5, 5, [1, 1, 0, 0, 2, 1, 1, 1, 1])
+	assert_eq(gen._fix_dune_vertex(ext, 5, 5), 1, "plain shift kept")
+
+
+func test_dune_fields_without_saddles_from_dunes() -> void:
+	# В дюнных полях седловин нет от гряд: ни один угол седловины не сдвинут правкой гряд. Остаются
+	# только редкие седловины общей правки (её решения по соседям на расстоянии 1 друг друга не видят).
+	for run_seed: int in [1, 7]:
+		var gen := TerrainGenerator.new(run_seed, TerrainParams.new())
+		var center := _dune_chunk(gen)
+		var dune_tiles := 0
+		var saddles := 0
+		var from_dunes := 0
+		for cz in range(center.y - 1, center.y + 1):
+			for cx in range(center.x - 1, center.x + 1):
+				var job := gen.begin(Vector2i(cx, cz))
+				while not gen.step(job, Time.get_ticks_usec() + 3_600_000_000):
+					pass
+				var d := job.data
+				var o := d.window_origin()
+				for lz in range(Grid.APRON, Grid.APRON + Grid.CHUNK):
+					for lx in range(Grid.APRON, Grid.APRON + Grid.CHUNK):
+						if not gen.dune_tile(o.x + lx, o.y + lz):
+							continue
+						dune_tiles += 1
+						if not _saddle(d, lz * ChunkData.N + lx):
+							continue
+						saddles += 1
+						for k in TerrainGenerator.TILE_CORNERS:
+							var ex := lx + 1 + k.x
+							var ez := lz + 1 + k.y
+							var raw := job.ext[ez * TerrainGenerator.EXT + ex]
+							var v := job.verts[(lz + k.y) * TerrainGenerator.VERTS + lx + k.x]
+							if v != raw and gen._fix_saddle_vertex(job.ext, ex, ez) == raw:
+								from_dunes += 1
+		assert_true(dune_tiles > 500, "seed %d: dune tiles %d" % [run_seed, dune_tiles])
+		assert_eq(from_dunes, 0, "seed %d: saddle corners moved by the dune fix" % run_seed)
+		assert_true(saddles * 500 <= dune_tiles, "seed %d: saddles in dune fields: %d of %d tiles" % [run_seed, saddles, dune_tiles])
+
+
 func test_dune_height_matches_generation() -> void:
 	# Вершины чанка (горячий путь: площадки — списком задачи) совпадают с height_at (площадки — из кэша
 	# по блокам) с точностью до правки седловин и крутизны (±1). Сравниваются углы неплоских тайлов —

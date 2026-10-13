@@ -18,10 +18,11 @@ extends Node
 ##     --no-threats       без угроз (погода, землетрясения, смерчи)
 ##     --no-fauna         без фауны
 ##     --threat=N         уровень угрозы не ниже N (1–6)
-##     --event=K@S,...    событие K на S-й секунде: storm, strike, fog, acid, dust, tornado,
+##     --event=K@S,...    событие K на S-й секунде: storm, strike, fog, acid, dust, murk, tornado,
 ##                          quake, whirlpool, hoppers, worm, shellback, shark, ray, nessie
-##                          (strike — молния в машину; червь — если рядом песок или равнина;
-##                          водные — если рядом зыбун, мелкая или глубокая вода)
+##                          (strike — молния в машину; murk — непогода по биому; червь — если рядом
+##                          песок или равнина; водные — если рядом зыбун, мелкая или глубокая вода;
+##                          опечатка в имени — предупреждение в консоли)
 ##   Сценарии без рук:
 ##     --idle             без стартового экрана и автопилота: машина стоит
 ##     --select           показать трюм с выбором машины и при --idle или --shots
@@ -40,8 +41,16 @@ extends Node
 ##                          (их шейдер прогрев не покрыл — первое появление дёрнет кадр в браузере)
 ##     --shots=N          N скриншотов в build\shots, интервал --shot-every=S (3 с)
 ##     --snapshot-at=S    отладочный снимок (как по F12) через S секунд
-## В веб-сборке те же параметры берутся из адреса страницы: ?seed=7&bench=30. Результаты бенчмарка
-## и снимки уходят POST-запросами на /log и /shot (tools/scripts/web_server.py).
+## В веб-сборке те же параметры берутся из адреса страницы: ?seed=7&bench=30 — но только в debug-экспорте
+## (export_web.ps1 -Debug). Release-сборка (её и публикуем) из адреса берёт лишь диагностику — ?log-slow
+## и ?shader-audit; прочее (бак, угроза, автопилот, события, seed…) отбрасывает со строкой в консоли.
+## Результаты бенчмарка и снимки уходят POST-запросами на /log и /shot (tools/scripts/web_server.py).
+
+## Имена событий --event: ThreatDirector._start и FaunaDirector._force.
+const EVENT_KINDS: Array[StringName] = [&"storm", &"strike", &"fog", &"acid", &"dust", &"murk", &"tornado",
+		&"quake", &"whirlpool", &"hoppers", &"worm", &"shellback", &"shark", &"ray", &"nessie"]
+## Параметры адреса страницы, которые принимает release-сборка в вебе: только диагностика кадра.
+const WEB_RELEASE_PARAMS: Array[String] = ["log-slow", "shader-audit"]
 
 var args := {}
 var run_seed: int
@@ -82,12 +91,14 @@ var _presses: Array[Dictionary] = []    ## {action, at}
 var _clicks: Array[Dictionary] = []     ## {pos (пиксели рендера), at}
 var _mouse_up: Array[Vector2] = []
 var _release: Array[StringName] = []
+var _events: Array[Dictionary] = []     ## --event, разобранный один раз (предупреждения — тоже раз)
 
 
 func _init(parsed_args: Dictionary) -> void:
 	args = parsed_args
 	name = "DevTools"
 	process_mode = Node.PROCESS_MODE_ALWAYS     # снимки, нажатия и F12 работают и на паузе
+	_events = parse_events(String(args.get("event", "")))
 	if args.has("bench"):
 		_bench_time = float(args["bench"])
 
@@ -141,13 +152,26 @@ func tweak_rules(rules: BalanceRules) -> BalanceRules:
 	return r
 
 
-## Принудительные события из --event=storm@5,quake@12.
+## Принудительные события из --event=storm@5,quake@12 — каждому директору свой список (он его расходует).
 func forced_events() -> Array[Dictionary]:
+	return _events.duplicate(true)
+
+
+## Разбор --event: K@S через запятую. Неизвестное имя (опечатка) или запись не по форме — предупреждение
+## в консоли, запись пропускается: иначе событие молча не случилось бы.
+static func parse_events(spec: String) -> Array[Dictionary]:
 	var result: Array[Dictionary] = []
-	for item in String(args.get("event", "")).split(",", false):
+	for item in spec.split(",", false):
 		var parts := item.split("@")
-		if parts.size() == 2:
-			result.append({"kind": StringName(parts[0]), "at": float(parts[1])})
+		if parts.size() != 2 or not parts[1].is_valid_float():
+			push_warning("DevTools: --event item '%s' is not KIND@SECONDS — skipped" % item)
+			continue
+		var kind := StringName(parts[0])
+		if not EVENT_KINDS.has(kind):
+			push_warning("DevTools: --event: unknown event '%s' — skipped (known: %s)" % [kind,
+					", ".join(PackedStringArray(EVENT_KINDS))])
+			continue
+		result.append({"kind": kind, "at": float(parts[1])})
 	return result
 
 
@@ -384,7 +408,22 @@ static func parse_args() -> Dictionary:
 	if OS.has_feature("web"):
 		var search: Variant = JavaScriptBridge.eval("window.location.search", true)
 		if search is String:
-			for pair in (search as String).trim_prefix("?").split("&", false):
-				var kv := pair.split("=", true, 1)
-				result[kv[0]] = kv[1] if kv.size() > 1 else ""
+			result.merge(url_params(search, not OS.is_debug_build()), true)
+	return result
+
+
+## Параметры из адреса страницы (window.location.search: «?seed=7&bench=30»). release — опубликованная
+## сборка: из адреса берутся только WEB_RELEASE_PARAMS, прочие отбрасываются (строка в консоли браузера).
+static func url_params(search: String, release: bool) -> Dictionary:
+	var result := {}
+	var ignored := PackedStringArray()
+	for pair in search.trim_prefix("?").split("&", false):
+		var kv := pair.split("=", true, 1)
+		if release and not WEB_RELEASE_PARAMS.has(kv[0]):
+			ignored.append(kv[0])
+			continue
+		result[kv[0]] = kv[1] if kv.size() > 1 else ""
+	if not ignored.is_empty():
+		print("DevTools: release build ignores URL parameters %s (debug export only; allowed: %s)" % [
+				", ".join(ignored), ", ".join(PackedStringArray(WEB_RELEASE_PARAMS))])
 	return result
