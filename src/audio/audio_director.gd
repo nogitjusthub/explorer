@@ -14,6 +14,8 @@ const FAUNA_HEAR_TILES := 14.0         ## звуки фауны — чуть д�
 const THUNDER_SPEED := 30.0            ## тайлов в секунду — гром приходит позже вспышки
 const SHUTTLE_HEAR_TILES := 45.0       ## челнок слышно издалека — прилёт к площадке за краем экрана
 const SYNTH_BUDGET_USEC := 3000        ## фоновый синтез звуков за кадр, мкс
+
+var synth_budget_usec := SYNTH_BUDGET_USEC   ## под экраном загрузки — больше (кадры там не видны)
 const SOUNDS: Array[StringName] = [&"hit", &"rumble_hit", &"pager", &"chime", &"crackle", &"thunder", &"screech",
 		&"buzz", &"rumble_build", &"dust", &"wind", &"bellow", &"bellow_low", &"stomp", &"thrust", &"tractor",
 		&"howl", &"ground_hum"]
@@ -53,7 +55,7 @@ func _ready() -> void:
 
 ## Фоновый синтез звуков (свои и чужие — люк трюма, гул угроз): очередь общая, в Sfx.
 func _process(_dt: float) -> void:
-	Sfx.pump(SYNTH_BUDGET_USEC)
+	Sfx.pump(synth_budget_usec)
 
 
 func _sfx(key: StringName) -> AudioStreamWAV:

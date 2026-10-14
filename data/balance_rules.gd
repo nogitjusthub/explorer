@@ -56,6 +56,7 @@ extends Resource
 @export_group("Storm")
 @export var storm_radius: float = 45.0           ## грозовой фронт диаметром 90 тайлов — проще уйти, чем проехать
 @export var storm_dark: float = 0.5              ## насколько темнее земля под тучами
+@export var storm_visibility: float = 7.0        ## под тучами (темно, дождь) видно столько тайлов — карта мира
 @export var storm_speed: float = 2.04
 @export var storm_max_s: float = 150.0          ## дольше — фронт рассеивается
 @export var strike_interval_s: float = 2.5
@@ -148,11 +149,12 @@ extends Resource
 @export var pack_min: int = 2
 @export var pack_max: int = 3
 @export var worm_min_level: int = 2
-@export var worm_first_s: float = 90.0            ## червь редок: первый — не раньше этого времени забега…
-@export var worm_gap_s: float = 150.0             ## …следующий — не раньше этого после встречи (гнался за машиной)
+@export var worm_first_s: float = 120.0           ## червь редок: первый — не раньше этого времени забега…
+@export var worm_gap_s: float = 210.0             ## …следующий — не раньше этого после ухода предыдущего
 @export var worm_chance: float = 0.15             ## шанс появиться на каждой проверке (раз в 2 с), когда можно
 @export var worm_speed: float = 5.0
-@export var worm_idle_speed: float = 1.5          ## не слышит машину — незаметно подтягивается к ней
+@export var worm_hear_r: float = 32.0             ## слышит едущую машину дальше прочей фауны: радиус × шум (0…1)
+@export var worm_wait_s: float = 25.0             ## не услышал за столько (машина стоит или крадётся) — уходит
 @export var worm_spawn_min: float = 20.0          ## появляется ближе остальных — в 20…30 тайлах, на своём грунте
 @export var worm_spawn_max: float = 30.0
 @export var worm_telegraph_s: float = 0.9

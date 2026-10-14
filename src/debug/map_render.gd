@@ -12,6 +12,7 @@ const MATERIAL_COLORS: Array[Color] = [
 	Color(0.66, 0.40, 0.76),   # кристалл
 ]
 const UNLOADED_COLOR := Color(0.15, 0.15, 0.17)
+const WATER_COLOR := Color(0.08, 0.42, 0.45)
 const LEDGE_COLOR := Color(0.95, 0.55, 0.1)
 const CLIFF_COLOR := Color(0, 0, 0)
 
@@ -29,19 +30,7 @@ static func render(q: TerrainQuery, x0: int, z0: int, w: int, h: int, scale: int
 				img.fill_rect(Rect2i(lx * scale, lz * scale, scale, scale), UNLOADED_COLOR)
 				continue
 			var i := d.local_index(tx, tz)
-			var c0 := d.get_corner(i, 0)
-			var c1 := d.get_corner(i, 1)
-			var c2 := d.get_corner(i, 2)
-			var c3 := d.get_corner(i, 3)
-			var avg := (c0 + c1 + c2 + c3) / 4.0
-			var col: Color = MATERIAL_COLORS[d.material[i]]
-			col = col * clampf(0.45 + avg * 0.045, 0.3, 1.25)
-			var gx := (c1 + c2 - c0 - c3) * 0.5
-			var gz := (c2 + c3 - c0 - c1) * 0.5
-			col = col * clampf(1.0 - 0.18 * (gx + gz), 0.6, 1.4)
-			var water := d.get_water(i)
-			if water != TerrainQuery.NO_WATER:
-				col = col.lerp(Color(0.08, 0.42, 0.45), clampf(0.55 + (water - avg) * 0.12, 0.5, 0.95))
+			var col := tile_color(d, i)
 			if d.flags[i] & ChunkData.FLAG_PAD:
 				col = Color(0.9, 0.2, 0.85)
 			if not trapped.is_empty() and trapped[lz * w + lx] == 0:
@@ -61,6 +50,25 @@ static func render(q: TerrainQuery, x0: int, z0: int, w: int, h: int, scale: int
 				else:
 					img.fill_rect(Rect2i(lx * scale, lz * scale + scale - 1, scale, 1), wall_col)
 	return img
+
+
+## Цвет тайла сверху: материал × высота яруса, светлее склон к свету (на северо-запад), вода — бирюзой тем
+## гуще, чем глубже. Общий для отладочной карты и карты мира (WorldMap).
+static func tile_color(d: ChunkData, i: int) -> Color:
+	var c0 := d.get_corner(i, 0)
+	var c1 := d.get_corner(i, 1)
+	var c2 := d.get_corner(i, 2)
+	var c3 := d.get_corner(i, 3)
+	var avg := (c0 + c1 + c2 + c3) / 4.0
+	var col: Color = MATERIAL_COLORS[d.material[i]]
+	col = col * clampf(0.45 + avg * 0.045, 0.3, 1.25)
+	var gx := (c1 + c2 - c0 - c3) * 0.5
+	var gz := (c2 + c3 - c0 - c1) * 0.5
+	col = col * clampf(1.0 - 0.18 * (gx + gz), 0.6, 1.4)
+	var water := d.get_water(i)
+	if water != TerrainQuery.NO_WATER:
+		col = col.lerp(WATER_COLOR, clampf(0.55 + (water - avg) * 0.12, 0.5, 0.95))
+	return col
 
 
 ## Метка машины: белый крест и линия курса.

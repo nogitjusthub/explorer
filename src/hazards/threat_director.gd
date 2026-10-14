@@ -98,6 +98,19 @@ func in_calm() -> bool:
 	return _calm_left > 0.0
 
 
+## Сколько тайлов видно вокруг машины (карта мира: разведанное): в ясную погоду — clear_sky; в массе тумана
+## или пыли — до её просвета (clear_radius) по плотности массы в точке (кислотный туман выше газа не мешает);
+## под грозовыми тучами — до storm_visibility по тому, как глубоко машина под фронтом.
+func visibility(pos: Vector2, y: float, clear_sky: float) -> float:
+	var front := _weather as WeatherFront
+	if front != null:
+		return lerpf(clear_sky, minf(front.clear_radius(), clear_sky), clampf(front.density(pos, y), 0.0, 1.0))
+	var storm := _weather as StormFront
+	if storm != null:
+		return lerpf(clear_sky, minf(rules.storm_visibility, clear_sky), clampf(storm.coverage, 0.0, 1.0))
+	return clear_sky
+
+
 ## Радар глушит гроза, если машина под фронтом.
 func radar_jammed() -> bool:
 	var storm := _weather as StormFront
@@ -112,7 +125,8 @@ func step(dt: float) -> void:
 	_calm_left = maxf(_calm_left - dt, 0.0)
 	for i in range(forced.size() - 1, -1, -1):
 		if _time >= forced[i]["at"]:
-			_start(forced[i]["kind"])
+			if _start(forced[i]["kind"]):
+				DevTools.mark("event:%s" % forced[i]["kind"])    # этап для замеров (web_bench)
 			forced.remove_at(i)
 
 	if _weather != null:
@@ -214,8 +228,9 @@ func _start(kind: StringName) -> bool:
 			var front := _weather as WeatherFront
 			return _spawn_tornado(front.wind if front != null else Vector2.ZERO)
 		&"whirlpool":
-			# Отладка (--event=whirlpool): вплотную к машине, чтобы сразу потянуло.
-			if not _spawn_whirlpool(2.0, 4.0):
+			# Отладка (--event=whirlpool): вплотную к машине, чтобы сразу потянуло; у берега глубокой воды рядом
+			# может не быть — тогда где-нибудь в кольце до игровой дальности.
+			if not _spawn_whirlpool(2.0, 4.0) and not _spawn_whirlpool(4.0, Whirlpool.SPAWN_MAX):
 				print("threats: no deep water for a whirlpool near the vehicle")
 				return false
 			return true

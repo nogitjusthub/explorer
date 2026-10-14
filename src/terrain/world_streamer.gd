@@ -151,20 +151,29 @@ func generating_count() -> int:
 
 ## Мир вокруг точки готов: все чанки в радиусе загрузки собраны и ямы залиты (рельеф окончательный).
 func ready_around(pos: Vector2) -> bool:
-	if _pits_needed or _pit_job != null:
-		return false
+	return ready_fraction(pos) >= 1.0
+
+
+## Доля готовности мира вокруг точки (экран загрузки): собранные чанки круга загрузки к их числу; пока
+## ямы не залиты — не больше 0,95.
+func ready_fraction(pos: Vector2) -> float:
+	var need := 0
+	var ready := 0
 	var c0 := Grid.chunk_of_world(pos.x - R_LOAD, pos.y - R_LOAD)
 	var c1 := Grid.chunk_of_world(pos.x + R_LOAD, pos.y + R_LOAD)
 	for cz in range(c0.y, c1.y + 1):
 		for cx in range(c0.x, c1.x + 1):
-			var coord := Vector2i(cx, cz)
 			var x0 := float(cx * Grid.CHUNK)
 			var z0 := float(cz * Grid.CHUNK)
 			var dx := maxf(maxf(x0 - pos.x, pos.x - (x0 + Grid.CHUNK)), 0.0)
 			var dz := maxf(maxf(z0 - pos.y, pos.y - (z0 + Grid.CHUNK)), 0.0)
-			if sqrt(dx * dx + dz * dz) <= R_LOAD and not is_ready(coord):
-				return false
-	return true
+			if sqrt(dx * dx + dz * dz) <= R_LOAD:
+				need += 1
+				ready += int(is_ready(Vector2i(cx, cz)))
+	var k := float(ready) / maxi(need, 1)
+	if _pits_needed or _pit_job != null:
+		k = minf(k, 0.95)
+	return k
 
 
 func is_ready(coord: Vector2i) -> bool:

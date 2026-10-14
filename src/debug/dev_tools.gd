@@ -35,15 +35,16 @@ extends Node
 ##     --course=D         автопилот строго по курсу D градусов, без объезда
 ##     --hunt             автопилот таранит ближайшего зверя (скакуны, панцирник, илозуб), если он рядом
 ##     --bench=S          бенчмарк S секунд с автопилотом, отчёт и выход
-##     --log-slow         печатать кадры дольше 20 мс: сколько заняли игра, генерация, отрисовка
-##                          (в вебе — ?log-slow в адресе, строки в консоли браузера F12)
+##     --log-slow[=MS]    печатать кадры дольше MS мс (20) по часам, с первого кадра: игра, генерация,
+##                          отрисовка; метки этапов (mark …) (в вебе — ?log-slow в адресе, консоль F12)
 ##     --shader-audit     печатать материалы с новым ключом шейдера, появившиеся после прогрева
 ##                          (их шейдер прогрев не покрыл — первое появление дёрнет кадр в браузере)
 ##     --shots=N          N скриншотов в build\shots, интервал --shot-every=S (3 с)
 ##     --snapshot-at=S    отладочный снимок (как по F12) через S секунд
-## В веб-сборке те же параметры берутся из адреса страницы: ?seed=7&bench=30 — но только в debug-экспорте
-## (export_web.ps1 -Debug). Release-сборка (её и публикуем) из адреса берёт лишь диагностику — ?log-slow
-## и ?shader-audit; прочее (бак, угроза, автопилот, события, seed…) отбрасывает со строкой в консоли.
+## В веб-сборке те же параметры берутся из адреса страницы: ?seed=7&bench=30 — в debug-экспорте
+## (export_web.ps1 -Debug) и в release на локальном сервере (127.0.0.1, localhost — замеры web_bench.mjs).
+## Опубликованная release-сборка из адреса берёт лишь диагностику — ?log-slow и ?shader-audit; прочее (бак,
+## угроза, автопилот, события, seed…) отбрасывает со строкой в консоли.
 ## Результаты бенчмарка и снимки уходят POST-запросами на /log и /shot (tools/scripts/web_server.py).
 
 ## Имена событий --event: ThreatDirector._start и FaunaDirector._force.
@@ -51,6 +52,8 @@ const EVENT_KINDS: Array[StringName] = [&"storm", &"strike", &"fog", &"acid", &"
 		&"quake", &"whirlpool", &"hoppers", &"worm", &"shellback", &"shark", &"ray", &"nessie"]
 ## Параметры адреса страницы, которые принимает release-сборка в вебе: только диагностика кадра.
 const WEB_RELEASE_PARAMS: Array[String] = ["log-slow", "shader-audit"]
+## Хосты, с которых release-сборка в вебе принимает все параметры (локальные замеры).
+const LOCAL_HOSTS: Array[String] = ["127.0.0.1", "localhost"]
 
 var args := {}
 var run_seed: int
@@ -74,8 +77,12 @@ var _shot_timer := 0.0
 var _shot_index := 0
 var _snapshot_at := -1.0
 var _frames := 0
+var holding := false                   ## идёт экран загрузки: часы сценариев (--press, --shots, --bench…) стоят
 var _elapsed := 0.0
 var _max_delta := 0.0
+var _last_usec := 0                    ## Time.get_ticks_usec() прошлого кадра — длительность кадра по часам
+var _wall := PackedFloat32Array()      ## длительности кадров по часам (мс) для отчёта бенчмарка
+var _slow_ms := 20.0                   ## --log-slow=MS
 var _throttle_sum := 0.0
 var _physics_frames := 0
 var _chunks_built := 0
@@ -123,6 +130,8 @@ func _ready() -> void:
 	if streamer != null:
 		streamer.chunk_built.connect(func(_c: Vector2i) -> void: _builds += 1)
 	if args.has("log-slow"):
+		if String(args["log-slow"]).is_valid_float():
+			_slow_ms = float(args["log-slow"])
 		# Время отрисовки кадра (ЦП и ГП) — чтобы отличить тормоза игры от тормозов рендера и браузера.
 		RenderingServer.viewport_set_measure_render_time(get_viewport().get_viewport_rid(), true)
 	if args.has("shader-audit"):
@@ -249,18 +258,27 @@ func snapshot() -> void:
 
 func _process(dt: float) -> void:
 	_frames += 1
-	_elapsed += dt
+	if not holding:
+		_elapsed += dt
+	# Кадр — по часам: dt движок урезает (не больше 8 шагов физики), и многосекундный кадр компиляции шейдеров
+	# выглядел бы как «130 мс».
+	var now := Time.get_ticks_usec()
+	var wall := (now - _last_usec) / 1000.0 if _last_usec > 0 else dt * 1000.0
+	_last_usec = now
 	if _frames > 10:
-		_max_delta = maxf(_max_delta, dt)
-		if dt > 0.02:
+		_max_delta = maxf(_max_delta, wall / 1000.0)
+		_wall.append(wall)
+		if wall > 20.0:
 			_slow_frames += 1
-			if args.has("log-slow"):
-				_log_slow(dt)
+	if args.has("log-slow") and wall > _slow_ms:
+		_log_slow(dt, wall)
 	_physics_seen = Engine.get_physics_frames()
 	script_usec = 0
 	_builds = 0
 	if not _audit_new.is_empty():
 		_audit()
+	if holding:
+		return                             # сценарий — от конца загрузки
 	for action in _release:
 		var up := InputEventAction.new()
 		up.action = action
@@ -341,6 +359,9 @@ func _print_bench() -> void:
 	_report("bench (%s, seed %d): %.1f s, %d frames, avg %.1f FPS, worst frame %.1f ms, frames > 20 ms: %d, worst job slice %.1f ms" % [
 		"web" if OS.has_feature("web") else "desktop", run_seed, _elapsed, _frames, _frames / _elapsed,
 		_max_delta * 1000.0, _slow_frames, scheduler.max_frame_usec / 1000.0])
+	var f := frame_stats(_wall)
+	_report("bench: wall frames — p95 %.1f ms, p99 %.1f ms, max %.1f ms, > 33 ms: %d, > 50 ms: %d" % [
+		f["p95"], f["p99"], f["max"], f["over33"], f["over50"]])
 	_report("bench: chunks built %d, loaded now %d, distance %.0f tiles, avg speed %.2f tiles/s" % [
 		_chunks_built, streamer.loaded_count(), vehicle.total_distance, vehicle.total_distance / _elapsed])
 	_report("bench: avg throttle %.2f → fuel %.1f u/min → full tank of %s lasts %.1f min" % [
@@ -376,11 +397,12 @@ func _report(line: String) -> void:
 
 ## Медленный кадр и на что ушло время: скрипты кадра (process), физика (сколько шагов), задачи генерации,
 ## отрисовка, объекты и память. Если всё это мало, а кадр долгий — тормозит не игра, а движок или
-## браузер (сборка мусора, звук, драйвер). В вебе при бенчмарке строка уходит и на локальный сервер.
-func _log_slow(dt: float) -> void:
+## браузер (компиляция шейдеров, сборка мусора, звук, драйвер). wall — по часам, dt — урезанный движком;
+## «at» — время игры и время с запуска (часы). В вебе при бенчмарке строка уходит и на локальный сервер.
+func _log_slow(dt: float, wall: float) -> void:
 	var vp := get_viewport().get_viewport_rid()
-	var line := "slow frame %.1f ms at %.2f s — game steps %.1f ms ×%d, jobs %.1f ms, chunks built %d, render cpu %.1f / gpu %.1f ms, draws %d, objects %d" % [
-		dt * 1000.0, _elapsed,
+	var line := "slow frame %.1f ms (dt %.1f) at %.2f s (%.2f s since start) — game steps %.1f ms ×%d, jobs %.1f ms, chunks built %d, render cpu %.1f / gpu %.1f ms, draws %d, objects %d" % [
+		wall, dt * 1000.0, _elapsed, Time.get_ticks_msec() / 1000.0,
 		script_usec / 1000.0, Engine.get_physics_frames() - _physics_seen,
 		scheduler.last_frame_usec / 1000.0 if scheduler != null else 0.0, _builds,
 		RenderingServer.viewport_get_measured_render_time_cpu(vp),
@@ -390,6 +412,29 @@ func _log_slow(dt: float) -> void:
 	print(line)
 	if OS.has_feature("web") and _bench_time > 0.0:
 		_web_post("/log", line, false)
+
+
+## Статистика длительностей кадров (мс): p95, p99, максимум, число кадров дольше 33 и 50 мс.
+static func frame_stats(frames: PackedFloat32Array) -> Dictionary:
+	var sorted := frames.duplicate()
+	sorted.sort()
+	var n := sorted.size()
+	var at := func(q: float) -> float: return sorted[clampi(ceili(q * n) - 1, 0, n - 1)] if n > 0 else 0.0
+	var over33 := 0
+	var over50 := 0
+	for v in sorted:
+		over33 += int(v > 33.0)
+		over50 += int(v > 50.0)
+	return {"p95": at.call(0.95), "p99": at.call(0.99), "max": sorted[n - 1] if n > 0 else 0.0,
+			"over33": over33, "over50": over50}
+
+
+## Метка этапа загрузки и игры (замеры): строка «mark NAME T ms» в консоли; в браузере — ещё
+## performance.mark('ex:NAME') и window.__exPhase (их читает зонд tools/web/gl_probe.js). Дёшево — можно всегда.
+static func mark(mark_name: String) -> void:
+	print("mark %s %d ms" % [mark_name, Time.get_ticks_msec()])
+	if OS.has_feature("web"):
+		JavaScriptBridge.eval("performance.mark('ex:%s'); window.__exPhase = '%s';" % [mark_name, mark_name])
 
 
 ## POST на локальный сервер веб-сборки. base64 — для двоичных данных (снимки).
@@ -407,9 +452,16 @@ static func parse_args() -> Dictionary:
 		result[kv[0]] = kv[1] if kv.size() > 1 else ""
 	if OS.has_feature("web"):
 		var search: Variant = JavaScriptBridge.eval("window.location.search", true)
+		var host: Variant = JavaScriptBridge.eval("window.location.hostname", true)
 		if search is String:
-			result.merge(url_params(search, not OS.is_debug_build()), true)
+			result.merge(url_params(search, release_filter(OS.is_debug_build(), String(host))), true)
 	return result
+
+
+## Отбрасывать ли из адреса всё, кроме диагностики: да — в release-сборке на чужом хосте (опубликованная игра);
+## debug-экспорт и локальный сервер замеров (LOCAL_HOSTS) берут всё.
+static func release_filter(debug_build: bool, host: String) -> bool:
+	return not debug_build and not LOCAL_HOSTS.has(host)
 
 
 ## Параметры из адреса страницы (window.location.search: «?seed=7&bench=30»). release — опубликованная

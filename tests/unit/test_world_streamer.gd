@@ -88,3 +88,19 @@ func test_ridge_settles_after_chunk_reload() -> void:
 	assert_eq(diff, 0, "ridge settled back after the reload")
 	streamer.free()
 	jobs.free()
+
+
+func test_ready_fraction_grows_to_one() -> void:
+	# Экран загрузки: доля готовности мира — от 0 (ничего нет) до 1 (круг загрузки собран, ямы залиты).
+	var terrain := TerrainData.new()
+	var gen := TerrainGenerator.new(3, TerrainParams.new())
+	var q := TerrainQuery.new(terrain)
+	var jobs := JobScheduler.new()
+	var streamer := WorldStreamer.new(terrain, gen, q, jobs, TerrainMaterials.new())
+	var at := Vector2(16, 16)
+	assert_eq(streamer.ready_fraction(at), 0.0, "nothing loaded yet")
+	streamer.preload_around(at)
+	assert_eq(streamer.ready_fraction(at), 1.0, "everything around the point is ready")
+	assert_true(streamer.ready_around(at))
+	streamer.free()
+	jobs.free()

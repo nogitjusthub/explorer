@@ -6,6 +6,9 @@
 # Ниже отключено всё, чем игра не пользуется. Если в игре появится что-то из этого (ogg/mp3, RegEx,
 # физические тела, сеть, SVG, JPG, GLTF, RichTextLabel, Line2D…), включите модуль обратно (или уберите
 # класс из build_web_template.gdbuild) и пересоберите шаблон — иначе в вебе этого класса просто не будет.
+# Свои правки движка — tools/web/godot_patches/*.patch (по порядку имён); дерево исходников каждый раз
+# сбрасывается к тегу и правки накладываются заново. -NoPatches — собрать без них (для A/B). Прежний zip
+# сохраняется рядом как *.prev.zip, состав сборки — в web_nothreads_release.txt.
 param(
     [string]$Version = "4.7.2",
     [string]$EmsdkVersion = "4.0.20",   # ею собран официальный шаблон 4.7.2 (см. «Build configuration» в консоли браузера)
@@ -13,7 +16,8 @@ param(
     [int]$Jobs = 0,                     # 0 — половина логических ядер
     [string]$Python = "",               # путь к python.exe, если он не находится сам
     [switch]$FallbackText,              # см. ниже, у списка флагов
-    [switch]$NoClassProfile             # собрать без списка отключённых классов (build_web_template.gdbuild)
+    [switch]$NoClassProfile,            # собрать без списка отключённых классов (build_web_template.gdbuild)
+    [switch]$NoPatches                  # собрать без правок движка (tools/web/godot_patches)
 )
 
 $ErrorActionPreference = "Stop"
@@ -98,6 +102,20 @@ if (-not (Test-Path (Join-Path $src ".git"))) {
     }
 }
 
+# 1b. Свои правки движка: сначала чистое дерево тега, потом патчи по порядку.
+git -C $src checkout -q -- .
+$patches = @()
+if (-not $NoPatches) {
+    $patches = @(Get-ChildItem (Join-Path $root "tools\web\godot_patches") -Filter *.patch -ErrorAction SilentlyContinue | Sort-Object Name)
+}
+foreach ($p in $patches) {
+    git -C $src apply --check $p.FullName
+    if ($LASTEXITCODE -ne 0) { throw "Patch does not apply to ${tag}: $($p.Name)" }
+    git -C $src apply $p.FullName
+    if ($LASTEXITCODE -ne 0) { throw "Patch failed: $($p.Name)" }
+    Write-Host "Patch applied: $($p.Name)"
+}
+
 # 2. Emscripten SDK нужной версии.
 if (-not (Test-Path (Join-Path $emsdk ".git"))) {
     git clone https://github.com/emscripten-core/emsdk.git $emsdk
@@ -139,5 +157,13 @@ $zip = Get-ChildItem (Join-Path $src "bin") -Filter "godot.web.template_release.
 if (-not $zip) { throw "Template zip not found in $src\bin" }
 
 New-Item -ItemType Directory -Force (Split-Path $out -Parent) | Out-Null
+if (Test-Path $out) { Copy-Item $out ($out -replace '\.zip$', '.prev.zip') -Force }   # прежний — для A/B и отката
 Copy-Item $zip.FullName $out -Force
+# Паспорт сборки: тег, emsdk, правки (с хешами), профиль классов, флаги.
+$passport = @("Godot $tag, emsdk $EmsdkVersion, built $(Get-Date -Format 'yyyy-MM-dd HH:mm')")
+$passport += "class profile: " + $(if ($NoClassProfile) { "off" } else { "build_web_template.gdbuild" })
+$passport += "patches:" + $(if ($patches.Count -eq 0) { " none" } else { "" })
+foreach ($p in $patches) { $passport += "  $($p.Name) sha256 $((Get-FileHash $p.FullName -Algorithm SHA256).Hash.ToLower())" }
+$passport += "flags: " + ($flags -join " ")
+$passport | Set-Content -Encoding utf8 ($out -replace '\.zip$', '.txt')
 Write-Host ("Built {0} in {1:N0} min -> {2} ({3:N1} MB)" -f $zip.Name, $sw.Elapsed.TotalMinutes, $out, ((Get-Item $out).Length / 1MB))

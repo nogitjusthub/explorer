@@ -13,6 +13,8 @@ extends CanvasLayer
 signal started
 
 var waiting := false               ## мир ещё грузится: после «Высадки» держим затемнение с надписью
+var locked := false                ## под экраном загрузки: ввода нет, трюм прогревает свои варианты света
+var warmed := false                ## прогрев света трюма пройден (экран загрузки ждёт его)
 var _loading: Label
 signal vehicle_changed(id: StringName)
 
@@ -158,6 +160,7 @@ var _bay_lamps: Array[StandardMaterial3D] = []
 
 
 func _ready() -> void:
+	DevTools.mark("hangar_ready")
 	name = "HangarScreen"
 	layer = 20
 	# Непрозрачная подложка: пока трюм не отрисовал первый кадр (в браузере — дольше), сквозь пустую
@@ -521,10 +524,17 @@ static func _quad(st: SurfaceTool, a: Vector3, b: Vector3, c: Vector3, d: Vector
 		st.add_vertex(pts[i])
 
 
+## Шейдеры трюма — общие на сессию (по коду): после «Выход» (перезагрузка сцены) трюм строится заново, но
+## программы GPU уже скомпилированы — в браузере это секунды.
+static var _shaders: Dictionary[String, Shader] = {}
+
+
 static func _shader(code: String) -> Shader:
-	var s := Shader.new()
-	s.code = code
-	return s
+	if not _shaders.has(code):
+		var s := Shader.new()
+		s.code = code
+		_shaders[code] = s
+	return _shaders[code]
 
 
 # --- Интерфейс ----------------------------------------------------------------------------------
@@ -652,14 +662,49 @@ func _process(dt: float) -> void:
 	if _leave_t >= 0.0:
 		_leave(dt)
 		return
-	if not HelpScreen.shown(get_tree()):     # справка поверх — клавиши её (и Esc, закрывший её в этом кадре)
+	if not locked and not HelpScreen.shown(get_tree()):   # справка поверх — клавиши её (и Esc, закрывший её)
 		_keys()
 	_models[selected].root.rotation.y += SPIN * dt
 	for m in _models:
 		for rotor in m.spinners:
 			rotor.rotation.z += 6.0 * dt * float(m == _models[selected])
-	_apply_lights(dt)
+	if not warmed:
+		_warm_lights()
+	else:
+		_apply_lights(dt)
 	_ui.queue_redraw()
+
+
+## Прогрев под экраном загрузки: варианты шейдеров трюма при всех сочетаниях света, что бывают в игре
+## (иначе они компилируются на первом A / D и в момент «Высадки» — в браузере это рывок): все прожекторы;
+## прожекторы и зарево шахты под каждым люком (спуск) и одно зарево; все прожекторы погашены (машина, с которой выбор
+## ушёл); обычный свет. WARM_HOLD кадров на шаг; потом — как обычно, материалы трюма — в ShaderCache.
+const WARM_HOLD := 3
+var _warm_frame := 0
+
+
+func _warm_lights() -> void:
+	var step := _warm_frame / WARM_HOLD
+	_warm_frame += 1
+	var bays := _doors.size()
+	# Шаги: 0 — все прожекторы; 1…bays — прожекторы и зарево под люком; bays+1…2·bays — только зарево (его
+	# достаёт и то, куда прожектор не светит); 2·bays+1 — всё погашено; 2·bays+2 — обычный свет.
+	var glow_bay := step - 1 if step <= bays else step - 1 - bays
+	var spots_on := step <= bays
+	for i in _spots.size():
+		_spots[i].visible = spots_on
+		_spots[i].light_energy = SPOT_ON
+	_shaft_glow.visible = step >= 1 and step <= 2 * bays
+	if _shaft_glow.visible:
+		_shaft_glow.position = Vector3(_doors[glow_bay].position.x, -1.5, 0)
+		_shaft_glow.light_energy = GLOW_ON
+	if step == 2 * bays + 2:
+		_apply_lights(0.0)                       # обычный свет — тоже кадрами под экраном
+	if step > 2 * bays + 2:
+		warmed = true
+		_shaft_glow.visible = false
+		ShaderCache.keep(_vp)
+		_apply_lights(0.0)
 
 
 ## Клавиши трюма: A / D — машина, F / Enter — высадка. Пока открыто окошко громкости: A / D — громкость,
@@ -685,7 +730,7 @@ func _keys() -> void:
 
 ## Тап или клик по машине — выбрать её.
 func _unhandled_input(event: InputEvent) -> void:
-	if _leave_t >= 0.0 or HelpScreen.shown(get_tree()) or not UiKit.is_click(event):
+	if locked or _leave_t >= 0.0 or HelpScreen.shown(get_tree()) or not UiKit.is_click(event):
 		return
 	if _vol_panel.visible:
 		_toggle_volume()                     # клик мимо окошка громкости — закрыть его
@@ -734,9 +779,10 @@ func _click() -> void:
 
 
 func _start() -> void:
-	if _leave_t >= 0.0 or HelpScreen.shown(get_tree()):
+	if locked or _leave_t >= 0.0 or HelpScreen.shown(get_tree()):
 		return
 	_leave_t = 0.0
+	DevTools.mark("hangar_start")
 	_click()
 	_lift_snd.stream = Sfx.hatch_lift()               # не успел в фоне — досинтезируется сейчас
 	_lift_snd.play()

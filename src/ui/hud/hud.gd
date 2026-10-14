@@ -53,7 +53,7 @@ var pager: Pager
 
 
 func _ready() -> void:
-	layer = 5
+	layer = 6                            # над картой мира (5)
 	_font = UiKit.FONT
 	_canvas = Control.new()
 	_canvas.set_anchors_preset(Control.PRESET_FULL_RECT)

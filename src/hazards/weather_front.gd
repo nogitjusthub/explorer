@@ -78,6 +78,11 @@ func begin(v: Variant) -> void:
 	_update_globals()
 
 
+## Радиус просвета вокруг машины внутри массы (weather_clear в шейдере): дальше — сплошная пелена.
+func clear_radius() -> float:
+	return rules.dust_visibility if variant == Variant.DUST else rules.fog_visibility
+
+
 ## Плотность массы в точке (x, z) на высоте y — копия weather_density() из шейдера (без шумового края).
 func density(p: Vector2, y: float = -INF) -> float:
 	if ended:

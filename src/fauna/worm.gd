@@ -3,18 +3,24 @@ extends Creature
 ## Песчаный червь (GDD §5.4) — как в «Дюне». Живёт под рыхлым грунтом — песок (SAND) и грунт (GROUND)
 ## в любом биоме, не под камнем, кристаллической породой и водой — и только там ходит (habitat);
 ## под землёй уступы ему не помеха. Появляется только в песке (spawn_ground), гонится и по грунту.
-## Пока не слышит машину — незаметно, без вала, дрейфует к ней (worm_idle_speed), если она на его грунте.
+## Слышит едущую машину дальше прочей фауны — как в «Дюне» на шаги: в радиусе worm_hear_r × шум (стоящую — нет,
+## крадущуюся — только вблизи). Пока не слышит — ждёт на месте (не подкрадывается: иначе сидел бы под стоящей
+## машиной и бросался, едва она тронется); не услышал за worm_wait_s — уходит в глубину.
 ## Слышит машину на своём грунте — идёт к ней под землёй: грунт над ним вспучивается валом (деформация рельефа,
 ## «обратная» борозде смерча, не выше яруса) и оседает обратно в RIDGE_KEEP тайлах позади; летит пыль,
 ## гудит. Деревья на пути валятся.
-## Догнал — за worm_telegraph_s до броска песок вокруг машины трескается кольцом и дрожит. Бросок:
+## Бросок — не раньше, чем вал шёл HUNT_MIN_S (до того червь держится в HOLD_OFF от машины): даже начав погоню
+## рядом (после укуса, машина наехала на него), он сначала виден и слышен. Догнал — за worm_telegraph_s до
+## броска песок вокруг машины трескается кольцом и дрожит. Бросок:
 ## огромный червь вырывается прямо под машиной — не строго вверх, а качаясь, как смерч, — с раскрытой
 ## пастью: три вытянутые челюсти с зазубренными краями (low-poly из треугольников), внутри кольцо зубов
 ## и глотка; челюсти захлопываются над машиной (урон worm_damage) и выплёвывают её на worm_toss тайла —
 ## в полёте машина наклонена в сторону броска; червь вздымается и уходит обратно, оставив яму.
 ## Сомкнутые челюсти — заострённая морда. Тело — «позвонки»: крупные 8-гранные и узкие 7-гранные
-## диски вперемешку, каждый повёрнут вокруг оси на свой угол. Спасение — уйти с песка (через LOSE_S червь теряет след) или уехать: он медленнее
-## ровера и ховера, и если fauna_give_up_s не может подобраться ближе — уходит в глубину и пропадает.
+## диски вперемешку, каждый повёрнут вокруг оси на свой угол.
+## Услышав машину, червь знает, где она, и погоню не бросает (потери интереса нет). Спасение — уйти с его грунта
+## (камень, кристалл, вода) и переждать LOSE_S — тогда он уходит в глубину; или гнать и уворачиваться от бросков.
+## Упёрся по прямой в камень — скользит вдоль; не сдвинуться совсем — тоже теряет след за LOSE_S.
 
 enum State { IDLE, HUNT, TELEGRAPH, STRIKE, COOLDOWN }
 
@@ -34,7 +40,7 @@ const BITE_S := 0.55                     ## челюсти захлопнули�
 const HOLD_S := 1.6                      ## держится над песком, потом уходит
 const TOP_Y := 3.6                       ## насколько вздымается голова над песком
 const COOLDOWN_S := 4.0
-const LOSE_S := 4.0
+const LOSE_S := 15.0                     ## машина вне его грунта (или к ней не сдвинуться) столько — уходит
 const STRIKE_R := 1.6
 const JAW_OPEN := -1.55                  ## лепесток откинут наружу почти плашмя
 const DISCS := 18                        ## тело — диски-«позвонки», крупные и узкие вперемешку
@@ -44,6 +50,8 @@ const JAW_LEN := 2.1                     ## длина челюсти: сомк�
 const TOSS_TILT := 0.55                  ## рад — наклон машины в полёте после броска
 const LEAN := 0.12                       ## рад — бросок не строго вверх
 const RIDGE_EVERY_S := 0.25
+const HUNT_MIN_S := 1.5                  ## вал, пыль и гул идут хотя бы столько перед броском
+const HOLD_OFF := 2.0                    ## пока HUNT_MIN_S не прошло, ближе к машине не подходит
 const HUM_DB := -14.0                    ## гул под песком — заметно тише гула землетрясения (−2 дБ)
 const HUM_HEAR_TILES := 14.0             ## дальше — не слышно (как остальную фауну)
 const HUM_FADE_S := 0.4                  ## гул нарастает и стихает за столько
@@ -54,6 +62,8 @@ var state := State.IDLE
 
 var _timer := 0.0
 var _lost := 0.0
+var _hunt_t := 0.0                       ## сколько идёт погоня (вал виден)
+var _wait := 0.0                         ## сколько ждёт, не слыша машину
 var _strike_at := Vector2.ZERO
 var _ground := 0.0
 var _bitten := false
@@ -84,7 +94,9 @@ func setup(at: Vector2) -> void:
 	_body.visible = false
 
 
-var met := false                         ## гнался за машиной (встреча была) — FaunaDirector выдержит паузу
+## Слышит ли машину в p: едущую — в радиусе worm_hear_r × шум (0…1 по скорости), стоящую — нет.
+func hears(p: Vector2) -> bool:
+	return pos.distance_to(p) <= noise.vehicle_level * rules.worm_hear_r
 
 
 func on_sand(p: Vector2) -> bool:
@@ -109,32 +121,29 @@ func step(dt: float) -> void:
 	var vp := vehicle.state.pos
 	match state:
 		State.IDLE:
-			if on_sand(vp) and noise.hears_vehicle(pos):
+			if on_sand(vp) and hears(vp):
 				start_hunt()
-			elif on_sand(vp):
-				var np := pos + (vp - pos).limit_length(rules.worm_idle_speed * dt)
-				if on_sand(np):
-					pos = np
-		State.HUNT:
-			if not on_sand(vp):
-				_lost += dt
-				if _lost > LOSE_S:
-					_leave()
-			elif lost_interest(dt, pos.distance_to(vp)):
-				_leave()
 			else:
-				_lost = 0.0
+				_wait += dt
+				if _wait > rules.worm_wait_s:
+					_leave()
+		State.HUNT:
+			_hunt_t += dt
+			var stuck := not on_sand(vp)
+			if not stuck:
 				var delta := vp - pos
 				if delta.length() > 0.01:
 					_heading = delta.normalized()
-				var np := pos + delta.limit_length(rules.worm_speed * dt)
-				if on_sand(np):
-					pos = np
+				var keep := HOLD_OFF if _hunt_t < HUNT_MIN_S else 0.0
+				stuck = not _advance(delta.limit_length(minf(rules.worm_speed * dt, maxf(delta.length() - keep, 0.0))))
 				_ridge_timer -= dt
 				if _ridge_timer <= 0.0:
 					_ridge_timer = RIDGE_EVERY_S
 					_raise_ridge()
-			if pos.distance_to(vp) < 1.0 and on_sand(vp):
+			_lost = _lost + dt if stuck else 0.0
+			if _lost > LOSE_S:
+				_leave()
+			elif pos.distance_to(vp) < 1.0 and on_sand(vp) and _hunt_t >= HUNT_MIN_S:
 				state = State.TELEGRAPH
 				_timer = rules.worm_telegraph_s
 				_strike_at = vp
@@ -163,11 +172,13 @@ func step(dt: float) -> void:
 				_timer = COOLDOWN_S
 		State.COOLDOWN:
 			_timer -= dt
-			if _timer <= 0.0:
-				if on_sand(vp):
-					start_hunt()
-				else:
-					_leave()
+			_lost = _lost + dt if not on_sand(vp) else 0.0
+			if _lost > LOSE_S:
+				_leave()
+			elif _timer <= 0.0:
+				state = State.HUNT                   # знает, где машина, — снова в погоню (бросок — после HUNT_MIN_S)
+				_hunt_t = 0.0
+				_ridge_from = pos
 	var underground := state == State.HUNT or state == State.TELEGRAPH
 	_update_hum(dt, underground)
 	if not underground:
@@ -177,6 +188,18 @@ func step(dt: float) -> void:
 		_tint_dust()
 		_wake.position = Vector3(pos.x, ground_y(pos) + 0.1, pos.y)
 		_wake.rotation.y = atan2(-_heading.x, -_heading.y)
+
+
+## Шаг погони по своему грунту: прямо, а упёрся (камень, вода) — вдоль препятствия по одной из осей.
+## false — не сдвинуться никуда (нулевой шаг — не упёрся: червь сам держит дистанцию).
+func _advance(move: Vector2) -> bool:
+	if move.length_squared() < 1e-8:
+		return true
+	for m: Vector2 in [move, Vector2(move.x, 0.0), Vector2(0.0, move.y)]:
+		if m.length_squared() > 1e-8 and on_sand(pos + m):
+			pos += m
+			return true
+	return false
 
 
 ## Гул под песком: ровная петля, пока червь идёт под землёй (охота, телеграф), — тише гула землетрясения,
@@ -237,8 +260,8 @@ func start_hunt() -> void:
 	state = State.HUNT
 	aggressive = true
 	_lost = 0.0
+	_hunt_t = 0.0
 	reset_interest()
-	met = true
 	_ridge_from = pos
 	EventBus.fauna_alerted.emit(&"worm", Vector3(pos.x, ground_y(pos), pos.y))
 

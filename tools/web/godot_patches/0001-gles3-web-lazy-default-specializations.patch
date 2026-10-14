@@ -1,0 +1,19 @@
+diff --git a/drivers/gles3/shader_gles3.cpp b/drivers/gles3/shader_gles3.cpp
+index 4fe333e..60c1265 100644
+--- a/drivers/gles3/shader_gles3.cpp
++++ b/drivers/gles3/shader_gles3.cpp
+@@ -709,6 +709,14 @@ void ShaderGLES3::_initialize_version(Version *p_version) {
+ 	p_version->variants.reserve(variant_count);
+ 	for (int i = 0; i < variant_count; i++) {
+ 		p_version->variants.push_back(AHashMap<uint64_t, Version::Specialization>());
++#ifdef WEB_ENABLED
++		// Explorer patch: on the web every program is compiled and linked synchronously on the main thread
++		// (no program cache, link status is checked at once), and the default specialization of a variant is
++		// rarely the one actually drawn. Measured: 191 of 309 programs were never drawn and took 85 % of the
++		// load. Leave the per-variant maps empty; _version_bind_shader compiles the requested specialization
++		// on first bind ("Compile on the spot").
++		continue;
++#endif
+ 		Version::Specialization spec;
+ 		_compile_specialization(spec, i, p_version, specialization_default_mask);
+ 		p_version->variants[i].insert(specialization_default_mask, spec);

@@ -33,3 +33,25 @@ func test_forced_events_are_separate_lists() -> void:
 	assert_eq(a.size(), 1)
 	assert_eq(b.size(), 2, "each director consumes its own copy")
 	dev.free()
+
+
+func test_release_filter_only_for_published_release() -> void:
+	assert_true(DevTools.release_filter(false, "nogitjusthub.github.io"), "published release keeps diagnostics only")
+	assert_false(DevTools.release_filter(false, "127.0.0.1"), "local release server takes every parameter")
+	assert_false(DevTools.release_filter(false, "localhost"))
+	assert_false(DevTools.release_filter(true, "nogitjusthub.github.io"), "debug export takes every parameter")
+
+
+func test_frame_stats() -> void:
+	var frames := PackedFloat32Array()
+	for i in 100:
+		frames.append(10.0)
+	frames[0] = 40.0
+	frames[1] = 60.0
+	var f := DevTools.frame_stats(frames)
+	assert_near(f["max"], 60.0, 1e-4)
+	assert_eq(f["over33"], 2)
+	assert_eq(f["over50"], 1)
+	assert_near(f["p95"], 10.0, 1e-4)
+	assert_near(f["p99"], 40.0, 1e-4)
+	assert_eq(DevTools.frame_stats(PackedFloat32Array())["max"], 0.0, "no frames — zeros")

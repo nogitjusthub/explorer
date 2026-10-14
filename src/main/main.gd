@@ -12,7 +12,8 @@ const LANDING_TRIES := 40
 const LANDING_DRY := 5            ## капсула садится не ближе 5 тайлов к воде (если такое место нашлось)
 const SPAWN_HEADING := -PI * 0.75
 const SPAWN_PAD_OFFSET := 2.0     ## без десанта машина стоит на краю площадки — в зоне погрузки, не под челноком
-const HANGAR_JOB_BUDGET_USEC := 12000   ## в трюме кадр почти пустой — мир догружается быстрее
+const LOADING_JOB_BUDGET_USEC := 30000  ## под экраном загрузки кадров не видно — мир догружается с большим бюджетом
+const LOADING_SYNTH_USEC := 20000       ## …и звуки синтезируются быстрее
 
 var run_seed: int
 var terrain: TerrainData
@@ -35,6 +36,7 @@ var sandbox := false               ## автопилот: забег беско�
 
 var _toast: Toast
 var _pause: PauseOverlay
+var _map: WorldMap
 var _help: HelpScreen
 var _no_drop := false
 var _sun: DirectionalLight3D
@@ -47,10 +49,15 @@ var _hangar: HangarScreen
 var _warmup: Warmup
 var _world_pending := false        ## мир вокруг старта ещё грузится в фоне (пока игрок в трюме)
 var _begin_waiting := false        ## игрок уже нажал «Высадка» — ждём мир за затемнением
+var _loading: LoadingScreen        ## экран загрузки (мир, прогрев, звуки, трюм) — до трюма и после «Заново»
+var _begin_after_loading := false  ## «Заново»: после загрузки — сразу десант
+var _sounds_total := 1             ## звуков в очереди синтеза в начале загрузки (для прогресса)
+var _audio: AudioDirector
 var _job_budget := 0
 
 
 func _ready() -> void:
+	DevTools.mark("main_ready")
 	var args := DevTools.parse_args()
 	run_seed = int(args.get("seed", str(int(Time.get_unix_time_from_system()) % 100000)))
 	print("Explorer — seed %d (Godot %s)" % [run_seed, Engine.get_version_info().string])
@@ -66,9 +73,10 @@ func _ready() -> void:
 			vehicle.autopilot = dev.make_autopilot()
 		_begin()
 	elif Settings.quick_restart:
-		# «Заново» на экране итога: тот же класс, сразу десант — без трюма с выбором.
+		# «Заново» на экране итога: тот же класс, сразу десант — без трюма с выбором; сначала — экран загрузки
+		# (шейдеры уже прогреты, догружается только мир).
 		Settings.quick_restart = false
-		_begin()
+		_begin_after_loading = true
 	else:
 		vehicle.control_enabled = false
 		var hangar := HangarScreen.new()
@@ -82,8 +90,19 @@ func _ready() -> void:
 		hangar.started.connect(_begin)
 		rig.turn_enabled = false
 		hud.visible = false
+		hangar.locked = true                     # ввод — после экрана загрузки
 		add_child(hangar)
 		_hangar = hangar
+	if _world_pending:
+		_loading = LoadingScreen.new()
+		add_child(_loading)
+		dev.holding = true                       # часы сценариев — от конца загрузки
+		_audio.synth_budget_usec = LOADING_SYNTH_USEC
+		_sounds_total = maxi(Sfx.pending(), 1)
+		_update_loading()
+	else:
+		LoadingScreen.web_done()                 # отладочный старт без экрана — убрать и оболочку страницы
+	DevTools.mark("world_built")
 
 
 func _build_world(args: Dictionary) -> void:
@@ -133,12 +152,13 @@ func _build_world(args: Dictionary) -> void:
 	streamer.chunk_removed.connect(pickups.on_chunk_removed)
 
 	var spawn := _spawn_point(args)
-	# Обычный старт — через трюм: он показывается сразу, а мир вокруг точки старта догружается задачами,
-	# пока игрок выбирает машину (в браузере синхронная загрузка — это секунды чёрного экрана).
-	_world_pending = not dev.skips_start() and not Settings.quick_restart
+	# Обычный старт и «Заново» — через экран загрузки: мир вокруг точки старта догружается задачами с большим
+	# бюджетом, пока под экраном прогреваются шейдеры и синтезируются звуки (синхронно в браузере — замершая
+	# страница). Отладочные старты без трюма — синхронно, как раньше.
+	_world_pending = not dev.skips_start()
 	if _world_pending:
 		_job_budget = scheduler.budget_usec
-		scheduler.budget_usec = maxi(_job_budget, HANGAR_JOB_BUDGET_USEC)
+		scheduler.budget_usec = maxi(_job_budget, LOADING_JOB_BUDGET_USEC)
 	else:
 		var t0 := Time.get_ticks_usec()
 		streamer.preload_around(spawn)
@@ -171,6 +191,18 @@ func _build_world(args: Dictionary) -> void:
 	hud.radar.vehicle = vehicle
 	hud.radar.camera = rig.camera
 
+	# Карта мира: память о рельефе и виденном пишется весь забег (и о чанках, загруженных до этой строки).
+	_map = WorldMap.new()
+	_map.memory = MapMemory.new(terrain)
+	_map.pickups = pickups
+	_map.vehicle = vehicle
+	_map.rig = rig
+	_map.hud = hud
+	streamer.chunk_built.connect(_map.memory.chunk_built)
+	for coord in terrain.chunks:
+		_map.memory.chunk_built(coord)
+	add_child(_map)
+
 	shuttles = ShuttleController.new()
 	shuttles.vehicle = vehicle
 	shuttles.query = query
@@ -186,6 +218,7 @@ func _build_world(args: Dictionary) -> void:
 	threats.rules = rules
 	threats.vehicle = vehicle
 	threats.query = query
+	_map.threats = threats                     # видимость в непогоду — разведанное на карте
 	threats.terrain = terrain
 	threats.generator = generator
 	threats.streamer = streamer
@@ -241,6 +274,7 @@ func _build_world(args: Dictionary) -> void:
 	var audio := AudioDirector.new()
 	audio.vehicle = vehicle
 	add_child(audio)
+	_audio = audio
 	_toast = Toast.new()
 	add_child(_toast)
 
@@ -364,6 +398,7 @@ func _preparing() -> bool:
 
 
 func _begin() -> void:
+	DevTools.mark("begin")
 	if _hangar != null and _preparing():
 		# «Высадка» раньше, чем мир готов: трюм держит затемнение с надписью, пока не догрузится.
 		_begin_waiting = true
@@ -393,6 +428,7 @@ func _begin() -> void:
 ## Касание капсулы: мягкая посадка на тормозных двигателях — пыль, лёгкая тряска, глухой удар; фауна
 ## рядом разбегается (шум двигателей).
 func _on_drop_landed() -> void:
+	DevTools.mark("drop_landed")
 	vehicle.place(_spawn, SPAWN_HEADING)
 	vehicle.visible = true
 	fauna.scare(_spawn, 15.0)
@@ -401,9 +437,11 @@ func _on_drop_landed() -> void:
 
 
 func _start_run() -> void:
+	DevTools.mark("run_start")
 	phase = Phase.RUN
 	_pause.enabled = true
 	_help.pause_game = true
+	_map.enabled = true
 	hud.visible = true
 	dev.mark_start()
 	vehicle.control_enabled = true
@@ -442,8 +480,36 @@ func _step(dt: float) -> void:
 	hud.radar.jammed = threats.radar_jammed()
 
 
+## Экран загрузки: прогресс по мир / прогрев / звуки / свет трюма; всё готово — экран уходит, трюм открывается
+## (или «Заново» — сразу десант).
+func _update_loading() -> void:
+	var world := 1.0 if not _world_pending else streamer.ready_fraction(_spawn)
+	var warm := _warmup.progress() if _warmup != null and is_instance_valid(_warmup) else 1.0
+	var sounds := 1.0 - float(Sfx.pending()) / _sounds_total
+	var hangar_ready := _hangar == null or not is_instance_valid(_hangar) or _hangar.warmed
+	var p := 0.4 * world + 0.45 * warm + 0.1 * sounds + (0.05 if hangar_ready else 0.0)
+	var text := "сборка мира" if world < 1.0 else ("прогрев графики" if warm < 1.0 else ("звуки" if sounds < 1.0 else "трюм"))
+	_loading.set_progress(p, text)
+	if not _preparing() and Sfx.pending() == 0 and hangar_ready:
+		_on_loaded()
+
+
+func _on_loaded() -> void:
+	DevTools.mark("loading_done")
+	dev.holding = false
+	_loading.finish()
+	_loading = null
+	_audio.synth_budget_usec = AudioDirector.SYNTH_BUDGET_USEC
+	if _hangar != null and is_instance_valid(_hangar):
+		_hangar.locked = false
+	if _begin_after_loading:
+		_begin_after_loading = false
+		_begin()
+
+
 ## Мир вокруг старта догрузился (трюм): точка высадки, машина на место, обычный бюджет задач.
 func _on_world_ready() -> void:
+	DevTools.mark("world_ready")
 	_world_pending = false
 	print("world ready in background: %d chunks, %d ms after start" % [streamer.loaded_count(), Time.get_ticks_msec()])
 	scheduler.budget_usec = _job_budget
@@ -458,6 +524,8 @@ func _on_world_ready() -> void:
 func _process(dt: float) -> void:
 	if _world_pending and streamer.ready_around(_spawn):
 		_on_world_ready()
+	if _loading != null:
+		_update_loading()
 	if _begin_waiting and not _preparing():
 		_begin_waiting = false
 		if _hangar != null and is_instance_valid(_hangar):
@@ -561,6 +629,8 @@ func _on_run_ended(cause: StringName) -> void:
 	phase = Phase.OVER
 	_pause.enabled = false
 	_help.pause_game = false
+	_map.enabled = false
+	_map.set_open(false)
 	shuttles.stop()                    # открытое меню челнока или вызова закрывается вместе с забегом
 	vehicle.control_enabled = false
 	if cause == &"whirlpool":
@@ -575,6 +645,7 @@ func _on_run_ended(cause: StringName) -> void:
 
 
 func _show_results() -> void:
+	DevTools.mark("results")
 	phase = Phase.RESULTS
 	hud.visible = false
 	var screen := ResultsScreen.new(run.result(), Leaderboard.new())
@@ -585,5 +656,6 @@ func _show_results() -> void:
 
 ## Новый забег: quick — сразу десант на той же машине («Заново»), иначе — в трюм к выбору («Выход»).
 func _restart(quick: bool) -> void:
+	DevTools.mark("restart_quick" if quick else "restart_exit")
 	Settings.quick_restart = quick
 	get_tree().reload_current_scene()

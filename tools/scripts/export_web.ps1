@@ -73,5 +73,8 @@ if ($exportCode -ne 0 -or -not (Test-Path (Join-Path $out "index.html"))) {
 Get-ChildItem $out | Select-Object Name, Length | Format-Table -AutoSize
 
 if ($Serve) {
-    python (Join-Path $root "tools\scripts\web_server.py") $Port
+    # «python» в Windows бывает заглушкой Магазина — тогда через лаунчер py.
+    $server = Join-Path $root "tools\scripts\web_server.py"
+    $py = Get-Command py -ErrorAction SilentlyContinue
+    if ($py) { & py -3 $server $Port } else { python $server $Port }
 }

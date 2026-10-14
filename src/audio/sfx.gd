@@ -147,6 +147,11 @@ static func named(key: StringName) -> AudioStreamWAV:
 	return _cache[key]
 
 
+## Сколько звуков ещё ждут фонового синтеза (экран загрузки).
+static func pending() -> int:
+	return _queue.size()
+
+
 ## Звук готов (синтезирован).
 static func is_ready(key: StringName) -> bool:
 	return _cache.has(key)

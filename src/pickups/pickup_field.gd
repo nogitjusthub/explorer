@@ -19,6 +19,8 @@ var _by_chunk: Dictionary[Vector2i, PackedInt64Array] = {}  ## чанк → кл
 var _taken: Dictionary[int, bool] = {}                      ## собранные статичные находки
 var _dropped: Dictionary[int, StringName] = {}              ## выпавшие из трюма
 var _canisters: Dictionary[Vector2i, Vector2i] = {}         ## чанк → тайл канистры (или NONE_TILE)
+var _remembered: Dictionary[int, StringName] = {}           ## находки выгруженных чанков (для карты): пока чанк
+                                                            ## выгружен, их никто не берёт и не двигает
 var _nodes: Dictionary[Vector2i, Node3D] = {}
 var _meshes: Dictionary[StringName, Mesh] = {}
 
@@ -47,11 +49,14 @@ func meshes() -> Array[Mesh]:
 func on_chunk_built(coord: Vector2i) -> void:
 	if not _by_chunk.has(coord):
 		_populate(coord)
+		for key in _by_chunk[coord]:
+			_remembered.erase(key)
 	_rebuild(coord)
 
 
 func on_chunk_removed(coord: Vector2i) -> void:
 	for key in _by_chunk.get(coord, PackedInt64Array()):
+		_remembered[key] = _active[key]
 		_active.erase(key)
 	_by_chunk.erase(coord)
 	var node: Node3D = _nodes.get(coord)
@@ -85,6 +90,17 @@ func within(pos: Vector2, radius: float) -> Array[Dictionary]:
 		var p := Vector2(t.x + 0.5, t.y + 0.5)
 		if p.distance_squared_to(pos) <= r2:
 			result.append({"key": key, "kind": _active[key], "pos": p})
+	return result
+
+
+## Все известные находки — в загруженных чанках и в выгруженных (такими, какими их оставили): для карты.
+## [{key, kind, pos}, ...].
+func known() -> Array[Dictionary]:
+	var result: Array[Dictionary] = []
+	for src: Dictionary[int, StringName] in [_active, _remembered]:
+		for key in src:
+			var t := DiffStore.key_tile(key)
+			result.append({"key": key, "kind": src[key], "pos": Vector2(t.x + 0.5, t.y + 0.5)})
 	return result
 
 

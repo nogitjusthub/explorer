@@ -102,7 +102,8 @@ func step(dt: float) -> void:
 	noise.tick(dt)
 	for i in range(forced.size() - 1, -1, -1):
 		if _time >= forced[i]["at"]:
-			_force(forced[i]["kind"])
+			if _force(forced[i]["kind"]):
+				DevTools.mark("event:%s" % forced[i]["kind"])    # этап для замеров (web_bench)
 			forced.remove_at(i)
 	_update_fields(dt)
 	if _worm_wait < 0.0:
@@ -123,8 +124,8 @@ func step(dt: float) -> void:
 		if c is Stargazer:
 			continue                      # троеглазки уходят вместе с чанком
 		if c.finished or (not c.aggressive and c.pos.distance_to(s.pos) > rules.fauna_despawn):
-			if c is Worm and (c as Worm).met:
-				_worm_wait = rules.worm_gap_s
+			if c is Worm:
+				_worm_wait = rules.worm_gap_s       # следующий червь — не раньше чем через столько после ухода этого
 			if c is LakeMonster and (c as LakeMonster).met:
 				_nessie_wait = rules.nessie_gap_s
 			c.queue_free()
@@ -395,31 +396,33 @@ func _on_emergency(state: StringName, _seconds: float, _penalty: int) -> void:
 	_emergency_state = state
 
 
-## Отладка: существо рядом с машиной, сразу в атаке.
-func _force(kind: StringName) -> void:
+## Отладка: существо рядом с машиной, сразу в атаке; false — места нет (или событие не фауны).
+func _force(kind: StringName) -> bool:
 	match kind:
 		&"hoppers":
 			var at: Variant = _ring_point(func(t: Vector2i) -> bool: return _dry(t), FORCED_DIST, FORCED_DIST + 3.0)
 			if at != null:
 				_spawn_pack(at, rules.pack_max).wake()
+				return true
 		&"worm":
 			var at: Variant = _scan_point(func(t: Vector2i) -> bool: return Worm.spawn_ground(query, t), 3.0, 25.0)
 			if at != null:
 				_spawn_worm(at).start_hunt()
-			else:
-				print("fauna: no sand for a worm near the vehicle")
+				return true
+			print("fauna: no sand for a worm near the vehicle")
 		&"shellback":
 			var at: Variant = _ring_point(func(t: Vector2i) -> bool: return _dry(t), 10.0, 12.0)
 			if at != null:
 				var sb := _spawn_shellback(at)
 				sb.state = Shellback.State.APPROACH
 				sb.aggressive = true
+				return true
 		&"shark":
 			var at: Variant = _scan_point(func(t: Vector2i) -> bool: return _shark_ground(t), 3.0, 15.0)
 			if at != null:
 				_spawn_shark(at).start_hunt()
-			else:
-				print("fauna: no quicksand (or water next to it) near the vehicle")
+				return true
+			print("fauna: no quicksand (or water next to it) near the vehicle")
 		&"ray":
 			var at: Variant = _scan_point(func(t: Vector2i) -> bool: return Stargazer.habitat(query, t), 2.0, 8.0)
 			if at != null:
@@ -428,14 +431,15 @@ func _force(kind: StringName) -> void:
 				var list: Array = _rays.get(coord, [])
 				list.append(_spawn_ray(at))
 				_rays[coord] = list
-			else:
-				print("fauna: no shallow water near the vehicle")
+				return true
+			print("fauna: no shallow water near the vehicle")
 		&"nessie":
 			var at: Variant = _scan_point(func(t: Vector2i) -> bool: return LakeMonster.habitat(query, t), 6.0, 18.0)
 			if at != null:
 				_spawn_nessie(at).start_hunt()
-			else:
-				print("fauna: no deep water near the vehicle")
+				return true
+			print("fauna: no deep water near the vehicle")
+	return false
 
 
 ## Отладка: ближайший к r_min тайл вокруг машины в кольце r_min…r_max, годный для вида (полный перебор,

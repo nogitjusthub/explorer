@@ -40,6 +40,8 @@ var _spot := Vector3.ZERO                ## куда смотрит камера
 var _cam: Camera3D
 var _light: OmniLight3D
 var _t0 := 0
+var _total := 1                          ## образцов всего (с взглядом на мир) — для экрана загрузки
+var _taken := 0
 
 
 func _ready() -> void:
@@ -66,6 +68,12 @@ func _ready() -> void:
 			_whirlpool, _shuttle.bind(ShuttleCraft.Kind.MAIN), _shuttle.bind(ShuttleCraft.Kind.EMERGENCY), _drop_pod,
 			_vehicles]
 	_t0 = Time.get_ticks_msec()
+	_total = _makers.size() + (1 if wait_world else 0)
+
+
+## Доля пройденных образцов (экран загрузки): 1 — прогрев закончен.
+func progress() -> float:
+	return 1.0 if done else clampf(float(_taken) / maxi(_total, 1), 0.0, 0.99)
 
 
 ## Мир вокруг старта догружен: последним образцом — взгляд на него (p — точка старта на рельефе).
@@ -89,6 +97,8 @@ func _process(_dt: float) -> void:
 		return
 	_light.visible = true
 	var make: Callable = _makers.pop_front()
+	_taken += 1
+	DevTools.mark("warmup:" + make.get_method())
 	_sample = make.call()
 	_hold = HOLD_FRAMES
 	if _sample == null:
@@ -103,6 +113,7 @@ func _process(_dt: float) -> void:
 
 
 func _finish() -> void:
+	DevTools.mark("warmup_done")
 	done = true
 	ShaderCache.warmed = true
 	print("warmup: %d materials kept, %d ms" % [ShaderCache.kept_count(), Time.get_ticks_msec() - _t0])
