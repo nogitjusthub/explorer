@@ -88,7 +88,7 @@ func test_ambush_in_quicksand() -> void:
 	var f := TerrainFixture.new(4)
 	_mire(f, 4, 10, 20, 11)
 	var start := Vector2(5.5, 10.5)
-	var s := _make(f, start, Vector2(12.5, 16.5))
+	var s := _make(f, start, Vector2(10.5, 14.5))              # у его места (shark_chase_r), вне прыжка
 	s.start_hunt()
 	var t := 0.0
 	while t < s.rules.fauna_give_up_s + 4.0:
@@ -168,8 +168,8 @@ func test_stalks_through_water_and_gives_up() -> void:
 	for tx in range(4, 21):
 		f.set_flat(tx, 10, 3)
 		f.set_water(tx, 10, 4)       # мелкая вода вдоль зыбуна — тоже ареал
-	# Машина на суше в 6 тайлах от воды — не допрыгнуть.
-	var s := _make(f, Vector2(5.5, 10.5), Vector2(11.5, 16.5))
+	# Машина на суше в 5 тайлах от воды — не допрыгнуть (но у его места — не дальше shark_chase_r).
+	var s := _make(f, Vector2(5.5, 10.5), Vector2(9.5, 15.5))
 	s.start_hunt()
 	assert_eq(s.state, MireShark.State.STALK, "hunt starts at once")
 	var outside := 0
@@ -186,11 +186,11 @@ func test_stalks_through_water_and_gives_up() -> void:
 			outside += 1
 		if s.state != MireShark.State.STALK:
 			leaped = true
-		if arrived < 0.0 and s.pos.distance_to(Vector2(11.5, 10.9)) < 0.5:
+		if arrived < 0.0 and s.pos.distance_to(Vector2(9.5, 10.9)) < 0.5:
 			arrived = t
 	assert_eq(outside, 0, "swims only in the water of its habitat")
 	assert_false(leaped, "no wind-up when the vehicle is out of reach")
-	assert_near(s.pos.x, 11.5, 0.6, "waits at the water edge nearest to the vehicle")
+	assert_near(s.pos.x, 9.5, 0.6, "waits at the water edge nearest to the vehicle")
 	assert_true(s.pos.y > 10.5 and s.pos.y < 11.0, "at the edge: %s" % s.pos)
 	assert_true(max_speed <= s.rules.shark_speed + 0.01, "approach speed %.2f ≤ shark_speed" % max_speed)
 	assert_true(max_speed > s.rules.shark_speed * 0.9, "swims at full speed: %.2f" % max_speed)
@@ -362,8 +362,8 @@ func test_swim_speed_against_vehicles() -> void:
 func test_hunts_a_hover_from_the_water() -> void:
 	var f := TerrainFixture.new(4)
 	_banked_lake(f, 2, 4, 14, 10, 3)
-	var s := _make(f, Vector2(4.5, 7.5), Vector2(11.5, 7.5), "hover")
-	s.noise.update_vehicle(s.vehicle.state.pos, 7.5, 7.5)    # полный ход — слышно в 12 тайлах
+	var s := _make(f, Vector2(4.5, 7.5), Vector2(9.5, 7.5), "hover")
+	s.noise.update_vehicle(s.vehicle.state.pos, 7.5, 7.5)    # полный ход — слышно в shark_hear_r (6) тайлах
 	var hits := [0]
 	s.damaged.connect(func(_amount: int, _source: StringName) -> void: hits[0] += 1)
 	var leap_at := -1.0
@@ -663,7 +663,7 @@ func test_bites_a_rover_wading_in_shallows() -> void:
 	var f := TerrainFixture.new(4)
 	_banked_lake(f, 2, 4, 14, 10, 1)
 	_lake(f, 2, 9, 14, 10, 3)                                  # мель у южного берега
-	var s := _make(f, Vector2(4.5, 5.5), Vector2(10.5, 9.5))
+	var s := _make(f, Vector2(4.5, 5.5), Vector2(9.5, 9.5))
 	s.start_hunt()
 	var hits := [0]
 	s.damaged.connect(func(_amount: int, _source: StringName) -> void: hits[0] += 1)
@@ -822,3 +822,20 @@ func test_spawns_only_near_quicksand() -> void:
 	assert_true(d >= dir.rules.shark_spawn_min - 1.0 and d <= dir.rules.shark_spawn_max + 1.0, "in the ring: %.1f" % d)
 	dir.vehicle.free()
 	dir.free()
+
+
+## Слышит ближе прочей фауны: машина на полном ходу в 9 тайлах (прочие звери слышат её за 12) — илозуб
+## не трогается; подъехала на 5 — охота.
+func test_hears_only_close() -> void:
+	var f := TerrainFixture.new(4)
+	_banked_lake(f, 2, 4, 14, 10, 3)
+	var s := _make(f, Vector2(4.5, 7.5), Vector2(13.5, 7.5), "hover")
+	s.noise.update_vehicle(s.vehicle.state.pos, 7.5, 7.5)
+	for _i in 30:
+		s.step(DT)
+	assert_false(s.aggressive, "does not hear a vehicle 9 tiles away")
+	s.vehicle.state.pos = Vector2(9.5, 7.5)
+	s.noise.update_vehicle(s.vehicle.state.pos, 7.5, 7.5)
+	s.step(DT)
+	assert_true(s.aggressive, "hears it within shark_hear_r")
+	_dispose(s)

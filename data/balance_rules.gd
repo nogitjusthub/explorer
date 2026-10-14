@@ -191,7 +191,8 @@ extends Resource
 @export var ray_cooldown_min_s: float = 5.0
 @export var ray_cooldown_max_s: float = 10.0
 @export var shark_min_level: int = 2
-@export var shark_speed: float = 4.5             ## плывёт к машине: быстрее танка, медленнее ровера и ховера
+@export var shark_speed: float = 4.2             ## плывёт к машине: чуть быстрее танка, медленнее ровера и ховера
+@export var shark_hear_r: float = 6.0            ## слышит машину в стольких тайлах × шум (прочая фауна — noise_range)
 @export var shark_lunge_dist: float = 2.5        ## прыжок из зыбуна на столько тайлов…
 @export var shark_lunge_speed: float = 9.0       ## …с такой скоростью
 @export var shark_telegraph_s: float = 0.6       ## выныривает и разевает пасть перед прыжком
@@ -199,7 +200,7 @@ extends Resource
 @export var shark_spawn_min: float = 12.0        ## появляется в своём ареале в 12…25 тайлах от машины
 @export var shark_spawn_max: float = 25.0
 @export var shark_home_r: int = 4                ## ареал: зыбун и вода не дальше стольких тайлов от него
-@export var shark_chase_r: float = 10.0          ## гонит не дальше стольких тайлов от своего места (появления)
+@export var shark_chase_r: float = 7.0           ## гонит не дальше стольких тайлов от своего места (появления)
 @export var nessie_min_level: int = 2
 @export var nessie_first_s: float = 120.0        ## редкая: первая — не раньше этого времени забега…
 @export var nessie_gap_s: float = 180.0          ## …следующая — не раньше этого после встречи

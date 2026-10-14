@@ -1,6 +1,6 @@
 extends TestCase
-## Карта мира (GDD §8): память рельефа по чанкам, туман войны (виденное — в радиусе видимости от пути, в тумане
-## меньше), находки выгруженных чанков остаются на карте, собранные — нет; оси карты — ромб 4×2 по камере.
+## Карта мира (GDD §8): память рельефа по чанкам, туман войны в три уровня (темно; радар — полутёмно; видели —
+## в цвет, в непогоду ближе), находки выгруженных чанков остаются на карте, собранные — нет; оси — ромб 4×2.
 
 
 func _render_all(m: MapMemory) -> void:
@@ -10,31 +10,33 @@ func _render_all(m: MapMemory) -> void:
 		m.render_step(100000)
 
 
-func test_unseen_tiles_are_dim_seen_are_full() -> void:
+func test_fog_levels_dark_scanned_seen() -> void:
 	var f := TerrainFixture.new()
 	var m := MapMemory.new(f.terrain)
-	m.chunk_built(Vector2i(0, 0))
-	_render_all(m)
-	var img := m.image(Vector2i(0, 0))
-	assert_true(img != null, "the chunk is drawn")
-	assert_near(img.get_pixel(10, 10).a, MapMemory.DIM_A, 0.01, "not seen yet — dim")
-	m.mark_seen(Vector2(10.5, 10.5))
-	assert_true(m.is_seen(10, 10), "the tile under the vehicle is seen")
-	assert_near(img.get_pixel(10, 10).a, 1.0, 0.01, "seen — full colour")
-	assert_true(m.is_seen(10 + int(MapMemory.SEEN_R) - 1, 10), "seen within SEEN_R")
-	assert_true(not m.is_seen(10 + int(MapMemory.SEEN_R) + 2, 10), "not beyond SEEN_R")
-	assert_near(img.get_pixel(30, 30).a, MapMemory.DIM_A, 0.01, "far tiles stay dim")
+	m.mark_scanned(Vector2(10.5, 10.5), 20.0)
+	m.mark_seen(Vector2(10.5, 10.5), MapMemory.SEEN_R)
+	var fog := m.fog(Vector2i(0, 0))
+	assert_true(fog != null, "fog image for a scanned chunk")
+	assert_eq(m.level(10, 10), MapMemory.SEEN, "under the vehicle — seen")
+	assert_near(fog.get_pixel(10, 10).a, MapMemory.FOG_A[MapMemory.SEEN], 0.01, "seen — no fog")
+	assert_eq(m.level(26, 10), MapMemory.SCANNED, "radar range beyond sight — scanned")
+	assert_near(fog.get_pixel(26, 10).a, MapMemory.FOG_A[MapMemory.SCANNED], 0.01, "scanned — dim")
+	assert_eq(m.level(10, 31), 0, "beyond the radar — dark")
+	assert_near(fog.get_pixel(10, 31).a, 1.0, 0.01, "dark — opaque fog")
 	assert_true(m.take_dirty().has(Vector2i(0, 0)), "changed images are reported for the texture")
 	assert_true(m.take_dirty().is_empty(), "…once")
 
 
-func test_seen_before_drawn_shows_full_once_drawn() -> void:
-	var f := TerrainFixture.new()
+func test_moving_marks_the_new_crescent_and_never_lowers() -> void:
+	var f := TerrainFixture.new(4, 2)
 	var m := MapMemory.new(f.terrain)
-	m.mark_seen(Vector2(5.5, 5.5))               # видели раньше, чем чанк дорисовался
-	m.chunk_built(Vector2i(0, 0))
-	_render_all(m)
-	assert_near(m.image(Vector2i(0, 0)).get_pixel(5, 5).a, 1.0, 0.01, "seen tiles are drawn in full colour")
+	m.mark_seen(Vector2(10.5, 10.5), MapMemory.SEEN_R)
+	m.mark_scanned(Vector2(10.5, 10.5), 20.0)
+	assert_eq(m.level(10, 10), MapMemory.SEEN, "radar does not dim what was seen")
+	m.mark_scanned(Vector2(13.5, 10.5), 20.0)        # три тайла на восток
+	assert_eq(m.level(33, 10), MapMemory.SCANNED, "the leading edge is scanned")
+	assert_eq(m.level(-10, 10), MapMemory.SCANNED, "the trailing edge stays scanned")
+	assert_eq(m.level(10, 10), MapMemory.SEEN, "still seen")
 
 
 func test_rendering_is_budgeted_by_rows() -> void:

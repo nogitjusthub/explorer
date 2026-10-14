@@ -3,12 +3,12 @@ extends CanvasLayer
 ## Карта мира (GDD §8): [M] (геймпад — крестовина вверх) открывает её на весь экран и закрывает; игра идёт
 ## дальше, не пауза. Поверх карты — HUD (кроме радара): урон и сообщения видны. По центру — машина; карта
 ## ориентирована по экрану, как радар и управление: тайл — ромб 4×2 пикселя (изометрия 2:1 сверху), поворот
-## камеры — поворот карты. Разведанное (MapMemory: что машина видела — видимость по погоде) — в цвете;
-## подгруженное, но не виденное — полутёмным; где чанки не грузились — темнота. Находки — все, что хоть раз
-## засёк радар (его дальность, в грозу — вдвое меньше) и ещё не собраны, — и там, где машина не была. Площадка
-## челнока — мигающей рамкой, за краем — стрелкой. Память пишется весь забег, открыта карта или нет.
+## камеры — поворот карты. Туман войны (MapMemory): куда доставал радар (его дальность, в грозу — вдвое
+## меньше) — рельеф полутёмным; что машина видела (видимость по погоде) — в цвете; остальное — темнота. Находки —
+## только виденные глазами (в той же видимости) и ещё не собранные, в том числе в уже выгруженных местах.
+## Площадка челнока — мигающей рамкой, за краем — стрелкой. Память пишется весь забег, открыта карта или нет.
 
-const BG := Color(0.03, 0.025, 0.06)
+const BG := MapMemory.FOG_COLOR
 const COLOR_SELF := Color(1, 1, 1)
 const COLOR_PAD := Color(0.45, 1.0, 0.95)
 const COLOR_OUTLINE := Color(0, 0, 0, 0.85)
@@ -25,11 +25,12 @@ var threats: ThreatDirector
 var enabled := false                     ## во время вылазки: память пишется, M работает
 
 var _canvas: Control
-var _textures: Dictionary[Vector2i, ImageTexture] = {}
+var _textures: Dictionary[Vector2i, ImageTexture] = {}     ## цвет рельефа
+var _fog_tex: Dictionary[Vector2i, ImageTexture] = {}      ## туман войны поверх
 var _blips: Array[Dictionary] = []       ## {pos: Vector2 (тайлы мира), color, big}
 var _refresh := 0.0
-var _detect := 0.0
-var _detected: Dictionary[int, bool] = {}   ## ключи находок, которые засёк радар (собранные выпадут из known())
+var _spot := 0.0
+var _spotted: Dictionary[int, bool] = {}    ## ключи находок, что машина видела (собранные выпадут из known())
 var _time := 0.0
 var _pad := Vector3.INF
 var _pad_landed := false
@@ -79,31 +80,39 @@ func _process(dt: float) -> void:
 	if enabled and vehicle != null:
 		var s := vehicle.state
 		var see := MapMemory.SEEN_R if threats == null else threats.visibility(s.pos, s.y, MapMemory.SEEN_R)
+		if hud != null:
+			memory.mark_scanned(s.pos, hud.radar.range_tiles * (0.5 if hud.radar.jammed else 1.0))
 		memory.mark_seen(s.pos, see)
-		_detect -= dt
-		if _detect <= 0.0 and pickups != null and hud != null:
-			_detect = REFRESH_S
-			var radar := hud.radar
-			for p in pickups.within(s.pos, radar.range_tiles * (0.5 if radar.jammed else 1.0)):
-				_detected[p["key"]] = true
+		_spot -= dt
+		if _spot <= 0.0 and pickups != null:
+			_spot = REFRESH_S
+			for p in pickups.within(s.pos, see):
+				_spotted[p["key"]] = true
 	if not visible:
 		return
 	for coord in memory.take_dirty():
-		var tex: ImageTexture = _textures.get(coord)
-		if tex == null:
-			_textures[coord] = ImageTexture.create_from_image(memory.image(coord))
-		else:
-			tex.update(memory.image(coord))
+		_upload(_textures, coord, memory.image(coord))
+		_upload(_fog_tex, coord, memory.fog(coord))
 	_refresh -= dt
 	if _refresh <= 0.0:
 		_refresh = REFRESH_S
 		_blips.clear()
 		for p in pickups.known():
-			if _detected.has(p["key"]):
+			if _spotted.has(p["key"]):
 				var pos: Vector2 = p["pos"]
 				var kind: StringName = p["kind"]
 				_blips.append({"pos": pos, "color": _colors.get(kind, Color.WHITE), "big": kind == &"core"})
 	_canvas.queue_redraw()
+
+
+func _upload(into: Dictionary[Vector2i, ImageTexture], coord: Vector2i, img: Image) -> void:
+	if img == null:
+		return
+	var tex: ImageTexture = into.get(coord)
+	if tex == null:
+		into[coord] = ImageTexture.create_from_image(img)
+	else:
+		tex.update(img)
 
 
 ## Оси карты на экране: куда сдвигается картинка на тайл по X и по Z мира. Из поворота камеры (четверть, а не
@@ -137,9 +146,14 @@ func _draw_map() -> void:
 	_canvas.draw_set_transform_matrix(xf)
 	for cz in range(c0.y, c1.y + 1):
 		for cx in range(c0.x, c1.x + 1):
+			var fog: ImageTexture = _fog_tex.get(Vector2i(cx, cz))
+			if fog == null:
+				continue                     # радар сюда не доставал — темнота
+			var at := Vector2(cx * Grid.CHUNK, cz * Grid.CHUNK)
 			var tex: ImageTexture = _textures.get(Vector2i(cx, cz))
 			if tex != null:
-				_canvas.draw_texture(tex, Vector2(cx * Grid.CHUNK, cz * Grid.CHUNK))
+				_canvas.draw_texture(tex, at)
+			_canvas.draw_texture(fog, at)
 	_canvas.draw_set_transform_matrix(Transform2D.IDENTITY)
 	for blip in _blips:
 		var p: Vector2 = (xf * (blip["pos"] as Vector2)).floor()
