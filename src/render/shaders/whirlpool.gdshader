@@ -4,8 +4,10 @@
 // сторону, куда крутится пена по краю и тянет машину (к убыванию угла atan(z, x)). Чёрная воронка в
 // центре, едва заметная кромка пены по краю. grow 0…1 — телеграф (бледные рукава) и появление; spin растёт.
 // Пиксель-арт: каждый пиксель мира (тексель рельефа) берётся по своему центру, пена и вода — ступенями.
+// Погода — как у рельефа и находок: в тумане и пылевой буре цвет уходит в пелену (vis_hidden), под тучами темнее.
 shader_type spatial;
 render_mode unshaded, cull_disabled, depth_draw_never, shadows_disabled;
+#include "res://src/render/shaders/visibility.gdshaderinc"
 uniform vec4 foam : source_color;
 uniform vec4 deep : source_color;
 uniform float grow = 0.0;
@@ -13,7 +15,6 @@ uniform float spin = 0.0;
 uniform float size = 3.2;                // сторона плоскости (PlaneMesh)
 const float ARMS = 6.0;
 const float WIND = 22.0;                 // ARMS / WIND ≈ tg 15° — наклон рукава к окружности
-const float ART_PX = 0.0625;
 varying vec3 world_pos;
 varying mat4 to_local;
 void vertex() {
@@ -39,7 +40,8 @@ void fragment() {
 	float f = floor(max(arm * (0.35 + 0.65 * grow), rim * 0.3) * 4.0 + 0.5) / 4.0;   // кромка — приглушённая
 	// Вода темнеет к центру — воронка уходит вглубь (ступенями).
 	vec3 water = deep.rgb * mix(0.4, 1.0, floor(smoothstep(0.1, 0.9, r) * 4.0 + 0.5) / 4.0);
-	ALBEDO = mix(water, foam.rgb, f * 0.85);
+	vec3 col = weather_grade(mix(water, foam.rgb, f * 0.85)) * (1.0 - 0.5 * storm_shade(world_pos));
+	ALBEDO = mix(col, weather_color(world_pos), vis_hidden(world_pos));
 	float body = 0.7 * grow * (1.0 - smoothstep(0.82, 1.0, r));
 	float alpha = clamp(max(max(body, f * 0.9), hole * 0.97 * grow), 0.0, 1.0) * min(grow * 3.0 + 0.25, 1.0);
 	ALPHA = floor(alpha * 5.0 + 0.5) / 5.0;

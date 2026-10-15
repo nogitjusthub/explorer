@@ -104,11 +104,19 @@ func in_calm() -> bool:
 func visibility(pos: Vector2, y: float, clear_sky: float) -> float:
 	var front := _weather as WeatherFront
 	if front != null:
-		return lerpf(clear_sky, minf(front.clear_radius(), clear_sky), clampf(front.density(pos, y), 0.0, 1.0))
+		return _sight_lerp(clear_sky, front.clear_radius(), front.density(pos, y))
 	var storm := _weather as StormFront
 	if storm != null:
-		return lerpf(clear_sky, minf(rules.storm_visibility, clear_sky), clampf(storm.coverage, 0.0, 1.0))
+		return _sight_lerp(clear_sky, rules.storm_visibility, storm.coverage)
 	return clear_sky
+
+
+## От ясного обзора clear_sky к обзору в непогоду bad по доле k (clear_sky = INF — «без предела»: в непогоду — bad).
+static func _sight_lerp(clear_sky: float, bad: float, k: float) -> float:
+	k = clampf(k, 0.0, 1.0)
+	if is_inf(clear_sky):
+		return INF if k <= 0.0 else bad
+	return lerpf(clear_sky, minf(bad, clear_sky), k)
 
 
 ## Радар глушит гроза, если машина под фронтом.
@@ -254,6 +262,7 @@ func _spawn_whirlpool(r_min: float, r_max: float) -> bool:
 		return false
 	var w := Whirlpool.new()
 	_setup(w)
+	w.sight = visibility
 	add_child(w)
 	w.begin(at)
 	_whirlpool = w

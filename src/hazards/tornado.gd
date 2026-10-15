@@ -234,8 +234,8 @@ func _build() -> void:
 		p.spread = 30.0
 		p.tangential_accel_min = 5.0
 		p.tangential_accel_max = 8.0
-		p.emitting = true
 		add_child(p)
+		p.emitting = true                   # после add_child: частицы в мировых координатах берут позицию узла
 	_dust.initial_velocity_min = 1.0
 	_dust.initial_velocity_max = 2.5
 	_clods.initial_velocity_min = 2.0

@@ -11,7 +11,6 @@ enum ControlMode { WORLD, VEHICLE }
 var path := PATH                       ## тесты подставляют свой файл, чтобы не трогать настройки игрока
 var camera_shake: bool = true          ## тряска камеры (IsoCameraRig); переключателя в интерфейсе пока нет
 var master_volume: float = 1.0         ## общая громкость 0…1 шагами по 0,1 (VolumeSlider); 0 — без звука
-var player_name: String = "AAA"        ## последнее введённое имя для таблицы рекордов
 var vehicle_id: String = "rover"       ## последний выбранный класс техники
 var quick_restart := false             ## «Заново» на экране итога: следующий забег без экрана выбора (не сохраняется)
 var control_mode: ControlMode = ControlMode.WORLD   ## режим управления (меню настроек)
@@ -57,9 +56,6 @@ func load_settings() -> void:
 	var volume: Variant = cfg.get_value("audio", "master_volume", master_volume)
 	if (volume is float or volume is int) and is_finite(float(volume)):
 		master_volume = clampf(snappedf(float(volume), 0.1), 0.0, 1.0)     # больше 1 перегрузил бы шину
-	var name_value: Variant = cfg.get_value("player", "name", player_name)
-	if name_value is String:
-		player_name = name_value
 	var vehicle_value: Variant = cfg.get_value("player", "vehicle", vehicle_id)
 	if vehicle_value is String:
 		vehicle_id = vehicle_value                 # неизвестный класс GameFlow заменит на rover
@@ -75,7 +71,6 @@ func save_settings() -> void:
 	var cfg := ConfigFile.new()
 	cfg.set_value("video", "camera_shake", camera_shake)
 	cfg.set_value("audio", "master_volume", master_volume)
-	cfg.set_value("player", "name", player_name)
 	cfg.set_value("player", "vehicle", vehicle_id)
 	cfg.set_value("controls", "mode", control_mode)
 	cfg.set_value("controls", "chase_camera", chase_camera)

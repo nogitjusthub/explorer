@@ -6,7 +6,7 @@
 // Запуск (из корня репозитория, Node 22+ — без npm):
 //   node tools/scripts/web_bench.mjs --scenario load|hangar|nohangar|full [--runs N] [--profile fresh|keep]
 //        [--browser chrome|edge] [--seed N] [--gzip] [--timeout S] [--extra "a=1&b"] [--assert]
-//        [--web DIR] [--tag NAME] [--keys q,d,a] (свои нажатия после загрузки)
+//        [--web DIR] [--tag NAME] [--keys q,d,a] (свои нажатия после загрузки) [--keys-delay S] (…и ещё через S секунд)
 //        [--snaps 2,6,12] (снимки страницы на этих секундах) [--trace] (трейс Chrome → trace.json)
 //        [--sources N] (исходники программ после загрузки и N самых дорогих → shader_sources.json)
 //        [--query "seed=7&select&press=pause@3&shots=2" --after S] (свой адрес; ждём загрузки и ещё S секунд)
@@ -140,6 +140,7 @@ async function runOnce(dir, profile) {
 		const deadline = Date.now() + timeoutS * 1000;
 		while (!sc.until(seen, counts) && Date.now() < deadline) await sleep(250);
 		const keys = opts.keys ? String(opts.keys).split(',') : sc.keys;   // --keys q,d,a — свои нажатия
+		if (keys && opts['keys-delay']) await sleep(Number(opts['keys-delay']) * 1000);
 		if (keys) {
 			for (const k of keys) { await key(page, k); await sleep(700); }
 		}

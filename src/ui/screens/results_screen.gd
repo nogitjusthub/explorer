@@ -2,9 +2,9 @@ class_name ResultsScreen
 extends CanvasLayer
 ## Экран итога (GDD §6): причина конца, разбор счёта, ввод имени при попадании в топ-10 класса
 ## (до Leaderboard.NAME_MAX знаков — всё, что есть на обычной клавиатуре: латиница, кириллица, цифры, пробел,
-## знаки; с клавиатуры набирается прямо, Backspace стирает; аркадный выбор для геймпада и стрелок: ↑/↓ — знак,
-## ←/→ — позиция; Enter — готово; на телефоне — тап по стрелкам над и под знаком и кнопка «Готово»; пустые
-## позиции — пробел, по краям обрезается),
+## знаки; ввод всегда с пустого поля и первой позиции; с клавиатуры набирается прямо, Backspace стирает;
+## аркадный выбор для геймпада и стрелок: ↑/↓ — знак, ←/→ — позиция; Enter — готово; на телефоне — тап по
+## стрелкам над и под знаком и кнопка «Готово»; пустые позиции — пробел, по краям обрезается),
 ## затем таблица рекордов и две кнопки с хоткеями:
 ## «Заново» (R) — сразу новый забег на той же машине, «Выход» (Esc) — в трюм челнока к выбору машины.
 ## Класс машины показан портретом — названий классов игроку не показываем.
@@ -54,7 +54,6 @@ var _entering := false
 var _highlight := -1
 var _letters := PackedInt32Array()       ## индексы знаков в LETTERS по позициям имени
 var _cursor := 0
-var _fresh := true                       ## прошлое имя ещё не трогали: первый набранный знак его стирает
 var _age := 0.0
 var _canvas: Control
 var _font: Font
@@ -92,8 +91,8 @@ func _ready() -> void:
 	_rank = board.rank_for(StringName(result["class"]), score) if score > 0 else -1
 	_entering = _rank >= 0
 	_update_buttons()
-	_letters = letters_of(Settings.player_name)
-	_cursor = 0                              # прошлое имя подставлено, набор — с первой позиции
+	_letters = letters_of("")                # ввод — всегда с пустого поля
+	_cursor = 0
 
 
 ## Имя → индексы знаков (до NAME_MAX позиций, незнакомые знаки и хвост — пусто).
@@ -104,6 +103,11 @@ static func letters_of(player_name: String) -> PackedInt32Array:
 	for i in Leaderboard.NAME_MAX:
 		out[i] = maxi(LETTERS.find(up[i]), 0) if i < up.length() else 0
 	return out
+
+
+## Ширина знака кеглем имени (UiKit.TITLE), пикселей.
+static func glyph_width(font: Font, ch: String) -> float:
+	return font.get_string_size(ch, HORIZONTAL_ALIGNMENT_LEFT, -1, UiKit.TITLE).x
 
 
 ## Индексы знаков → имя: пустые позиции — пробелы, по краям обрезаются; совсем пусто — «???».
@@ -163,7 +167,6 @@ func _input(event: InputEvent) -> void:
 	if _age < INPUT_DELAY_S or HelpScreen.shown(get_tree()):
 		return
 	if _entering and UiKit.is_click(event):
-		_fresh = false                           # правка стрелками или выбор позиции — имя уже правят
 		var p: Vector2 = (event as InputEventMouseButton).position
 		for up: bool in [true, false]:                 # стрелки — только у выбранной позиции
 			if _letter_arrow(_cursor, up).grow(2.0).has_point(p):
@@ -211,7 +214,6 @@ func _arcade(event: InputEvent) -> bool:
 		_cursor = mini(_cursor + 1, Leaderboard.NAME_MAX - 1)
 	else:
 		return false
-	_fresh = false
 	return true
 
 
@@ -225,7 +227,6 @@ func _type_key(k: InputEventKey) -> bool:
 	if not k.pressed:
 		return false
 	if k.keycode == KEY_BACKSPACE:
-		_fresh = false
 		if _letters[_cursor] == 0 and _cursor > 0:
 			_cursor -= 1
 		_letters[_cursor] = 0
@@ -235,10 +236,6 @@ func _type_key(k: InputEventKey) -> bool:
 	var idx := LETTERS.find(String.chr(k.unicode).to_upper())
 	if idx < 0:
 		return false
-	if _fresh:                               # прошлое имя — как выделенный текст: набор его заменяет
-		_letters.fill(0)
-		_cursor = 0
-	_fresh = false
 	_letters[_cursor] = idx
 	_cursor = mini(_cursor + 1, Leaderboard.NAME_MAX - 1)
 	return true
@@ -253,8 +250,6 @@ func _save_entry() -> void:
 	})
 	_entering = false
 	_update_buttons()
-	Settings.player_name = entry_name
-	Settings.save_settings()
 
 
 func _draw_screen() -> void:
@@ -289,7 +284,10 @@ func _draw_screen() -> void:
 		for i in Leaderboard.NAME_MAX:
 			var x := _slot_x(i) + 2.0
 			var col := COLOR_MARK if i == _cursor else COLOR_TEXT
-			_text(Vector2(x, y), LETTERS[_letters[i]], UiKit.TITLE, col, HORIZONTAL_ALIGNMENT_CENTER, 14)
+			# По центру позиции по своей ширине: с пределом ширины широкий знак (W, Ж, Ш, @) шире предела
+			# выбрасывался целиком — набранный, но невидимый.
+			var ch := LETTERS[_letters[i]]
+			_text(Vector2(_slot_x(i) + floorf((SLOT_W - glyph_width(_font, ch)) * 0.5), y), ch, UiKit.TITLE, col)
 			if i == _cursor and fmod(_age, 0.6) < 0.4:
 				_canvas.draw_rect(Rect2(x + 1, y + 3, 12, 2), COLOR_MARK)
 			elif i != _cursor and _letters[i] == 0:

@@ -103,7 +103,8 @@ func test_neck_unfolds_head_first() -> void:
 	assert_true(LakeMonster.pose_angle(0.0) > 0.0)
 	assert_true(LakeMonster.pose_angle(0.5) < 0.0)
 	assert_true(LakeMonster.pose_angle(1.0) > 0.5)
-	assert_true(LakeMonster.POSE_S >= 0.6, "the pose telegraphs the strike at least 0.6 s (LKM rule)")
+	assert_true(LakeMonster.POSE_S <= 0.3, "short pause between surfacing and the strike (0.1–0.3 s)")
+	assert_true(LakeMonster.POSE_S > LakeMonster.SNAP_S, "the S-snap still finishes before the strike")
 
 
 func test_strike_hits_a_still_hover_and_tosses_it() -> void:

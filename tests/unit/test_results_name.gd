@@ -33,6 +33,7 @@ func test_typing_cyrillic() -> void:
 	for ch in "кот":
 		assert_true(r._type_key(_key(ch)), "Cyrillic letters are typed")
 	assert_eq(ResultsScreen.compose_name(r._letters), "КОТ")
+	r.free()
 
 
 func test_typing_wasd_backspace() -> void:
@@ -52,13 +53,14 @@ func test_typing_wasd_backspace() -> void:
 	r.free()
 
 
-func test_typing_replaces_the_previous_name() -> void:
-	var r := _screen("KACPER")
-	assert_eq(r._cursor, 0, "entry starts at the first position")
-	r._type_key(_key("b"))
-	r._type_key(_key("o"))
-	assert_eq(ResultsScreen.compose_name(r._letters), "BO", "the previous name is replaced, not overtyped")
-	r.free()
+## Каждый знак набора кеглем имени помещается в позицию: с пределом ширины широкий знак (W) выбрасывался
+## при отрисовке — набранный, но невидимый.
+func test_every_letter_fits_its_slot() -> void:
+	for ch in ResultsScreen.LETTERS:
+		var w := ResultsScreen.glyph_width(UiKit.FONT, ch)
+		assert_true(w <= ResultsScreen.SLOT_W, "%s fits: %.0f px" % [ch, w])
+	assert_true(ResultsScreen.glyph_width(UiKit.FONT, "W") > 0.0, "W has a glyph")
+	assert_false("player_name" in Settings, "no remembered name: entry always starts empty")
 
 
 func test_leaderboard_cuts_long_names() -> void:
@@ -85,7 +87,6 @@ func test_arrow_keys_pick_letters_and_slots() -> void:
 	var echo := _key("", KEY_UP)
 	echo.echo = true
 	assert_true(r._arcade(echo), "holding the arrow repeats")
-	assert_false(r._fresh, "arcade edits keep the name: the next typed letter does not wipe it")
 	r._type_key(_key("z"))
 	assert_eq(ResultsScreen.compose_name(r._letters), "ZA", "typing after arrows overwrites only the slot")
 	r.free()

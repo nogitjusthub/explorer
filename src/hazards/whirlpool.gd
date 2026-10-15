@@ -45,6 +45,7 @@ var rules: BalanceRules
 var vehicle: Vehicle
 var query: TerrainQuery
 var rng: RandomNumberGenerator
+var sight: Callable                      ## (pos, y, clear) → радиус обзора в непогоду (ThreatDirector.visibility)
 
 var pos := Vector2.ZERO
 var finished := false
@@ -157,6 +158,8 @@ func step(dt: float) -> void:
 	_mat.set_shader_parameter(&"spin", _spin)
 	_foam.emitting = _form <= 0.0 and _fade < 0.0
 	var d := vehicle.state.pos.distance_to(pos)
+	# Точки пены — обычный материал, пелена их не гасит: дальше обзора в тумане и пыли — не видны (диск прячет шейдер).
+	_foam.visible = not sight.is_valid() or d - SIZE <= float(sight.call(vehicle.state.pos, vehicle.state.y, INF))
 	_audio.volume_db = linear_to_db(clampf((1.0 - d / HEAR_TILES) * maxf(k, 0.2), 0.02, 1.0)) - 8.0
 
 
