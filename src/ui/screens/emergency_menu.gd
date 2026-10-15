@@ -100,8 +100,6 @@ func _draw_menu() -> void:
 	var w := PANEL.size.x
 	UiKit.text(_canvas, Vector2(x, PANEL.position.y + 13), "ВЫЗВАТЬ ЧЕЛНОК?", UiKit.TEXT, UiKit.COLOR_MARK,
 			HORIZONTAL_ALIGNMENT_CENTER, w)
-	UiKit.text(_canvas, Vector2(x, PANEL.position.y + 27), "что привезти?", UiKit.TEXT, UiKit.COLOR_DIM,
-			HORIZONTAL_ALIGNMENT_CENTER, w)
 	var tr := _track()
 	var fuel_c: Color = UiKit.STAT_COLORS[UiKit.Stat.FUEL]
 	var parts_c: Color = UiKit.STAT_COLORS[UiKit.Stat.ARMOR]

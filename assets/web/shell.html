@@ -96,14 +96,6 @@ body {
 	min-height: 1.3em;
 }
 
-#status-hint {
-	font-size: 13px;
-	color: #9e94a8;
-	text-align: center;
-	max-width: 80vw;
-	line-height: 1.4;
-}
-
 #status-notice {
 	display: none;
 	background-color: #5b3943;
@@ -137,7 +129,6 @@ body {
 			<div id="status-title">EXPLORER</div>
 			<div id="status-bar"><div id="status-fill"></div><div id="status-shine"></div></div>
 			<div id="status-text">загрузка…</div>
-			<div id="status-hint">Первый запуск дольше: браузер готовит графику.<br>Дальше всё пойдёт без задержек.</div>
 			<div id="status-notice"></div>
 		</div>
 
@@ -181,7 +172,6 @@ const engine = new Engine(GODOT_CONFIG);
 	const overlay = document.getElementById('status');
 	const fill = document.getElementById('status-fill');
 	const text = document.getElementById('status-text');
-	const hint = document.getElementById('status-hint');
 	const notice = document.getElementById('status-notice');
 	const canvas = document.getElementById('canvas');
 	const SILENCE_MS = 120000;         // игра молчит дольше — заставку убираем (отладочный запуск, ошибка)
@@ -211,7 +201,6 @@ const engine = new Engine(GODOT_CONFIG);
 	function fail(message, reload) {
 		console.error(message);
 		text.textContent = '';
-		hint.textContent = '';
 		notice.textContent = '';
 		for (const line of String(message).split('\n')) {
 			notice.appendChild(document.createTextNode(line));
@@ -245,10 +234,6 @@ const engine = new Engine(GODOT_CONFIG);
 		if (!overlay.isConnected) document.body.appendChild(overlay);
 		finished = false;
 		fail('Браузер сбросил графику (WebGL).\nПерезагрузите страницу.', true);
-	});
-
-	document.addEventListener('visibilitychange', () => {
-		if (!finished && document.hidden) hint.textContent = 'Во вкладке в фоне загрузка идёт медленнее.';
 	});
 
 	const missing = Engine.getMissingFeatures({ threads: GODOT_THREADS_ENABLED });

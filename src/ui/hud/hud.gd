@@ -244,7 +244,7 @@ func _draw_bottom(size: Vector2) -> void:
 					HORIZONTAL_ALIGNMENT_CENTER, size.x)
 		&"landed":
 			var col := COLOR_PAD if _shuttle_left > 5.0 or blink else COLOR_FUEL_LOW
-			_text(Vector2(0, y), "ЧЕЛНОК НА ПЛОЩАДКЕ  %s  — остановитесь в круге" % _clock(_shuttle_left), UiKit.TEXT, col,
+			_text(Vector2(0, y), "ЧЕЛНОК НА ПЛОЩАДКЕ  %s" % _clock(_shuttle_left), UiKit.TEXT, col,
 					HORIZONTAL_ALIGNMENT_CENTER, size.x)
 	y -= 12.0
 	if _notice_t > 0.0:
