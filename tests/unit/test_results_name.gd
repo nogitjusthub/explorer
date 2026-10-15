@@ -69,8 +69,9 @@ func test_leaderboard_cuts_long_names() -> void:
 	f.store_string(JSON.stringify({"rover": [{"name": "TOOLONGNAME", "score": 100}]}))
 	f.close()
 	var board := Leaderboard.new(path)
-	assert_eq(String(board.entries(&"rover")[0]["name"]), "TOOLONGN")
-	DirAccess.remove_absolute(ProjectSettings.globalize_path(path))
+	assert_eq(String(board.entries()[0]["name"]), "TOOLONGN")
+	for p in [path, path + Leaderboard.V1_SUFFIX]:      # файл старого вида — копия .v1 остаётся рядом
+		DirAccess.remove_absolute(ProjectSettings.globalize_path(p))
 
 
 func test_arrow_keys_pick_letters_and_slots() -> void:

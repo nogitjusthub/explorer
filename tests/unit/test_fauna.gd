@@ -407,3 +407,22 @@ func _gather_box(n: Node3D, xf: Transform3D, acc: Array) -> void:
 
 func _head_y(m: Dictionary) -> float:
 	return ((m["body"] as Node3D).transform * (m["head"] as Node3D).transform).origin.y
+
+
+## Отступившая стая (сдалась или испугалась) на глазах не пропадает: отбегает, возвращается к месту появления и
+## патрулирует там; пока не успокоилась (CALM_S), на машину рядом не кидается снова.
+func test_retreating_pack_goes_home_not_away() -> void:
+	var f := TerrainFixture.new(4, 2)
+	var home := Vector2(10.5, 10.5)
+	var p := _pack(f, home, Vector2(14.5, 10.5))
+	for _i in int(1.5 / DT):                               # заметила машину рядом — погоня
+		p.step(DT)
+	assert_true(p.aggressive, "chasing the vehicle")
+	p.flee()
+	for _i in int(9.0 / DT):
+		p.step(DT)
+		assert_false(p.finished, "never vanishes")
+		assert_false(p.aggressive, "does not attack again while calming down")
+	assert_eq(p.state, HopperPack.State.IDLE, "back to patrolling")
+	assert_true(p.pos.distance_to(home) <= p.rules.hopper_patrol_r + 1.0, "around its home: %s" % p.pos)
+	_dispose(p)

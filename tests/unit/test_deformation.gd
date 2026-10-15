@@ -310,3 +310,30 @@ func test_mark_ground_persists() -> void:
 	f.set_water(6, 5, 6)
 	Deformation.mark_ground(f.terrain, [Vector2i(6, 5)] as Array[Vector2i], ChunkData.FLAG_ROUGH)
 	assert_eq(f.query.flags(6, 5) & ChunkData.FLAG_ROUGH, 0, "water tiles are not marked")
+
+
+func _lowest(f: TerrainFixture, x0: int, z0: int, x1: int, z1: int) -> int:
+	var lo := 1 << 20
+	for tz in range(z0, z1 + 1):
+		for tx in range(x0, x1 + 1):
+			for c in 4:
+				lo = mini(lo, f.query.corner(tx, tz, c))
+	return lo
+
+
+## Следы не складываются в каньон: смерчи тянутся к машине и пашут одно место, молния бьёт рядом с ней.
+## Вершину, уже опущенную копанием (TerrainData.dug), борозда и воронка больше не углубляют.
+func test_repeated_digging_does_not_make_a_canyon() -> void:
+	var f := TerrainFixture.new(6)
+	for _pass in 3:                                   # три смерча, у каждого свой done
+		Deformation.furrow(f.terrain, Vector2(4.3, 10.5), Vector2(20.7, 11.2), 0.6, {})
+	assert_eq(_lowest(f, 2, 6, 22, 16), 5, "three tornado passes — still one tier deep")
+	for _strike in 3:
+		Deformation.crater(f.terrain, Vector2(12.0, 22.0), 1.0, 1)
+	assert_eq(_lowest(f, 8, 18, 16, 26), 5, "three strikes on one spot — one crater, not a shaft")
+	var g := TerrainFixture.new(6)
+	Deformation.fault_path(g.terrain, PackedVector2Array([Vector2(12, 2), Vector2(12, 28)]), 2, 2)
+	var after_fault := _lowest(g, 4, 4, 20, 26)
+	for x: float in [10.5, 13.5]:                   # по обеим сторонам линии: одна опущена, другая поднята
+		Deformation.furrow(g.terrain, Vector2(x, 6.5), Vector2(x, 24.5), 0.6, {})
+	assert_eq(_lowest(g, 4, 4, 20, 26), after_fault, "a tornado along the fault does not deepen its lowered side")

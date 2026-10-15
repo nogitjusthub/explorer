@@ -139,6 +139,7 @@ func _strike() -> void:
 	Deformation.mark_ground(terrain, _debris_tiles(), ChunkData.FLAG_ROUGH)
 	streamer.request_pit_fill()
 	EventBus.threat_ended.emit(&"quake")
+	EventBus.fault_opened.emit(path)
 	EventBus.camera_shake_requested.emit(1.2 + 0.8 * strength, AFTER_SHAKE_S)
 	(get_node(^"Crack") as Node3D).visible = false
 	var s := vehicle.state

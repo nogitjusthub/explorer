@@ -68,7 +68,7 @@ func _ready() -> void:
 	_light.shadow_enabled = false
 	_light.position = _spot + Vector3(0, 1.5, 0)
 	add_child(_light)
-	_makers = [_basics, _world_kit, _trail, _tornado, _worm, _hoppers, _shellback, _shark, _nessie, _stargazer,
+	_makers = [_basics, _world_kit, _trail, _scars, _tornado, _worm, _hoppers, _shellback, _shark, _nessie, _stargazer,
 			_whirlpool, _shuttle.bind(ShuttleCraft.Kind.MAIN), _shuttle.bind(ShuttleCraft.Kind.EMERGENCY), _drop_pod,
 			_vehicles]
 	_t0 = Time.get_ticks_msec()
@@ -225,6 +225,16 @@ func _tornado() -> Node3D:
 	add_child(t)                        # звук и расстановка — в дереве сцены
 	t.begin(_at2())
 	return t
+
+
+## Следы смерча и молнии на земле (GroundScars: MultiMesh — свой вариант шейдера).
+func _scars() -> Node3D:
+	var scars := GroundScars.new()
+	scars.query = query
+	var a := _at2()
+	scars.strip(a + Vector2(-1.0, 0.0), a, Tornado.SCAR_WIDTH)
+	scars.spot(a + Vector2(1.0, 0.0), 0.6)
+	return scars
 
 
 ## Колея, пыль и комья из-под колёс (VehicleTrail).

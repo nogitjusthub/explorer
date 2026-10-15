@@ -55,6 +55,10 @@ func _ready() -> void:
 	noise.full_frac = rules.noise_full_frac
 	EventBus.shuttle_state_changed.connect(_on_shuttle)
 	EventBus.emergency_state_changed.connect(_on_emergency)
+	# Угрозы пугают малую фауну рядом: бросает погоню (скакуны отступают домой, панцирник и илозуб отстают).
+	EventBus.lightning_struck.connect(func(at: Vector3) -> void: scare(Vector2(at.x, at.z), rules.fauna_scare_strike_r))
+	EventBus.threat_telegraphed.connect(_on_threat)
+	EventBus.fault_opened.connect(func(path: PackedVector2Array) -> void: scare_line(path, rules.fauna_scare_fault_r))
 	for coord: Vector2i in terrain.chunks:
 		on_chunk_built(coord)
 
@@ -69,17 +73,38 @@ func field(mode: FlowField.Mode) -> FlowField:
 	return _fields.get(mode)
 
 
-## Испуг (удар капсулы десанта): стаи рядом уходят, панцирники успокаиваются.
+## Смерч рядом пугает каждый кадр, пока он близко (телеграф смерча идёт каждый кадр).
+func _on_threat(kind: StringName, at: Vector3, _seconds: float, _dir: Vector2) -> void:
+	if kind == &"tornado":
+		scare(Vector2(at.x, at.z), rules.fauna_scare_tornado_r)
+
+
+## Испуг вдоль линии (разлом): всех ближе radius к любой её точке.
+func scare_line(path: PackedVector2Array, radius: float) -> void:
+	for c in _creatures:
+		for i in path.size() - 1:
+			if Geometry2D.get_closest_point_to_segment(c.pos, path[i], path[i + 1]).distance_to(c.pos) <= radius:
+				_frighten(c)
+				break
+
+
+## Испуг (удар капсулы десанта, смерч, молния, разлом рядом): стаи отступают домой, панцирники успокаиваются,
+## илозуб ныряет; червь и Несса не пугаются.
 func scare(at: Vector2, radius: float) -> void:
 	for c in _creatures:
-		if c.dead or c.pos.distance_to(at) > radius:
-			continue
-		if c is HopperPack:
-			(c as HopperPack).flee()
-		elif c is Shellback:
-			(c as Shellback).calm_down()
-		elif c is MireShark:
-			(c as MireShark).scare()
+		if c.pos.distance_to(at) <= radius:
+			_frighten(c)
+
+
+func _frighten(c: Creature) -> void:
+	if c.dead:
+		return
+	if c is HopperPack:
+		(c as HopperPack).flee()
+	elif c is Shellback:
+		(c as Shellback).calm_down()
+	elif c is MireShark:
+		(c as MireShark).scare()
 
 
 func on_chunk_built(coord: Vector2i) -> void:

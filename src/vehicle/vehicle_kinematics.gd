@@ -326,7 +326,12 @@ static func _move_axis(s: VehicleState, cls: VehicleClass, q: TerrainQuery, axis
 			np[axis] = minf(np[axis], maxf(p[axis], boundary - RADIUS))
 		else:
 			np[axis] = maxf(np[axis], minf(p[axis], boundary + RADIUS))
-		_slide_along_wall(s, axis)
+		if s.vel[axis] * d > 0.0:
+			_slide_along_wall(s, axis)
+		else:
+			# В стенку прижимает только снос (смерч, ветер), сама машина туда не едет: гасим снос, а курс и скорость
+			# не трогаем — иначе каждый кадр курс выравнивался вдоль стенки, и прижатая машина не могла развернуться.
+			s.push_vel[axis] = 0.0
 		r.hit_wall = true
 		s.pos = np
 		return

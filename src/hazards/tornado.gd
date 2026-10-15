@@ -4,13 +4,15 @@ extends Node3D
 ## Внешняя зона (tornado_pull_r) тянет к центру: a(r) = pull / масса × (1 − r / pull_r). Ядро
 ## (tornado_core_r): tornado_core_dps урона в секунду, через tornado_throw_after_s выбрасывает машину по
 ## дуге на tornado_throw_dist туда, где посадка не выше старта; приземление — по правилам падения.
-## Пашет борозду (кроме скал), вырывает деревья, подхватывает находки и роняет их по пути. Гудит —
+## За собой оставляет временную полосу содранного грунта (GroundScars; землю не копает — борозды складывались
+## в каньоны), вырывает деревья, подхватывает находки и роняет их по пути. Гудит —
 ## громче с приближением.
 
 signal damaged(amount: int, source: StringName)
 
 const HEIGHT := 6.0
 const FURROW_EVERY_S := 0.5
+const SCAR_WIDTH := 1.2                  ## тайла — полоса содранного грунта за смерчем
 const DAMAGE_STEP := 5                   ## урон ядра приходит порциями, чтобы не мельтешить в HUD
 const CATCH_R := 1.2                     ## находки ближе — подхвачены
 const FADE_S := 1.5
@@ -23,6 +25,7 @@ var query: TerrainQuery
 var terrain: TerrainData
 var pickups: PickupField
 var rng: RandomNumberGenerator
+var scars: GroundScars                    ## временные следы на земле (ThreatDirector)
 
 var pos := Vector2.ZERO
 var drift := Vector2.ZERO                ## снос ветром бури, тайл/с
@@ -36,7 +39,6 @@ var _damage_acc := 0.0
 var _furrow_from := Vector2.ZERO
 var _furrow_timer := FURROW_EVERY_S
 var _carried: Array[Dictionary] = []     ## {kind, left}
-var _ploughed: Dictionary = {}           ## вершины, уже опущенные этим смерчем
 var _fade := -1.0
 var _funnel: Node3D
 var _dust: CPUParticles3D                ## пыль у основания (PixelFx — как у всех), цвет грунта под смерчем
@@ -158,17 +160,11 @@ func _affect_vehicle(dt: float) -> void:
 		vehicle.tumble(target - s.pos, 0.4)
 
 
-## След: борозда (скалы не берёт), вырванные деревья, подхваченные находки.
+## След: временная полоса содранного грунта (не по воде), вырванные деревья, подхваченные находки.
 func _plough() -> void:
 	if _furrow_from.distance_to(pos) > 0.2:
-		# Под водой дно не трогаем: борозда сквозь водоём выглядела криво и ломала берега.
-		if not _wet(_furrow_from) and not _wet(pos):
-			Deformation.furrow(terrain, _furrow_from, pos, 0.6, _ploughed)
-			# Камень смерч не пашет, но крошит: на скалах за ним остаётся россыпь обломков.
-			var t := Grid.tile_of_world(pos.x, pos.y)
-			var m := query.material(t.x, t.y)
-			if m == ChunkData.Mat.ROCK or m == ChunkData.Mat.CRYSTAL:
-				Deformation.mark_ground(terrain, [t] as Array[Vector2i], ChunkData.FLAG_ROUGH)
+		if scars != null and not _wet(_furrow_from) and not _wet(pos):
+			scars.strip(_furrow_from, pos, SCAR_WIDTH)
 		_furrow_from = pos
 	var c := Grid.tile_of_world(pos.x, pos.y)
 	for dz in range(-1, 2):

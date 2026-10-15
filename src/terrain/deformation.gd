@@ -44,9 +44,11 @@ class Work:
 	var water: Dictionary[int, int] = {}          ## байт уровня воды (0 — нет)
 	var orig_water: Dictionary[int, int] = {}
 	var locked: Dictionary[int, bool] = {}
+	var digs := false                             ## копание (воронка, борозда, разлом): опущенное — в TerrainData.dug
 
-	func _init(t: TerrainData) -> void:
+	func _init(t: TerrainData, digging: bool = false) -> void:
 		terrain = t
+		digs = digging
 
 	## Тайл в работе (загружается по требованию). false — неподвижен: площадка или не загружен.
 	func load_tile(tx: int, tz: int) -> bool:
@@ -96,14 +98,15 @@ class Work:
 
 
 ## Воронка: вершины в радиусе от центра опускаются на depth, затем релаксация. Возвращает ключи
-## изменённых тайлов.
+## изменённых тайлов. Уже опущенные копанием вершины (`TerrainData.dug`) не трогает — молния, бьющая
+## рядом с машиной, не роет шахту.
 static func crater(terrain: TerrainData, center: Vector2, radius: float, depth: int) -> PackedInt64Array:
-	var w := Work.new(terrain)
+	var w := Work.new(terrain, true)
 	var queue: Array[Vector3i] = []
 	var r := ceili(radius) + 1
 	for vz in range(floori(center.y) - r, floori(center.y) + r + 2):
 		for vx in range(floori(center.x) - r, floori(center.x) + r + 2):
-			if Vector2(vx, vz).distance_to(center) <= radius:
+			if Vector2(vx, vz).distance_to(center) <= radius and not terrain.dug.has(Vector2i(vx, vz)):
 				_shift_vertex(w, Vector2i(vx, vz), -depth, LOWER, queue)
 	_relax(w, queue)
 	return _commit(w)
@@ -111,12 +114,14 @@ static func crater(terrain: TerrainData, center: Vector2, radius: float, depth: 
 
 ## Борозда вдоль отрезка: вершины ближе half_width к отрезку опускаются на ярус. На скалах
 ## (материал ROCK у любого тайла вокруг вершины) следа не остаётся. done — вершины, уже опущенные этим
-## же источником (смерч): их не трогаем, иначе медленный смерч выкопал бы каньон. Вершина попадает
+## же источником (смерч): их не трогаем, иначе медленный смерч выкопал бы каньон. Вершины, опущенные любым
+## копанием раньше (`TerrainData.dug`: борозды других смерчей, воронки, разлом, в том числе соседи, опущенные
+## релаксацией), тоже не трогаем: смерчи тянутся к машине и пашут одно место — следы складывались в каньон. Вершина попадает
 ## в done, только когда действительно сдвинулась: неподвижную (сосед не загружен) возьмёт следующий проход.
 ## height — сдвиг вершин: −1 — борозда (смерч), +1 — вал (червь под песком).
 static func furrow(terrain: TerrainData, from: Vector2, to: Vector2, half_width: float, done: Dictionary = {},
 		height: int = -1) -> PackedInt64Array:
-	var w := Work.new(terrain)
+	var w := Work.new(terrain, height < 0)
 	var queue: Array[Vector3i] = []
 	var lo := Vector2i(floori(minf(from.x, to.x) - half_width) - 1, floori(minf(from.y, to.y) - half_width) - 1)
 	var hi := Vector2i(ceili(maxf(from.x, to.x) + half_width) + 1, ceili(maxf(from.y, to.y) + half_width) + 1)
@@ -126,7 +131,7 @@ static func furrow(terrain: TerrainData, from: Vector2, to: Vector2, half_width:
 			if Geometry2D.get_closest_point_to_segment(p, from, to).distance_to(p) > half_width:
 				continue
 			var v := Vector2i(vx, vz)
-			if done.has(v) or _vertex_on_rock(terrain, v):
+			if done.has(v) or _vertex_on_rock(terrain, v) or (height < 0 and terrain.dug.has(v)):
 				continue
 			if _shift_vertex(w, v, height, LOWER if height < 0 else RAISE, queue):
 				done[v] = true
@@ -239,7 +244,7 @@ static func _vertex_recorded(v: Vector2i, originals: Dictionary) -> bool:
 ## Сторона «+» (тайлы с большей координатой поперёк линии) поднимается на up, сторона «−»
 ## опускается на down. Возвращает ключи изменённых тайлов.
 static func fault(terrain: TerrainData, start: Vector2i, along_x: bool, length: int, up: int, down: int) -> PackedInt64Array:
-	var w := Work.new(terrain)
+	var w := Work.new(terrain, true)
 	var queue: Array[Vector3i] = []
 	var band := maxi(up, down) + 4
 	for a in range(-1, length + 1):
@@ -274,7 +279,7 @@ static func fault_path(terrain: TerrainData, path: PackedVector2Array, up: int, 
 		ramp_every: int = RAMP_EVERY, coords: FaultLine = null) -> PackedInt64Array:
 	if coords == null:
 		coords = FaultLine.new(path, up, down)
-	var w := Work.new(terrain)
+	var w := Work.new(terrain, true)
 	var queue: Array[Vector3i] = []
 	var total := coords.total
 	var box := coords.box
@@ -483,6 +488,10 @@ static func _commit(w: Work) -> PackedInt64Array:
 			record[ci] = c[ci] + Grid.HEIGHT_OFFSET
 		record[5] = w.water[k]
 		w.terrain.write_tile(t.x, t.y, record, true, record[6] != 0)
+		if w.digs:
+			for ci in 4:
+				if c[ci] < w.orig[k][ci]:
+					w.terrain.dug[t + CORNER_OFFSETS[ci]] = true
 		if record[5] != 0 or w.orig_water[k] != 0:
 			w.terrain.mark_dirty(t.x, t.y, DIRTY_WATER)
 		changed.append(k)

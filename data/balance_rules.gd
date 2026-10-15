@@ -67,8 +67,6 @@ extends Resource
 @export var strike_core_r: float = 0.45          ## ближе — урон «в центре»
 @export var strike_damage_center: int = 25
 @export var strike_damage_edge: int = 10
-@export var strike_crater_depth: int = 1
-@export var strike_crater_chance: float = 0.15   ## воронку выбивает не каждый удар; в воду — никогда
 
 @export_group("Murk")
 ## Плохая видимость — огромная масса, ползущая по карте: проехать насквозь трудно, проще уйти, пока
@@ -137,6 +135,10 @@ extends Resource
 @export var shuttle_pack_chance: float = 0.5     ## к севшему основному челноку выходит стая — не всегда
 @export var emergency_noise_s: float = 10.0
 @export var fauna_give_up_s: float = 6.0        ## не подобраться к машине столько — фауна сдаётся (червь уходит)
+## Угрозы пугают малую фауну (скакуны, панцирник, илозуб; не червя и не Нессу): ближе — бросает погоню.
+@export var fauna_scare_tornado_r: float = 5.0   ## от смерча (каждый кадр, пока рядом)
+@export var fauna_scare_strike_r: float = 3.0    ## от точки удара молнии
+@export var fauna_scare_fault_r: float = 5.0     ## от линии разлома в момент толчка
 ## Скорости погони — между Vmax танка (4) и ровера (6,5): ровер и ховер уходят от фауны, танк — нет.
 @export var hopper_speed: float = 4.7
 @export var hopper_wander_speed: float = 1.0       ## патрулирует медленно

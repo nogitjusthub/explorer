@@ -1,6 +1,8 @@
 class_name Leaderboard
 extends RefCounted
-## Локальная таблица рекордов (GDD §6): топ-10 отдельно по каждому классу машины, user://.
+## Локальная таблица рекордов (GDD §6): общий топ-10 для всех машин, user://. Машина рекорда — в записи
+## (`vehicle`, id класса), на экране её не называем. Файл старого вида (топ-10 отдельно по каждому классу)
+## при чтении сливается в общую таблицу; копия старого файла остаётся рядом (leaderboard.json.v1).
 ## Файл мог быть испорчен (обрыв записи, правка руками): при чтении записи без счёта и чужих типов
 ## отбрасываются, остальные приводятся к своим типам и сортируются; если что-то пришлось выбросить
 ## (или файл не разобрать), копия остаётся в leaderboard.json.bad, а в консоль — предупреждение.
@@ -13,9 +15,11 @@ const SIZE := 10
 const NAME_MAX := 8                    ## имя в таблице — до стольких знаков
 const BAD_SUFFIX := ".bad"
 const TMP_SUFFIX := ".tmp"
+const V1_SUFFIX := ".v1"               ## копия файла старого вида (таблицы по классам) до слияния
+const KEY := "entries"                 ## файл: {"entries": [...]}
 
 var path: String
-var _tables: Dictionary = {}     ## класс → массив записей {name, score, time, shipments, cause, date}
+var _list: Array = []                  ## записи {name, score, time, shipments, cause, date, vehicle} по убыванию счёта
 
 
 func _init(file_path: String = DEFAULT_PATH) -> void:
@@ -23,36 +27,33 @@ func _init(file_path: String = DEFAULT_PATH) -> void:
 	_load()
 
 
-func entries(class_id: StringName) -> Array:
-	return _tables.get(String(class_id), [])
+func entries() -> Array:
+	return _list
 
 
 ## Позиция, которую займёт счёт (0 — первое место), или -1, если в топ не попадает.
-func rank_for(class_id: StringName, score: int) -> int:
-	var list := entries(class_id)
-	for i in list.size():
-		if score > int(list[i]["score"]):
+func rank_for(score: int) -> int:
+	for i in _list.size():
+		if score > int(_list[i]["score"]):
 			return i
-	return list.size() if list.size() < SIZE else -1
+	return _list.size() if _list.size() < SIZE else -1
 
 
 ## Добавляет запись и сохраняет файл. Возвращает её место (0..9) или -1.
-func add(class_id: StringName, entry: Dictionary) -> int:
-	var rank := rank_for(class_id, int(entry["score"]))
+func add(entry: Dictionary) -> int:
+	var rank := rank_for(int(entry["score"]))
 	if rank < 0:
 		return -1
-	var list: Array = entries(class_id).duplicate()
-	list.insert(rank, entry)
-	if list.size() > SIZE:
-		list.resize(SIZE)
-	_tables[String(class_id)] = list
+	_list.insert(rank, entry)
+	if _list.size() > SIZE:
+		_list.resize(SIZE)
 	_save()
 	return rank
 
 
 ## Запись из файла в привычном виде: счёт обязателен (конечное число), прочие поля — своего типа или
-## по умолчанию. null — запись не годится.
-static func clean_entry(raw: Variant) -> Variant:
+## по умолчанию; vehicle — машина рекорда (в файле старого вида — ключ таблицы). null — запись не годится.
+static func clean_entry(raw: Variant, vehicle: String = "") -> Variant:
 	if not raw is Dictionary:
 		return null
 	var e: Dictionary = raw
@@ -68,6 +69,7 @@ static func clean_entry(raw: Variant) -> Variant:
 		"shipments": int(shipments) if (shipments is float or shipments is int) and is_finite(float(shipments)) else 0,
 		"cause": e["cause"] if e.get("cause") is String else "",
 		"date": e["date"] if e.get("date") is String else "",
+		"vehicle": e["vehicle"] if e.get("vehicle") is String else vehicle,
 	}
 
 
@@ -87,28 +89,32 @@ func _load() -> void:
 		_keep_bad(from, "not a JSON object")
 		return
 	var dropped := 0
+	var legacy := false
+	var all: Array = []
 	for key: Variant in parsed:
 		var list: Variant = parsed[key]
 		if not key is String or not list is Array:
 			dropped += 1
 			continue
-		var clean: Array = []
+		legacy = legacy or key != KEY          # старый вид: ключ — класс машины
 		for raw: Variant in list:
-			var e: Variant = clean_entry(raw)
+			var e: Variant = clean_entry(raw, "" if key == KEY else key)
 			if e == null:
 				dropped += 1
 			else:
-				clean.append(e)
-		# Таблица — по убыванию счёта (rank_for на это рассчитывает); равные — в прежнем порядке.
-		var sorted := true
-		for i in range(1, clean.size()):
-			sorted = sorted and int(clean[i - 1]["score"]) >= int(clean[i]["score"])
-		if not sorted:
-			clean.sort_custom(func(a: Dictionary, b: Dictionary) -> bool: return int(a["score"]) > int(b["score"]))
-		if clean.size() > SIZE:
-			dropped += clean.size() - SIZE
-			clean.resize(SIZE)
-		_tables[key] = clean
+				all.append(e)
+	if legacy and not FileAccess.file_exists(path + V1_SUFFIX):
+		DirAccess.copy_absolute(from, path + V1_SUFFIX)
+	# Таблица — по убыванию счёта (rank_for на это рассчитывает); равные — в прежнем порядке.
+	var order := range(all.size())
+	order.sort_custom(func(a: int, b: int) -> bool:
+		var sa := int(all[a]["score"])
+		var sb := int(all[b]["score"])
+		return sa > sb or (sa == sb and a < b))
+	for i in mini(order.size(), SIZE):
+		_list.append(all[order[i]])
+	if not legacy and all.size() > SIZE:
+		dropped += all.size() - SIZE
 	if dropped > 0:
 		_keep_bad(from, "%d bad entries dropped" % dropped)
 
@@ -122,7 +128,7 @@ func _keep_bad(from: String, why: String) -> void:
 
 
 func _save() -> void:
-	var text := JSON.stringify(_tables, "\t")
+	var text := JSON.stringify({KEY: _list}, "\t")
 	var tmp := path + TMP_SUFFIX
 	if _write(tmp, text) and DirAccess.rename_absolute(tmp, path) == OK:
 		return

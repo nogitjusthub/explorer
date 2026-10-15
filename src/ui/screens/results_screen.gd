@@ -1,6 +1,6 @@
 class_name ResultsScreen
 extends CanvasLayer
-## Экран итога (GDD §6): причина конца, разбор счёта, ввод имени при попадании в топ-10 класса
+## Экран итога (GDD §6): причина конца, разбор счёта, ввод имени при попадании в общий топ-10 (все машины)
 ## (до Leaderboard.NAME_MAX знаков — всё, что есть на обычной клавиатуре: латиница, кириллица, цифры, пробел,
 ## знаки; ввод всегда с пустого поля и первой позиции; с клавиатуры набирается прямо, Backspace стирает;
 ## аркадный выбор для геймпада и стрелок: ↑/↓ — знак, ←/→ — позиция; Enter — готово; на телефоне — тап по
@@ -19,9 +19,10 @@ const LETTERS_Y := 166.0
 const SLOT_W := 18.0                     ## шаг позиций имени: знак кеглем 20 — до 16 пикселей
 const LINE_H := 11.0                     ## шаг строк таблиц: шрифт 10 px и пиксель зазора
 const INPUT_DELAY_S := 0.8             ## нажатия в первые доли секунды игнорируются (палец ещё на газе)
+## Причина конца — заголовок итога. Говорим о машине (её портрет рядом): женский род, без слова «машина».
 const CAUSE_TEXT := {
 	"evacuated": "ВОЗВРАЩЕНИЕ НА ОРБИТУ",
-	"drowned": "МАШИНА УТОНУЛА",
+	"drowned": "УТОНУЛА",
 	"fall": "РАЗБИТА ПРИ ПАДЕНИИ",
 	"tree": "РАЗБИТА О ДЕРЕВЬЯ",
 	"ram": "РАЗБИТА О ЗВЕРЕЙ",
@@ -30,13 +31,13 @@ const CAUSE_TEXT := {
 	"quake": "РАЗБИТА ЗЕМЛЕТРЯСЕНИЕМ",
 	"acid": "РАЗЪЕДЕНА КИСЛОТНЫМ ГАЗОМ",
 	"tornado": "РАЗБИТА СМЕРЧЕМ",
-	"hopper": "ЗАГРЫЗЛИ СКАКУНЫ",
+	"hopper": "ЗАГРЫЗЕНА СКАКУНАМИ",
 	"worm": "ПРОГЛОЧЕНА ЧЕРВЁМ",
 	"shellback": "РАЗБИТА ПАНЦИРНИКОМ",
-	"empty_tank": "КОНЧИЛОСЬ ТОПЛИВО",
+	"empty_tank": "ОСТАЛАСЬ БЕЗ ТОПЛИВА",
 	"shuttle": "РАЗДАВЛЕНА ЧЕЛНОКОМ",
 	"whirlpool": "УТОНУЛА В ВОДОВОРОТЕ",
-	"ray": "УБИТА ТРОЕГЛАЗКОЙ",
+	"ray": "СОЖЖЕНА ТРОЕГЛАЗКОЙ",
 	"shark": "РАЗОРВАНА ИЛОЗУБОМ",
 	"nessie": "РАЗБИТА ОЗЁРНЫМ ЧУДОВИЩЕМ",
 }
@@ -88,7 +89,7 @@ func _ready() -> void:
 	_restart = _button("ЗАНОВО", "R", restart_requested.emit, Vector2(232, 296), false, true)
 	_exit = _button("ВЫХОД", "Esc", exit_requested.emit, Vector2(248, 296), false)
 	var score := int(result["score"])
-	_rank = board.rank_for(StringName(result["class"]), score) if score > 0 else -1
+	_rank = board.rank_for(score) if score > 0 else -1
 	_entering = _rank >= 0
 	_update_buttons()
 	_letters = letters_of("")                # ввод — всегда с пустого поля
@@ -243,10 +244,10 @@ func _type_key(k: InputEventKey) -> bool:
 
 func _save_entry() -> void:
 	var entry_name := compose_name(_letters)
-	_highlight = board.add(StringName(result["class"]), {
+	_highlight = board.add({
 		"name": entry_name, "score": int(result["score"]), "time": snappedf(float(result["time"]), 0.1),
 		"shipments": int(result["shipments"]), "cause": String(result["cause"]),
-		"date": Time.get_date_string_from_system(),
+		"date": Time.get_date_string_from_system(), "vehicle": String(result["class"]),
 	})
 	_entering = false
 	_update_buttons()
@@ -256,7 +257,7 @@ func _draw_screen() -> void:
 	var w := _canvas.size.x
 	var cause := String(result["cause"])
 	var evacuated := cause == String(RunState.CAUSE_EVACUATED)
-	_text(Vector2(0, 30), CAUSE_TEXT.get(cause, "МАШИНА УНИЧТОЖЕНА"), UiKit.TITLE,
+	_text(Vector2(0, 30), CAUSE_TEXT.get(cause, "УНИЧТОЖЕНА"), UiKit.TITLE,
 			COLOR_GOOD if evacuated else COLOR_BAD, HORIZONTAL_ALIGNMENT_CENTER, w)
 
 	var lines: Array[Array] = []
@@ -299,13 +300,11 @@ func _draw_screen() -> void:
 				var s := -1.0 if up else 1.0
 				_canvas.draw_colored_polygon(PackedVector2Array([c + Vector2(-4, -2 * s), c + Vector2(4, -2 * s),
 						c + Vector2(0, 3 * s)]), COLOR_MARK)
-		_text(Vector2(0, y + 24), "Набери имя (до %d знаков), Backspace — стереть" % Leaderboard.NAME_MAX,
-				UiKit.TEXT, COLOR_DIM, HORIZONTAL_ALIGNMENT_CENTER, w)
-		_text(Vector2(0, y + 24 + LINE_H), "↑ ↓ — знак,  ← → — позиция,  Enter — готово", UiKit.TEXT, COLOR_DIM,
+		_text(Vector2(0, y + 24), "Backspace — стереть,  ↑ ↓ — знак,  ← → — позиция", UiKit.TEXT, COLOR_DIM,
 				HORIZONTAL_ALIGNMENT_CENTER, w)
 		return
 
-	var list := board.entries(StringName(result["class"]))
+	var list := board.entries()
 	_text(Vector2(0, y), "РЕКОРДЫ", UiKit.TEXT, COLOR_DIM, HORIZONTAL_ALIGNMENT_CENTER, w)
 	y += 11.0
 	for i in list.size():

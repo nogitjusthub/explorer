@@ -22,6 +22,7 @@ signal cargo_shipped(value: int, emergency: bool)
 # Угрозы и погода
 signal threat_telegraphed(kind: StringName, at: Vector3, seconds: float, dir_hint: Vector2)
 signal threat_ended(kind: StringName)
+signal fault_opened(path: PackedVector2Array)   ## толчок землетрясения: линия разлома (мировые x, z) — пугает фауну
 signal lightning_struck(at: Vector3)
 signal sheet_lightning(at: Vector3)        ## зарница в тучах — вспышка и далёкий гром без удара
 signal wind_changed(dir: Vector2, strength: float)

@@ -10,7 +10,9 @@ extends Creature
 ## укусы не двигают — только раскачивают корпус. Кусают только на одном с машиной уровне (Creature.same_level):
 ## машина под скалой или на ней — стая обходит уступ по полю путей, а обхода нет — ждёт у края.
 ## Танк на ходу расшвыривает стаю. Не подобраться к машине
-## fauna_give_up_s (или погоня дольше hopper_chase_s / дальше hopper_chase_dist) — стая уходит и пропадает.
+## fauna_give_up_s (или погоня дольше hopper_chase_s / дальше hopper_chase_dist), испугалась (смерч, молния, разлом
+## рядом, капсула десанта) — стая отбегает от машины, затем возвращается к месту появления (не пройти — живёт, где
+## застряла) и снова патрулирует; CALM_S машину не замечает. На глазах не пропадает — уходит только вдали.
 ## Разбуженная шумным событием (посадка челнока) стая сначала бежит к нему — это ещё не погоня, её пределы
 ## не тратятся; заметила машину — погоня с этого места. Добежала, а машины не видно — ждёт, пока слышен
 ## шум, и остаётся патрулировать там; застряла по пути — патрулирует, где стоит.
@@ -51,7 +53,9 @@ const ALERT_S := 0.6
 const SEE_R := 8.0                       ## тайлов: в погоне машину ближе этого стая видит и без шума
 const STANDOFF := 0.8                    ## стая встаёт на таком расстоянии от центра машины
 const REACH := 1.05                      ## отсюда передний достаёт машину броском
-const RETREAT_S := 6.0
+const RETREAT_S := 2.5                   ## отступление: столько отбегает от машины, потом — шагом домой
+const HOME_STUCK_S := 2.0                ## не продвигается к дому столько — остаётся жить здесь
+const CALM_S := 12.0                     ## после отступления столько не замечает машину (не кидается снова)
 const LUNGE_S := 0.3
 const LUNGE_LEN := 0.42
 const STUN_S := 1.0
@@ -91,6 +95,7 @@ var _chase_t := 0.0
 var _cd := 0.0
 var _lunge := 0.0
 var _stun := 0.0
+var _calm := 0.0                         ## машину не замечает ещё столько (после отступления)
 
 
 func _init() -> void:
@@ -118,11 +123,13 @@ func flee() -> void:
 	state = State.RETREAT
 	aggressive = false
 	_timer = RETREAT_S
+	_calm = CALM_S
+	_stuck = 0.0
 
 
 ## Разбудить (шумное событие — посадка челнока): крик и бег на шум.
 func wake(toward: Variant = null) -> void:
-	if state == State.IDLE:
+	if state == State.IDLE and _calm <= 0.0:
 		source = toward
 		_alert()
 
@@ -138,7 +145,10 @@ func step(dt: float) -> void:
 	match state:
 		State.IDLE:
 			_patrol(dt)
-			if noise.hears_vehicle(pos) or pos.distance_to(vehicle.state.pos) < rules.hopper_sight_r:
+			_calm = maxf(_calm - dt, 0.0)
+			if _calm > 0.0:
+				pass
+			elif noise.hears_vehicle(pos) or pos.distance_to(vehicle.state.pos) < rules.hopper_sight_r:
 				_alert()
 			else:
 				var heard: Variant = noise.heard_source(pos)
@@ -156,10 +166,11 @@ func step(dt: float) -> void:
 			_chase(dt)
 		State.RETREAT:
 			_timer -= dt
-			var away := (pos - vehicle.state.pos).normalized()
-			_move_pack(pos + away * 3.0, rules.hopper_wander_speed * 2.5, dt)
-			if _timer <= 0.0:
-				finished = true
+			if _timer > 0.0:
+				var away := (pos - vehicle.state.pos).normalized()
+				_move_pack(pos + away * 3.0, rules.hopper_wander_speed * 2.5, dt)
+			else:
+				_go_home(dt)
 	_place_all(dt)
 
 
@@ -207,6 +218,19 @@ func _run_to_source(dt: float, hunting: bool) -> void:
 		return
 	if not there:
 		_move_pack(target, rules.hopper_speed, dt)
+
+
+## Отступила — шагом домой: дошла — патрулирует там; не пройти (стенка, вода) — остаётся жить, где застряла.
+func _go_home(dt: float) -> void:
+	var before := pos
+	_move_pack(home, rules.hopper_wander_speed * 1.5, dt)
+	_stuck = _stuck + dt if pos.distance_squared_to(before) < 0.0001 else 0.0
+	if pos.distance_to(home) < 0.5 or _stuck > HOME_STUCK_S:
+		state = State.IDLE
+		home = pos
+		_goal = pos
+		_timer = 0.0
+		_stuck = 0.0
 
 
 ## Остаётся здесь: патрулирует вокруг этого места, машину замечает, как обычно.

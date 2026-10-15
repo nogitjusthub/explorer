@@ -7,8 +7,8 @@ extends Node3D
 ## серия из двух-трёх ударов подряд (next_strike_gap); часть рядом с машиной (если она под фронтом),
 ## остальные — по фронту; точка выбирается с весом по высоте (вершины и деревья притягивают удары).
 ## Телеграф — светящийся круг и треск, удар через strike_telegraph_s: урон, поваленное дерево, из
-## кристаллической породы выбиваются кристаллы; изредка (strike_crater_chance, в воду — никогда) —
-## воронка с каменным крошевом на дне. Тень рисуют шейдеры по глобальным параметрам
+## кристаллической породы выбиваются кристаллы; на суше — временное выжженное пятно (GroundScars; землю
+## молния не копает). Тень рисуют шейдеры по глобальным параметрам
 ## storm_center / storm_radius.
 
 signal damaged(amount: int, source: StringName)
@@ -33,6 +33,7 @@ var generator: TerrainGenerator
 var streamer: WorldStreamer
 var pickups: PickupField
 var rng: RandomNumberGenerator
+var scars: GroundScars                    ## временные следы на земле (ThreatDirector)
 
 var center := Vector2.ZERO
 var direction := Vector2.RIGHT
@@ -254,18 +255,9 @@ func _strike(p: Vector2) -> void:
 	if query.material(t.x, t.y) == ChunkData.Mat.CRYSTAL:
 		for _i in 1 + rng.randi() % 2:
 			pickups.drop(&"crystal", p, 0.8)
-	# Воронка — изредка и только на суше: дно водоёма молния не трогает.
-	if query.water_tier(t.x, t.y) != TerrainQuery.NO_WATER or rng.randf() >= rules.strike_crater_chance:
-		return
-	Deformation.crater(terrain, p, rules.strike_radius, rules.strike_crater_depth)
-	# Каменное крошево на дне воронки — неровный грунт.
-	var debris: Array[Vector2i] = []
-	for dz in range(-1, 2):
-		for dx in range(-1, 2):
-			var n := t + Vector2i(dx, dz)
-			if Vector2(n.x + 0.5, n.y + 0.5).distance_to(p) < rules.strike_radius * 0.9:
-				debris.append(n)
-	Deformation.mark_ground(terrain, debris, ChunkData.FLAG_ROUGH)
+	# Выжженное пятно — на суше, временное: землю молния не копает (воронки складывались в ямы у машины).
+	if scars != null and query.water_tier(t.x, t.y) == TerrainQuery.NO_WATER:
+		scars.spot(p, rules.strike_radius * 0.8)
 
 
 ## Молния — ломаная от тучи до земли с ответвлениями: яркая сердцевина и голубое свечение, вспышка

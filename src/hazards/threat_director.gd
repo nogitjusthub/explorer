@@ -24,6 +24,7 @@ var forced: Array[Dictionary] = []         ## отладка: [{kind, at}] — �
 
 var level := 1
 var stats := {"storm": 0, "quake": 0, "strikes": 0, "fog": 0, "acid": 0, "dust": 0, "tornado": 0, "whirlpool": 0}   ## для отчёта бенчмарка
+var scars: GroundScars                       ## временные следы угроз на земле (смерч, молния) — живут дольше угрозы
 var _rng: RandomNumberGenerator
 var _time := 0.0
 var _distance0 := 0.0
@@ -41,6 +42,8 @@ var _whirlpool: Whirlpool = null
 
 func _ready() -> void:
 	name = "ThreatDirector"
+	scars = GroundScars.new()
+	add_child(scars)
 	EventBus.cargo_shipped.connect(_on_cargo_shipped)
 	EventBus.lightning_struck.connect(func(_at: Vector3) -> void: stats["strikes"] += 1)
 
@@ -300,6 +303,8 @@ func _setup(hazard: Node) -> void:
 	hazard.set(&"streamer", streamer)
 	hazard.set(&"pickups", pickups)
 	hazard.set(&"rng", _rng)
+	scars.query = query
+	hazard.set(&"scars", scars)
 	hazard.connect(&"damaged", func(amount: int, source: StringName) -> void: damaged.emit(amount, source))
 
 

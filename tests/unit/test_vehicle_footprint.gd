@@ -107,3 +107,19 @@ func test_no_bridge_when_the_corners_differ() -> void:
 	var ne := Vector2(1, -1).normalized()
 	var s := _state(f, _rover(), Vector2(10.45, 10.65), ne.angle())
 	assert_false(_drive_through(f, s, ne, 1.5), "no common vertex height — falls into the side tile as before")
+
+
+## Снос (смерч, ветер) прижимает машину к стенке, а она сама туда не едет: курс не выравнивается вдоль стенки
+## каждый кадр — машина разворачивается и уезжает (было: ховер в углу смерча не мог ни повернуть, ни уехать).
+func test_pushed_against_a_wall_can_turn_away() -> void:
+	for id in ["rover", "hover"]:
+		var cls: VehicleClass = load("res://data/vehicles/%s.tres" % id)
+		var f := TerrainFixture.new()
+		f.set_block(0, 0, 30, 9, 8)                                    # стена севернее (z < 10)
+		var s := _state(f, cls, Vector2(12.5, 10.0 + VehicleKinematics.RADIUS), 0.0)   # вплотную, курс вдоль стены
+		var south := Vector2(0, 1)
+		for _i in 120:
+			s.ext_accel = Vector2(0, -3.0)                             # тянет в стену, слабее разгона
+			VehicleKinematics.step(s, south, cls, f.query, DT)
+		assert_true(absf(wrapf(s.heading - PI / 2.0, -PI, PI)) < 0.3, "%s turned south: heading %.2f" % [id, s.heading])
+		assert_true(s.pos.y > 10.6, "%s drove away from the wall: z %.2f" % [id, s.pos.y])
