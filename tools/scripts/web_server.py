@@ -5,8 +5,8 @@
   POST /shot  — PNG в теле запроса, сохраняется в build/web_shots/shot_NN.png (номер — следующий
                 после самого большого из уже лежащих: старые снимки не перезаписываются).
 Игра шлёт туда результаты бенчмарка (?bench=N в адресе страницы) и скриншоты. Параметры вроде
-?bench, ?seed, ?shots игра берёт из адреса только в debug-экспорте (export_web.ps1 -Debug); release-сборка
-принимает лишь ?log-slow и ?shader-audit.
+?bench, ?seed, ?shots игра берёт из адреса в debug-экспорте (export_web.ps1 -Debug) и в release-сборке,
+открытой с 127.0.0.1 / localhost; на GitHub Pages release принимает лишь ?log-slow и ?shader-audit.
 
 Запуск: python tools/scripts/web_server.py [порт]
 """

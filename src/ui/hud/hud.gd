@@ -260,7 +260,7 @@ func _draw_bottom(size: Vector2) -> void:
 		&"no_place":
 			call_line = "АВАРИЙНЫЙ ЧЕЛНОК — ищет, где сесть"
 		&"water":
-			call_line = "Вызов челнока на воде не возможен" if _fuel <= 0.0 else ""
+			call_line = "Вызов челнока на воде невозможен" if _fuel <= 0.0 else ""
 		&"idle":
 			call_line = "Вызов аварийного челнока [F]" if _fuel <= 0.0 else ""
 	if _fuel <= 0.0:

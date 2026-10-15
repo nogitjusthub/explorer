@@ -1,12 +1,14 @@
 # Explorer
 
-Изометрическая аркада на рекорд: высадись на живую чужую планету, набей трюм и выберись живым.
+Изометрическая аркада на рекорд: высадись на живую чужую планету, набери груз и выберись живым.
 Godot 4.7.2, GDScript, рендерер Compatibility (ПК и веб).
 
-**Играть в браузере:** https://nogitjusthub.github.io/explorer/ (обновить страницу после коммитов — `tools\scripts\publish_web.ps1`).
+**Играть в браузере:** https://nogitjusthub.github.io/explorer/ (обновление — `publish_web.ps1`, см. «Запуск и инструменты»).
 
 - Дизайн: [docs/GDD.md](docs/GDD.md)
 - Архитектура: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
+- Варианты облика фауны (материал для выбора, не GDD): [docs/CREATURE_OPTIONS.md](docs/CREATURE_OPTIONS.md)
+- Планеты (предложение для бэклога, в игре пока одна планета): [docs/PLANETS.md](docs/PLANETS.md)
 
 ## Установка
 
@@ -52,12 +54,19 @@ powershell -ExecutionPolicy Bypass -File tools\scripts\test.ps1 -Filter smoke
 # Веб-сборка (build/web/) и локальный сервер: http://127.0.0.1:8000
 powershell -ExecutionPolicy Bypass -File tools\scripts\get_templates.ps1        # один раз
 powershell -ExecutionPolicy Bypass -File tools\scripts\build_web_template.ps1   # один раз: свой урезанный шаблон
-powershell -ExecutionPolicy Bypass -File tools\scripts\export_web.ps1
+powershell -ExecutionPolicy Bypass -File tools\scripts\export_web.ps1      # [-Debug] [-Serve] — отладочная сборка / сразу поднять сервер
 python tools\scripts\web_server.py 8000
 
-# Замер загрузки веб-сборки без окон (headless Chrome, холодный кэш): build/web_runs/<время>-full-1/summary.txt
+# Публикация на GitHub Pages: release-сборка рабочего дерева (незакоммиченные правки тоже уйдут) — в ветку gh-pages
+# (worktree build/gh-pages) одним коммитом без истории, push -f; -NoPush — только собрать и закоммитить
+powershell -ExecutionPolicy Bypass -File tools\scripts\publish_web.ps1
+
+# Замер веб-сборки без окон (Node 22+, headless Chrome, холодный кэш; сначала export_web.ps1): загрузка + «Высадка» + 120 с игры
+# → build/web_runs/<время>-full-1/summary.txt; только загрузка — --scenario load
 node tools\scripts\web_bench.mjs --scenario full --assert
 ```
+
+Параметры адреса веб-сборки (`?seed=7&bench=40`, на 127.0.0.1 — все отладочные; на Pages — только `log-slow` и `shader-audit`) и ключи раннера — в [ARCHITECTURE.md](docs/ARCHITECTURE.md), §12.
 
 Release-экспорт идёт на своём шаблоне `tools/godot/templates/web_nothreads_release.zip` (`index.wasm` 39,5 → 22,2 МБ, в gzip 10,1 → 5,6 МБ): Godot собран из исходников без физики, сети, лишних форматов и классов, которых нет в игре. Исходники, Emscripten и объектники — вне репозитория, в `..\godot-web-build`; правки движка (`tools/web/godot_patches/`) накладываются при сборке — без них первая загрузка в браузере в несколько раз дольше. Без этого zip `export_web.ps1` берёт официальный шаблон. Что отключено и что делать, если игре понадобится, — [ARCHITECTURE.md](docs/ARCHITECTURE.md), §12.
 

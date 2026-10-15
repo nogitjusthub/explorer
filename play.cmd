@@ -105,6 +105,6 @@ echo   play.cmd --spawn=100,60 --event=quake@5           землетрясен�
 echo   play.cmd --idle --shuttle-in=6 --shuttle-dist=0   челнок на площадке старта через 6 с
 echo   play.cmd --idle --fuel=0.1 --event=strike@3       пустой бак и молния в машину
 echo.
-echo В игре: W/A/S/D — движение, F — аварийный челнок, Q/E — поворот камеры, Esc — пауза, F1 — справка, F3 — отладка, F12 — снимок в build\debug
+echo В игре: W/A/S/D — движение, F — аварийный челнок, Q/E — поворот камеры, M — карта, Esc — пауза и настройки, F1 — справка, F3 — отладка, F12 — снимок в build\debug
 chcp %_oldcp% >nul
 exit /b
