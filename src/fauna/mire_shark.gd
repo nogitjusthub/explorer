@@ -1254,7 +1254,7 @@ func _update_wake() -> void:
 	_wake.initial_velocity_min = 0.6 + 0.6 * fast if wet else 0.6
 	_wake.initial_velocity_max = 1.4 + 1.2 * fast if wet else 1.4
 	_ripples.position = at
-	((_wake.mesh as QuadMesh).material as StandardMaterial3D).albedo_color = FOAM_COLOR if wet else _clod
+	_wake.color = FOAM_COLOR if wet else _clod
 	_ripple_mat.set_shader_parameter(&"tint", FOAM_COLOR if wet else _mud)
 
 
@@ -1266,7 +1266,7 @@ func _burst(p: Vector2, y: float, amount: int, speed: float) -> void:
 	_splash.initial_velocity_min = speed * 0.5
 	_splash.initial_velocity_max = speed
 	_splash.position = Vector3(p.x, y + 0.05, p.y)
-	((_splash.mesh as QuadMesh).material as StandardMaterial3D).albedo_color = FOAM_COLOR if _over_water(p) else _clod
+	_splash.color = FOAM_COLOR if _over_water(p) else _clod
 	_splash.restart()
 	_splash.emitting = true
 
@@ -1408,9 +1408,9 @@ func _build() -> void:
 		_mesh(pec, _hull_mesh(fan), _fin_mat)
 		_pecs.append(pec)
 
-	_wake = _particles(12, 0.5, 1, 0.6, 1.4, 35.0)
+	_wake = _particles(12, 0.5, 0.6, 1.4, 35.0)
 	_ripples = _ripple_trail()
-	_splash = _particles(30, 0.7, 2, 1.5, 3.0, 55.0)
+	_splash = _particles(30, 0.7, 1.5, 3.0, 55.0)
 	_splash.one_shot = true
 	_splash.explosiveness = 0.9
 	_splash.emitting = false
@@ -1580,17 +1580,13 @@ static func _hull(st: SurfaceTool, pts: Array[Vector3]) -> void:
 				MeshKit.tri(st, pts[i], pts[j], pts[k], -nrm if above else nrm)
 
 
-func _particles(amount: int, lifetime: float, texels: int, v_min: float, v_max: float, spread: float) -> CPUParticles3D:
-	var p := CPUParticles3D.new()
-	p.amount = amount
-	p.lifetime = lifetime
-	p.direction = Vector3.UP
+## Комья ила и брызги — комья PixelFx (как у всех); цвет — ил или пена, по месту.
+func _particles(amount: int, lifetime: float, v_min: float, v_max: float, spread: float) -> CPUParticles3D:
+	var p := PixelFx.clods(amount, lifetime)
+	p.color = _mud
 	p.spread = spread
 	p.initial_velocity_min = v_min
 	p.initial_velocity_max = v_max
-	p.gravity = Vector3(0, -9.0, 0)
-	p.local_coords = false
-	p.mesh = PixelFx.quad(texels, _mud)
 	add_child(p)
 	return p
 

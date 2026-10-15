@@ -141,6 +141,36 @@ body {
 			<div id="status-notice"></div>
 		</div>
 
+		<script>
+// Программы шейдеров, которые браузер ещё собирает в фоне: правка движка 0002 не ждёт сборки
+// (KHR_parallel_shader_compile), и экран загрузки ждёт, пока таких не останется (ShaderCache.pending_programs).
+// Без расширения программа собирается сразу — её не считаем.
+(function () {
+	const COMPLETION_STATUS_KHR = 0x91B1;
+	const pending = new Map();         // программа → контекст
+	const parallel = new WeakMap();    // контекст → есть ли расширение
+	const proto = WebGL2RenderingContext.prototype;
+	const link = proto.linkProgram;
+	proto.linkProgram = function (program) {
+		link.call(this, program);
+		if (!parallel.has(this)) parallel.set(this, this.getExtension('KHR_parallel_shader_compile') !== null);
+		if (parallel.get(this)) pending.set(program, this);
+	};
+	const remove = proto.deleteProgram;
+	proto.deleteProgram = function (program) {
+		pending.delete(program);
+		return remove.call(this, program);
+	};
+	window.explorerShaders = {
+		pending() {
+			for (const [program, gl] of pending) {
+				if (gl.isContextLost() || gl.getProgramParameter(program, COMPLETION_STATUS_KHR)) pending.delete(program);
+			}
+			return pending.size;
+		},
+	};
+}());
+		</script>
 		<script src="$GODOT_URL"></script>
 		<script>
 const GODOT_CONFIG = $GODOT_CONFIG;

@@ -72,12 +72,14 @@ func _draw_screen() -> void:
 	var size := _canvas.size
 	_canvas.draw_rect(Rect2(Vector2.ZERO, size), BG)
 	var c := size * 0.5
-	UiKit.text(_canvas, Vector2(0, c.y - 46), "EXPLORER", UiKit.TITLE, UiKit.COLOR_MARK, HORIZONTAL_ALIGNMENT_CENTER, size.x)
+	# Как в оболочке страницы (assets/web/shell.html): заголовок, полоса, этап, проценты — с зазорами. Подписи —
+	# по базовой линии: строка кегля 10 поднимается над ней на ~9 пикселей, 20 — на ~18.
+	UiKit.text(_canvas, Vector2(0, c.y - 14), "EXPLORER", UiKit.TITLE, UiKit.COLOR_MARK, HORIZONTAL_ALIGNMENT_CENTER, size.x)
 	var bar := Rect2(roundf(c.x - BAR_W * 0.5), roundf(c.y - BAR_H * 0.5), BAR_W, BAR_H)
 	_canvas.draw_rect(bar.grow(1.0), UiKit.COLOR_DIM, false, 1.0)
 	_canvas.draw_rect(Rect2(bar.position, Vector2(floorf(BAR_W * _shown), BAR_H)), UiKit.COLOR_MARK)
-	UiKit.text(_canvas, Vector2(0, c.y + 10), _text, UiKit.TEXT, UiKit.COLOR_TEXT, HORIZONTAL_ALIGNMENT_CENTER, size.x)
-	UiKit.text(_canvas, Vector2(0, c.y + 24), "%d %%" % roundi(_shown * 100.0), UiKit.TEXT, UiKit.COLOR_DIM, HORIZONTAL_ALIGNMENT_CENTER, size.x)
+	UiKit.text(_canvas, Vector2(0, c.y + 19), _text, UiKit.TEXT, UiKit.COLOR_TEXT, HORIZONTAL_ALIGNMENT_CENTER, size.x)
+	UiKit.text(_canvas, Vector2(0, c.y + 32), "%d %%" % roundi(_shown * 100.0), UiKit.TEXT, UiKit.COLOR_DIM, HORIZONTAL_ALIGNMENT_CENTER, size.x)
 	# Все знаки шрифта — внутри кадра, но цветом фона (не видно): растеризуются сейчас, а не в игре.
 	for fs in [UiKit.TEXT, UiKit.TITLE]:
 		_canvas.draw_string(UiKit.FONT, Vector2(2, size.y - 3), GLYPHS, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, BG)

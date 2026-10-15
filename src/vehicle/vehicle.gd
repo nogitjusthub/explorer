@@ -19,6 +19,7 @@ const ROCK_BITE := 0.9
 const ROCK_TREE := 0.8
 const ROCK_WALL := 1.8
 const ROCK_LANDING := 1.0
+const TILT_STEP := 0.75 * Grid.TIER_H   ## перепад опоры от центра больше — стенка или обрыв: на него не опираемся
 const ROCK_RAM := 2.8
 
 var cls: VehicleClass
@@ -231,6 +232,7 @@ func _physics_process(dt: float) -> void:
 			_lift_t = -1.0
 		return
 	var inp := Vector2.ZERO
+	var relative := false                 # управление «относительно машины»: inp — (поворот, ход)
 	if inverted_left > 0.0:
 		inverted_left = maxf(inverted_left - dt, 0.0)
 		_shock.set_active(inverted_left > 0.0 and not wrecked, _model.root)
@@ -238,12 +240,17 @@ func _physics_process(dt: float) -> void:
 		if autopilot != null:
 			inp = autopilot.direction(state, dt)
 		else:
-			inp = VehicleInput.world_direction(camera)
+			relative = Settings.control_mode == Settings.ControlMode.VEHICLE
+			inp = VehicleInput.drive_turn() if relative else VehicleInput.world_direction(camera)
 			if inverted_left > 0.0:
 				inp = -inp
 	var before := state.pos
 	state.speed_cap = crawl_speed if out_of_fuel else INF
-	var r := VehicleKinematics.step(state, inp, cls, query, dt)
+	var r: VehicleKinematics.StepResult
+	if relative:
+		r = VehicleKinematics.step_relative(state, inp.y, inp.x, cls, query, dt)
+	else:
+		r = VehicleKinematics.step(state, inp, cls, query, dt)
 	total_distance += before.distance_to(state.pos)
 	if r.landed:
 		landed.emit(r.fell_tiers, r.fall_damage)
@@ -303,14 +310,22 @@ func _ground_basis() -> Basis:
 	var fwd := Vector3(f.x, 0.0, f.y)
 	var right := Vector3(-f.y, 0.0, f.x)
 	var p := state.pos
-	var hf := _height(p.x + f.x * 0.45, p.y + f.y * 0.45)
-	var hb := _height(p.x - f.x * 0.45, p.y - f.y * 0.45)
-	var hr := _height(p.x + right.x * 0.3, p.y + right.z * 0.3)
-	var hl := _height(p.x - right.x * 0.3, p.y - right.z * 0.3)
+	var h0 := _height(p.x, p.y)
+	var hf := _support(h0, p.x + f.x * 0.45, p.y + f.y * 0.45)
+	var hb := _support(h0, p.x - f.x * 0.45, p.y - f.y * 0.45)
+	var hr := _support(h0, p.x + right.x * 0.3, p.y + right.z * 0.3)
+	var hl := _support(h0, p.x - right.x * 0.3, p.y - right.z * 0.3)
 	var f3 := Vector3(fwd.x * 0.9, hf - hb, fwd.z * 0.9).normalized()
 	var r3 := Vector3(right.x * 0.6, hr - hl, right.z * 0.6).normalized()
 	var up := r3.cross(f3).normalized()
 	return Basis.looking_at(f3, up)
+
+
+## Высота точки опоры для наклона: за стенкой или обрывом (перепад больше TILT_STEP от центра) машина на
+## точку не опирается — берётся высота центра. Иначе у стенки нос «лез на неё», а над обрывом клевал заранее.
+func _support(h0: float, x: float, z: float) -> float:
+	var h := _height(x, z)
+	return h if absf(h - h0) <= TILT_STEP else h0
 
 
 ## Высота опоры: поверхность, а для машины на подушке — не ниже зеркала воды.

@@ -59,6 +59,7 @@ const PX := Grid.ART_PX            ## пиксель обшивки — как �
 
 
 var kind: Kind
+var query: TerrainQuery                  ## рельеф под челноком — цвет пыли (без него — цвет грунта по умолчанию)
 var zone_r := 2.0
 var hull_r := MAIN_HULL_R
 
@@ -156,22 +157,18 @@ func _sound(event: StringName, seconds: float) -> void:
 
 ## Пыль кольцом из-под челнока (касание, взлёт).
 func dust(radius: float) -> void:
-	var p := CPUParticles3D.new()
+	var p := PixelFx.dust(70 if kind == Kind.MAIN else 36, 1.6)     # как у всех (PixelFx), цвет грунта
 	p.one_shot = true
 	p.explosiveness = 0.8
-	p.amount = 70 if kind == Kind.MAIN else 36
-	p.lifetime = 1.6
+	p.color = PixelFx.dust_color(query, global_position.x, global_position.z)
 	p.emission_shape = CPUParticles3D.EMISSION_SHAPE_RING
 	p.emission_ring_axis = Vector3.UP
 	p.emission_ring_radius = radius
 	p.emission_ring_inner_radius = radius * 0.4
 	p.emission_ring_height = 0.1
-	p.direction = Vector3.UP
 	p.spread = 75.0
 	p.initial_velocity_min = 1.5
 	p.initial_velocity_max = 4.0
-	p.gravity = Vector3(0, -3.0, 0)
-	p.mesh = PixelFx.quad(4, Color(0.7, 0.58, 0.5))
 	p.position = Vector3(0, 0.1, 0)
 	add_child(p)
 	p.emitting = true

@@ -7,8 +7,9 @@ extends Node3D
 ## (fault_length_min…max), высоту сброса (одна сторона поднимается на 1…fault_up_max, другая
 ## опускается на 0…fault_down_max) и редкость пандусов (fault_ramp_every_min…max) — сильный толчок
 ## даёт длинный разлом со сплошными обрывами. Линия — ломаная из 1–4 отрезков (сгибы до 45°,
-## чередуются); вдоль неё — осыпь (неровный грунт, fault_debris_r). Машину на сдвинутом блоке подбрасывает от линии по дуге
-## на quake_toss_dist тайлов: урон + падение. Разлом не ложится ближе fault_pad_clearance к площадкам
+## чередуются); вдоль неё — осыпь (неровный грунт, fault_debris_r). Машину на тайлах разлома (полоса осыпи) подбрасывает
+## от линии по дуге на quake_toss_dist тайлов: урон + падение; дальше от линии сдвинутый блок просто несёт её вверх
+## или вниз — без броска и урона. Разлом не ложится ближе fault_pad_clearance к площадкам
 ## и только на загруженный рельеф.
 
 signal damaged(amount: int, source: StringName)
@@ -18,7 +19,6 @@ const AFTER_S := 1.2                     ## пыль оседает после �
 const COLOR_LINE_FROM := Color(1.0, 1.0, 1.0)
 const COLOR_LINE_TO := Color(0.95, 0.12, 0.08)
 const AFTER_SHAKE_S := 1.5               ## тряска после сдвига затухает за столько
-const COLOR_DUST := Color(0.62, 0.5, 0.42, 0.55)
 const SEGMENT_MIN := 5.0                 ## тайлов — отрезок ломаной разлома не короче
 const MAX_BEND := 45.0                   ## градусов — сгиб между отрезками (угол между ними 135…180°)
 
@@ -134,6 +134,7 @@ func _strike() -> void:
 	_dust.amount = int(_dust.amount * 2)
 	var vt := vehicle.state.tile
 	var before := _tile_corners(vt)
+	var on_fault := _on_fault(vt)
 	Deformation.fault_path(terrain, path, up, down, ramp_every, _coords)
 	Deformation.mark_ground(terrain, _debris_tiles(), ChunkData.FLAG_ROUGH)
 	streamer.request_pit_fill()
@@ -141,7 +142,7 @@ func _strike() -> void:
 	EventBus.camera_shake_requested.emit(1.2 + 0.8 * strength, AFTER_SHAKE_S)
 	(get_node(^"Crack") as Node3D).visible = false
 	var s := vehicle.state
-	if _tile_corners(vt) != before and not s.falling and not s.drowning:
+	if on_fault and _tile_corners(vt) != before and not s.falling and not s.drowning:
 		_toss()
 
 
@@ -151,10 +152,15 @@ func _debris_tiles() -> Array[Vector2i]:
 	var box := FaultLine.path_bounds(path).grow(rules.fault_debris_r + 1.0)
 	for tz in range(floori(box.position.y), ceili(box.end.y)):
 		for tx in range(floori(box.position.x), ceili(box.end.x)):
-			var cc := FaultLine.path_coords(path, _lengths, Vector2(tx + 0.5, tz + 0.5), rules.fault_debris_r + 1.0)
-			if absf(cc.y) <= rules.fault_debris_r and cc.x > 1.0 and cc.x < _length - 1.0:
+			if _on_fault(Vector2i(tx, tz)):
 				out.append(Vector2i(tx, tz))
 	return out
+
+
+## Тайл разлома — в полосе осыпи: центр ближе fault_debris_r к линии (кроме самых концов).
+func _on_fault(t: Vector2i) -> bool:
+	var cc := FaultLine.path_coords(path, _lengths, Vector2(t.x + 0.5, t.y + 0.5), rules.fault_debris_r + 1.0)
+	return absf(cc.y) <= rules.fault_debris_r and cc.x > 1.0 and cc.x < _length - 1.0
 
 
 ## Машину на сдвинутом блоке подбрасывает от линии разлома (поперёк неё, в сторону машины).
@@ -244,16 +250,12 @@ func _build_telegraph() -> void:
 			seg.rotation.y = -atan2(d.y, d.x) + rng.randf_range(-0.12, 0.12)
 			crack.add_child(seg)
 			points.append(Vector3(mid.x, y + 0.1, mid.y))
-	_dust = CPUParticles3D.new()
-	_dust.amount = clampi(roundi(_length * 1.6), 16, 64)
-	_dust.lifetime = 1.4
+	_dust = PixelFx.dust(clampi(roundi(_length * 1.6), 16, 64), 1.4)   # пыль — как у всех (PixelFx)
 	_dust.emission_shape = CPUParticles3D.EMISSION_SHAPE_POINTS
 	_dust.emission_points = points
-	_dust.direction = Vector3.UP
 	_dust.spread = 25.0
 	_dust.initial_velocity_min = 0.4
 	_dust.initial_velocity_max = 1.2
-	_dust.gravity = Vector3(0, -0.6, 0)
-	_dust.mesh = PixelFx.quad(3, Color(COLOR_DUST, 1.0))
-	_dust.emitting = false
+	var mid: Vector3 = points[points.size() / 2] if not points.is_empty() else Vector3.ZERO
+	_dust.color = PixelFx.dust_color(query, mid.x, mid.z)
 	add_child(_dust)

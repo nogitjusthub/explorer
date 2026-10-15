@@ -9,6 +9,7 @@
 //        [--web DIR] [--tag NAME] [--keys q,d,a] (свои нажатия после загрузки)
 //        [--snaps 2,6,12] (снимки страницы на этих секундах) [--trace] (трейс Chrome → trace.json)
 //        [--sources N] (исходники программ после загрузки и N самых дорогих → shader_sources.json)
+//        [--query "seed=7&select&press=pause@3&shots=2" --after S] (свой адрес; ждём загрузки и ещё S секунд)
 //        [--events "acid@1,tornado@3"] [--spawn X,Z] (события и точка старта сценария events)
 //
 // Сценарии (часы сценария — от конца загрузки):
@@ -60,7 +61,9 @@ const SCENARIOS = {
 	map: { query: `seed=${seed}&autopilot&press=map@35,cam_right@39&shots=14&shot-every=3&log-slow=50`, until: (s) => s.has('warmup_done'), after: 55 },
 	events: { query: `seed=${seed}${spawnArg}&select&idle&no-drop&press=radio@1&event=${opts.events || EVENTS}&bench=60&log-slow=50`, until: (s) => s.has('bench_done'), after: 1 },
 };
-const sc = SCENARIOS[scenario];
+// --query "seed=7&select&press=pause@3&shots=2" — свой сценарий: ждём конца загрузки и ещё --after секунд.
+if (opts.query) SCENARIOS.custom = { query: String(opts.query), until: (s) => s.has('loading_done') || s.has('warmup_done'), after: Number(opts.after || 10) };
+const sc = SCENARIOS[opts.query ? 'custom' : scenario];
 if (!sc) die(`unknown scenario ${scenario}`);
 
 const stamp = new Date().toISOString().replace(/[:T]/g, '-').slice(0, 19);

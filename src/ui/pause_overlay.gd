@@ -2,12 +2,12 @@ class_name PauseOverlay
 extends CanvasLayer
 ## Пауза (GDD §8): Esc / Start останавливает забег — всё дерево на паузе, звук тоже. Меню челнока
 ## паузы не даёт (оно поверх игры). Работает, только пока идёт забег (enabled ставит GameFlow). На паузе —
-## регулятор громкости: мышью или A / D (стиком).
+## меню настроек (SettingsPanel: громкость, управление, вид сзади): W / S — пункт, A / D — значение, мышь.
 
 var enabled := false
+var settings: SettingsPanel
 
 var _shade: ColorRect
-var _volume: VolumeSlider
 
 
 func _ready() -> void:
@@ -19,18 +19,11 @@ func _ready() -> void:
 	_shade.set_anchors_preset(Control.PRESET_FULL_RECT)
 	_shade.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(_shade)
-	_line("ПАУЗА", 112, UiKit.TITLE, UiKit.COLOR_TEXT)
-	# Громкость: подпись и регулятор одной строкой по центру.
-	var caption := "ГРОМКОСТЬ"
-	_volume = VolumeSlider.new()
-	add_child(_volume)
-	var cap_w := ceilf(UiKit.FONT.get_string_size(caption, HORIZONTAL_ALIGNMENT_LEFT, -1, UiKit.TEXT).x)
-	var x0 := roundf((480.0 - cap_w - 8.0 - _volume.size.x) * 0.5)
-	var cap := _line(caption, 148, UiKit.TEXT, UiKit.COLOR_DIM)
-	cap.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
-	cap.position.x = x0
-	_volume.position = Vector2(x0 + cap_w + 8.0, 150)
-	_line("A / D — громкость      Esc — продолжить", 182, UiKit.TEXT, UiKit.COLOR_DIM)
+	_line("ПАУЗА", 92, UiKit.TITLE, UiKit.COLOR_TEXT)
+	settings = SettingsPanel.new()
+	add_child(settings)
+	settings.position = Vector2(roundf((480.0 - settings.size.x) * 0.5), 124)
+	_line("Esc — продолжить", 124 + settings.size.y + 10.0, UiKit.TEXT, UiKit.COLOR_DIM)
 	visible = false
 
 
@@ -49,12 +42,12 @@ func _line(text: String, y: float, font_size: int, color: Color) -> Label:
 
 
 func _unhandled_input(event: InputEvent) -> void:
-	# Справка поверх паузы: A / D громкость не трогают.
-	if visible and not HelpScreen.shown(get_tree()) \
-			and (event.is_action_pressed(&"move_left") or event.is_action_pressed(&"move_right")):
-		_volume.nudge(-1 if event.is_action_pressed(&"move_left") else 1)
-		get_viewport().set_input_as_handled()
-		return
+	# Справка поверх паузы: клавиши меню настроек не трогают.
+	if visible and not HelpScreen.shown(get_tree()):
+		for action: StringName in [&"move_up", &"move_down", &"move_left", &"move_right"]:
+			if event.is_action_pressed(action) and settings.handle(action):
+				get_viewport().set_input_as_handled()
+				return
 	if not event.is_action_pressed(&"pause"):
 		return
 	if not enabled and not get_tree().paused:

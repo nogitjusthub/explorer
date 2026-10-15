@@ -111,3 +111,18 @@ func test_fault_polyline_shape() -> void:
 	var cc := FaultLine.path_coords(line, FaultLine.path_lengths(line), Vector2(5, 2))
 	assert_near(cc.x, 5.0, 1e-4, "along")
 	assert_near(cc.y, 2.0, 1e-4, "signed distance")
+
+
+## Землетрясение бросает и ранит машину только на тайлах разлома — в полосе осыпи вдоль линии (fault_debris_r);
+## дальше сдвинутый блок просто несёт её вверх или вниз.
+func test_quake_hurts_only_on_the_fault_tiles() -> void:
+	var q := Quake.new()
+	q.rules = BalanceRules.new()
+	q.path = PackedVector2Array([Vector2(0, 10), Vector2(20, 10)])
+	q._lengths = FaultLine.path_lengths(q.path)
+	q._length = 20.0
+	assert_true(q._on_fault(Vector2i(8, 9)), "next to the line — a fault tile")
+	assert_true(q._on_fault(Vector2i(8, 10)), "the other side too")
+	assert_false(q._on_fault(Vector2i(8, 13)), "three tiles off — the block, not the fault")
+	assert_false(q._on_fault(Vector2i(25, 10)), "past the end of the line")
+	q.free()

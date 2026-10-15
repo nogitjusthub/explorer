@@ -129,6 +129,11 @@ static func habitat(q: TerrainQuery, t: Vector2i) -> bool:
 	return d >= SHALLOW_MIN and d <= SHALLOW_MAX
 
 
+## Тайл осушен: воды нет или над центром мельче SHALLOW_MIN (засыпка ямы, вал, разлом подняли дно).
+static func dried(q: TerrainQuery, t: Vector2i) -> bool:
+	return q.water_tier(t.x, t.y) == TerrainQuery.NO_WATER or q.water_depth(t.x + 0.5, t.y + 0.5) < SHALLOW_MIN
+
+
 ## Сколько глаз открыто на дистанции d (вне разряда): 0, 1 или 2.
 static func eyes_for(d: float) -> int:
 	return 2 if d < EYE2_R else (1 if d < EYE1_R else 0)
@@ -173,12 +178,16 @@ func open_eyes() -> int:
 func step(dt: float) -> void:
 	var s := vehicle.state
 	var d2 := pos.distance_squared_to(s.pos)
-	# Рельеф могли изменить (воронка, землетрясение, борозда смерча) — тело ложится на дно заново раз в
-	# PLACE_S и вдали (оно видно и оттуда), и вблизи.
+	# Рельеф могли изменить (засыпка ямы после сборки чанка, воронка, землетрясение, борозда смерча) — тело
+	# ложится на дно заново раз в PLACE_S и вдали (оно видно и оттуда), и вблизи. Тайл осушило — троеглазка
+	# уходит (углубило — остаётся на новом дне).
 	_place_t -= dt
 	var replace := _place_t <= 0.0
 	if replace:
 		_place_t = PLACE_S
+		if dried(query, Grid.tile_of_world(pos.x, pos.y)):
+			_leave()
+			return
 		_place()
 	if _idle and d2 > FAR_R * FAR_R:
 		_far = true
@@ -222,6 +231,32 @@ func step(dt: float) -> void:
 	_update_fx(dt)
 	_idle = state == State.READY and _order.is_empty() and _tilt <= 0.0 and _ember <= 0.0 \
 			and _arc_t < 0.0 and _ready_seq < 0.0 and _eyes_shut()
+
+
+## Мелкой воды под троеглазкой больше нет: закапывается — облачко пыли и комья грунта (живут у родителя:
+## саму троеглазку директор сразу убирает по finished).
+func _leave() -> void:
+	finished = true
+	visible = false
+	if get_parent() == null:
+		return
+	var at := Vector3(pos.x, ground_y(pos), pos.y)
+	var dust := PixelFx.dust(10, 0.9)
+	dust.color = PixelFx.dust_color(query, pos.x, pos.y)
+	var clods := PixelFx.clods(6, 0.5)
+	clods.color = PixelFx.clod_color(query, pos.x, pos.y)
+	for p: CPUParticles3D in [dust, clods]:
+		p.one_shot = true
+		p.explosiveness = 1.0
+		p.emission_shape = CPUParticles3D.EMISSION_SHAPE_SPHERE
+		p.emission_sphere_radius = R_LID
+		p.spread = 60.0
+		p.initial_velocity_min = 0.5
+		p.initial_velocity_max = 1.3
+		p.finished.connect(p.queue_free)
+		get_parent().add_child(p)
+		p.global_position = at
+		p.emitting = true
 
 
 ## Разряд: урон и инверсия машине, третий глаз, крышка на шарнире, пластины, дуги, муть.

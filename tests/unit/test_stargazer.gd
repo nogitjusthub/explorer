@@ -178,3 +178,23 @@ func test_no_shock_on_shore_eyes_watch() -> void:
 	assert_eq(hits.size(), 0, "wrecked vehicle")
 	ray.free()
 	v.free()
+
+
+## Засыпка ямы (TerrainRepair) после сборки чанка подняла дно выше зеркала и осушила тайл — троеглазка не
+## остаётся лежать на суше: при следующей укладке на дно уходит (finished — директор её убирает).
+func test_leaves_when_its_tile_dries_up() -> void:
+	for near: bool in [true, false]:
+		var f := _pond()
+		var r := BalanceRules.new()
+		var v := _vehicle(f, "rover", Vector2(7.7, 10.5) if near else Vector2(1.0, 10.5))
+		var ray := _ray(f, r, v, Vector2(10.5, 10.5))
+		var hits: Array = []
+		_run(ray, 0.5, hits)
+		assert_false(ray.finished, "lies in its pond")
+		TerrainRepair.raise_tile(f.terrain, 10, 10, 5)
+		assert_true(Stargazer.dried(f.query, Vector2i(10, 10)), "the fill drained the tile")
+		_run(ray, Stargazer.PLACE_S + 0.1, hits)
+		assert_true(ray.finished, "left the dry tile (near: %s)" % near)
+		assert_false(ray.visible, "not lying on land")
+		ray.free()
+		v.free()

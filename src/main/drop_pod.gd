@@ -26,6 +26,7 @@ const NOZZLES := 3
 const PX := Grid.ART_PX / POD_SCALE      ## пиксель обшивки — как у рельефа (капсула уменьшена — в меше крупнее)
 const SHAKE_EVERY_S := 0.12              ## торможение трясёт камеру толчками с таким шагом по времени капсулы
 
+var query: TerrainQuery                  ## рельеф под капсулой — цвет пыли (без него — цвет грунта по умолчанию)
 var _t := 0.0
 var _ground := Vector3.ZERO
 var _phase := 0                          ## 0 — падение, 1 — раскрытие, 2 — готово
@@ -311,7 +312,8 @@ func _build() -> void:
 		_marker.add_child(tick)
 
 	# Пыль из-под струй: по кольцу на земле, разлетается в стороны.
-	_blast = _particles(Color(0.66, 0.54, 0.48), 70, 0.9, Vector3.UP, 80.0, 1.5, 4.0, 3)
+	var dust_color := PixelFx.dust_color(query, _ground.x, _ground.z)
+	_blast = _particles(PixelFx.dust(70, 0.9), dust_color, 80.0, 1.5, 4.0)
 	_blast.emission_shape = CPUParticles3D.EMISSION_SHAPE_RING
 	_blast.emission_ring_axis = Vector3.UP
 	_blast.emission_ring_radius = 1.0
@@ -322,7 +324,7 @@ func _build() -> void:
 	_blast.position = _ground + Vector3(0, 0.1, 0)
 	_blast.emitting = false
 
-	_dust = _particles(Color(0.62, 0.5, 0.45), 60, 1.2, Vector3.UP, 70.0, 1.5, 4.0, 4)
+	_dust = _particles(PixelFx.dust(60, 1.2), dust_color, 70.0, 1.5, 4.0)
 	_dust.one_shot = true
 	_dust.explosiveness = 0.9
 	_dust.emission_shape = CPUParticles3D.EMISSION_SHAPE_RING
@@ -339,17 +341,11 @@ func _build() -> void:
 	add_child(_roar)
 
 
-func _particles(color: Color, amount: int, lifetime: float, direction: Vector3, spread: float,
-		v_min: float, v_max: float, texels: int) -> CPUParticles3D:
-	var p := CPUParticles3D.new()
-	p.amount = amount
-	p.lifetime = lifetime
-	p.direction = direction
+## Пыль (PixelFx — как у всех) цвета грунта под капсулой: разброс и скорость — свои у струй и касания.
+func _particles(p: CPUParticles3D, color: Color, spread: float, v_min: float, v_max: float) -> CPUParticles3D:
+	p.color = color
 	p.spread = spread
 	p.initial_velocity_min = v_min
 	p.initial_velocity_max = v_max
-	p.gravity = Vector3(0, -6.0, 0)
-	p.local_coords = false
-	p.mesh = PixelFx.quad(texels, color)
 	add_child(p)
 	return p

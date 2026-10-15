@@ -7,8 +7,8 @@ extends CanvasLayer
 
 const FUEL_WARN := 0.2                 ## доля бака, ниже которой полоса топлива мигает
 const BAR_W := 60
-const PANEL := Rect2(3, 3, 97, 33)
-const BAR_X := 36                        ## полосы — правее подписей HP / ТОП / ГРУЗ
+const PANEL := Rect2(3, 3, 113, 33)
+const BAR_X := 52                        ## полосы — правее подписей КОРПУС / ТОПЛИВО / ГРУЗ
 const COLOR_PANEL := Color(0.06, 0.04, 0.09, 0.62)
 const COLOR_TEXT := Color(0.95, 0.92, 0.85)
 const COLOR_DIM := Color(0.62, 0.58, 0.66)
@@ -21,6 +21,8 @@ const COLOR_SLOT := Color(0.3, 0.95, 0.9)
 const COLOR_SLOT_EMPTY := Color(0.3, 0.3, 0.36)
 const COLOR_DAMAGE := Color(1.0, 0.3, 0.25)
 const POPUP_S := 1.6
+const FLOAT_S := 1.0                     ## «-15» / «+20» у машины (урон, ремонт корпуса): всплывает за столько
+const FLOAT_RISE := 14.0                 ## …поднимаясь на столько пикселей
 const COLOR_PAD := Color(0.45, 1.0, 0.95)
 const COLOR_WARN := Color(1.0, 0.6, 0.25)
 
@@ -35,6 +37,7 @@ var _score_shown := 0.0
 var _time := 0.0
 var _damage_flash := 0.0
 var _popups: Array[Dictionary] = []    ## {text, color, t}
+var _floats: Array[Dictionary] = []    ## числа у машины: {text, color, t}
 var _banner := ""
 var _notice := ""                      ## сообщение челнока над его отсчётом (низ-центр)
 var _notice_color := Color.WHITE
@@ -102,6 +105,13 @@ func shuttle_notice(text: String, color: Color = COLOR_TEXT, seconds: float = 4.
 	_notice_t = seconds
 
 
+## Число у машины — урон корпусу или ремонт («-15», «+20»): всплывает над ней и гаснет.
+func float_number(text: String, color: Color) -> void:
+	_floats.append({"text": text, "color": color, "t": FLOAT_S})
+	if _floats.size() > 3:
+		_floats.pop_front()
+
+
 ## Короткое сообщение под счётом.
 func popup(text: String, color: Color = COLOR_TEXT) -> void:
 	_popups.append({"text": text, "color": color, "t": POPUP_S})
@@ -145,14 +155,14 @@ func _on_pickup_collected(kind: StringName, value: int) -> void:
 	if pk.cargo:
 		popup("+%d  %s" % [value, pk.display_name], pk.color.lightened(0.3))
 	elif pk.hp_restore > 0:
-		popup("+%d HP  %s" % [value, pk.display_name], COLOR_HP)
+		float_number("+%d" % value, COLOR_HP)
 	else:
 		popup("+%d%% топлива  %s" % [value, pk.display_name], COLOR_FUEL)
 
 
 func _on_damaged(amount: int, _source: StringName, _at: Vector3) -> void:
 	_damage_flash = 0.35
-	popup("-%d HP" % amount, COLOR_DAMAGE)
+	float_number("-%d" % amount, COLOR_DAMAGE)
 
 
 func _process(dt: float) -> void:
@@ -164,6 +174,9 @@ func _process(dt: float) -> void:
 	for p in _popups:
 		p["t"] -= dt
 	_popups = _popups.filter(func(p: Dictionary) -> bool: return p["t"] > 0.0)
+	for p in _floats:
+		p["t"] -= dt
+	_floats = _floats.filter(func(p: Dictionary) -> bool: return p["t"] > 0.0)
 	# Счёт докручивается к новому значению, а не прыгает.
 	_score_shown = move_toward(_score_shown, _score, maxf(absf(_score - _score_shown) * 4.0, 60.0) * dt)
 	_canvas.queue_redraw()
@@ -183,15 +196,15 @@ func _draw_hud() -> void:
 
 	_canvas.draw_rect(PANEL, COLOR_PANEL)
 	var hp_frac := float(_hp) / maxf(_hp_max, 1)
-	_text(Vector2(6, 11), "HP", UiKit.TEXT, COLOR_DIM)
+	_text(Vector2(6, 11), "КОРПУС", UiKit.TEXT, COLOR_DIM)
 	_bar(Vector2(BAR_X, 6), hp_frac, COLOR_HP if hp_frac > 0.3 else COLOR_HP_LOW, true)
 	var fuel_frac := _fuel / maxf(_fuel_max, 0.001)
 	var low := fuel_frac <= FUEL_WARN
 	var blink_on := not low or fmod(_time, 0.5) < 0.3
-	_text(Vector2(6, 21), "ТОП", UiKit.TEXT, COLOR_FUEL_LOW if low and blink_on else COLOR_DIM)
+	_text(Vector2(6, 21), "ТОПЛИВО", UiKit.TEXT, COLOR_FUEL_LOW if low and blink_on else COLOR_DIM)
 	_bar(Vector2(BAR_X, 16), fuel_frac, COLOR_FUEL_LOW if low else COLOR_FUEL, blink_on)
 	_text(Vector2(6, 31), "ГРУЗ", UiKit.TEXT, COLOR_DIM)
-	# Ячейки трюма — во всю ширину полос HP и топлива при любом числе слотов: границы ячеек делят
+	# Ячейки груза — во всю ширину полос корпуса и топлива при любом числе слотов: границы ячеек делят
 	# BAR_W + 1 пикселей поровну (с округлением), между ячейками — пиксель зазора.
 	var n := maxi(_slots_max, 1)
 	for i in n:
@@ -207,6 +220,7 @@ func _draw_hud() -> void:
 		_text(Vector2(0, y), p["text"], UiKit.TEXT, c, HORIZONTAL_ALIGNMENT_CENTER, size.x)
 		y += 10.0
 
+	_draw_floats()
 	_draw_bottom(size)
 
 	if _banner_t > 0.0:
@@ -264,6 +278,20 @@ func _draw_bottom(size: Vector2) -> void:
 static func _clock(seconds: float) -> String:
 	var s := ceili(maxf(seconds, 0.0))
 	return "%d:%02d" % [s / 60, s % 60]
+
+
+## Числа у машины: над ней, поднимаются и гаснут ступенями (без полупрозрачности — пиксельно).
+func _draw_floats() -> void:
+	if _floats.is_empty() or radar.camera == null or radar.vehicle == null:
+		return
+	var at := radar.camera.unproject_position(radar.vehicle.global_position + Vector3(0, 0.9, 0))
+	for i in _floats.size():
+		var p: Dictionary = _floats[i]
+		var k := 1.0 - float(p["t"]) / FLOAT_S
+		var c: Color = p["color"]
+		c.a = 1.0 if p["t"] > 0.25 else 0.5
+		var y := roundf(at.y - k * FLOAT_RISE - (_floats.size() - 1 - i) * 10.0)
+		_text(Vector2(roundf(at.x) - 40.0, y), p["text"], UiKit.TEXT, c, HORIZONTAL_ALIGNMENT_CENTER, 80.0)
 
 
 func _bar(pos: Vector2, frac: float, color: Color, filled: bool) -> void:

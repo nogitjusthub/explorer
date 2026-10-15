@@ -42,8 +42,10 @@ var _retry_t := 0.0
 func _ready() -> void:
 	name = "ShuttleController"
 	_main_craft = ShuttleCraft.new(ShuttleCraft.Kind.MAIN, rules.shuttle_zone_r)
+	_main_craft.query = query
 	add_child(_main_craft)
 	_em_craft = ShuttleCraft.new(ShuttleCraft.Kind.EMERGENCY)
+	_em_craft.query = query
 	add_child(_em_craft)
 	reset()
 
@@ -107,7 +109,7 @@ func _on_radio() -> void:
 		hud.popup("Аварийный челнок уже в пути", COLOR_WARN)
 		return
 	if in_water():
-		hud.popup("Вызов челнока на воде не возможен", COLOR_WARN)
+		hud.popup("Вызов челнока на воде невозможен", COLOR_WARN)
 		return
 	_call_menu = EmergencyMenu.new()
 	_call_menu.supply = rules.emergency_supply
@@ -173,9 +175,9 @@ func _on_emergency_touchdown() -> void:
 	EventBus.cargo_shipped.emit(delta, true)
 	hud.banner("АВАРИЙНЫЙ ЧЕЛНОК  %+d" % delta, COLOR_WARN)
 	if emergency.fuel_units > 0:
-		hud.popup("+%d топлива" % emergency.fuel_units, Hud.COLOR_FUEL)
+		hud.popup("+%d%% топлива" % roundi(100.0 * emergency.fuel_units / vehicle.cls.fuel_max), Hud.COLOR_FUEL)
 	if emergency.parts > 0:
-		hud.popup("+%d HP  запчасти" % emergency.parts, Hud.COLOR_HP)
+		hud.float_number("+%d" % emergency.parts, Hud.COLOR_HP)
 	refueled.emit()
 
 

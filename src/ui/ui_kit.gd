@@ -17,7 +17,7 @@ const COLOR_EDGE := Color(1.0, 0.8, 0.3, 0.7)
 const COLOR_PIP_EMPTY := Color(0.3, 0.28, 0.36)
 
 enum Stat { FUEL, ARMOR, HANDLING, CARGO }
-const STAT_NAMES := ["ТОПЛИВО", "БРОНЯ", "МАНЁВР", "ГРУЗ"]
+const STAT_NAMES := ["ТОПЛИВО", "КОРПУС", "МАНЁВР", "ГРУЗ"]
 const STAT_COLORS := [Color(1.0, 0.72, 0.2), Color(0.46, 0.9, 0.4), Color(0.45, 0.85, 1.0), Color(0.3, 0.95, 0.9)]
 const PIPS := 5
 const FONT: Font = preload("res://assets/fonts/ark-pixel-10px.ttf")

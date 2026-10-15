@@ -6,7 +6,7 @@ extends CanvasLayer
 ## Выбор: A / D, стрелки, тап по машине или кнопкам; старт — F / Enter / кнопка: люк раскрывается,
 ## машина уходит вниз по шахте — дальше сцена десанта. Нужен и вебу: звук включается после действия игрока.
 ## Выбор и старт щёлкают механическим тумблером; на старте лязгает люк и гудит гидропривод подъёмника. Справа от названия — версия; в правом верхнем углу —
-## кнопка-динамик с окошком громкости (VolumeSlider; пока открыто, A / D — громкость, Esc — закрыть).
+## шестерёнка с меню настроек (SettingsPanel; пока открыто, W / S, A / D — его, Esc — закрыть).
 ## Трюм — отдельный мир в SubViewport: свой свет и окружение, игровой мир под экраном не трогаем; под ним —
 ## непрозрачная подложка, чтобы до первого кадра трюма не просвечивал мир.
 
@@ -40,6 +40,25 @@ const CAPTION := "выбор машины"
 const DISPLAY_ORDER: Array[StringName] = [&"tank", &"rover", &"hover"]   ## универсал — в центре
 const DEFAULT_ID := &"rover"             ## выбран при открытии трюма
 const CAPTION_Y := 52.0                  ## строка «выбор машины» между кнопками «<» и «>»
+## Иконка кнопки настроек: контур шестерёнки 16×16, восемь зубцов, кольцо посередине.
+const GEAR: Array[String] = [
+	".......##.......",
+	"...#..#..#..#...",
+	"..#.#.#..#.#.#..",
+	".#...#....#...#.",
+	"..#..........#..",
+	"...#...##...#...",
+	".##...#..#...##.",
+	"#....#....#....#",
+	"#....#....#....#",
+	".##...#..#...##.",
+	"...#...##...#...",
+	"..#..........#..",
+	".#...#....#...#.",
+	"..#.#.#..#.#.#..",
+	"...#..#..#..#...",
+	".......##.......",
+]
 const HOLE_R := 0.57                     ## проём в полу под створкой: чуть меньше её — без щелей по краю
 const SHAFT_SIDES := 8                   ## шахта под люком — восьмигранный колодец
 const SHAFT_R := 0.6                     ## радиус, вписанный в грани
@@ -146,9 +165,8 @@ var _shaft_lamps: ShaderMaterial
 var _shaft_glow: OmniLight3D             ## зарево снизу в шахте выбранной — подсвечивает машину на спуске
 var _light_k: PackedFloat32Array = []    ## яркость прожектора над каждой машиной 0..1
 var _ui: Control
-var _vol_button: Button                  ## динамик в правом верхнем углу: открывает окошко громкости
-var _vol_panel: Control                  ## окошко с регулятором (пока открыто — A / D крутят громкость)
-var _vol_slider: VolumeSlider
+var _gear_button: Button                 ## шестерёнка в правом верхнем углу: открывает меню настроек
+var _settings: SettingsPanel             ## меню настроек под шестерёнкой (пока открыто — клавиши его)
 var _fade: ColorRect
 var _toggle_snd: AudioStreamPlayer
 var _lift_snd: AudioStreamPlayer          ## старт: лязг люка и гул гидропривода подъёмника
@@ -240,6 +258,16 @@ func _build_hold() -> void:
 
 	# Под каждым люком — шахта (сетка общая); зарево в ней загорается при старте — под выбранной.
 	var shaft := _shaft_mesh()
+	# Невидимая лампа на весь трюм: каждый объект всегда задет точечным светом — одним вариантом шейдера
+	# меньше (как фонарь машины в мире, GameFlow.LAMP_*). Почти нулевая яркость: среди точечных огней объекта
+	# движок первой отбрасывает её, зарево шахты остаётся.
+	var lamp := OmniLight3D.new()
+	lamp.omni_range = 40.0
+	lamp.light_energy = 0.001
+	lamp.light_specular = 0.0
+	lamp.shadow_enabled = false
+	lamp.position = Vector3(0, 6.0, 0)
+	_vp.add_child(lamp)
 	_shaft_glow = OmniLight3D.new()
 	_shaft_glow.light_color = COLOR_GLOW
 	_shaft_glow.omni_range = 1.8                       # до пола и стен трюма не достаёт
@@ -560,55 +588,45 @@ func _build_ui() -> void:
 	next.text = "[D]   >"
 	next.pressed.connect(_step.bind(1))
 	_place(next, Vector2(VIEW.x * 0.5 + half, CAPTION_Y - 3), false)
-	_build_volume()
+	_build_settings()
 
 
-## Громкость: кнопка-динамик в правом верхнем углу; по нажатию под ней — окошко с регулятором.
-func _build_volume() -> void:
-	_vol_button = UiKit.button("", "")
-	_vol_button.custom_minimum_size = Vector2(22, 17)
-	_vol_button.draw.connect(_draw_speaker_button)
-	_vol_button.pressed.connect(_toggle_volume)
-	_place(_vol_button, Vector2(VIEW.x - 10, 16), false, true)
-	_vol_panel = Control.new()
-	_vol_panel.draw.connect(func() -> void:
-		var r := Rect2(Vector2.ZERO, _vol_panel.size)
-		_vol_panel.draw_rect(r, UiKit.COLOR_PANEL)
-		_vol_panel.draw_rect(r, UiKit.COLOR_EDGE, false, 1.0)
-		UiKit.text(_vol_panel, Vector2(8, 15), "ГРОМКОСТЬ", UiKit.TEXT, UiKit.COLOR_DIM)
-		UiKit.text(_vol_panel, Vector2(8, 43), "A / D, колесо", UiKit.TEXT, UiKit.COLOR_DIM))
-	add_child(_vol_panel)
-	_vol_slider = VolumeSlider.new()
-	_vol_panel.add_child(_vol_slider)
-	_vol_slider.changed.connect(func(_v: float) -> void: _vol_button.queue_redraw())
-	_vol_slider.position = Vector2(8, 20)
-	_vol_panel.size = Vector2(_vol_slider.size.x + 16.0, 50)
-	_vol_panel.position = Vector2(_vol_button.position.x + _vol_button.size.x - _vol_panel.size.x,
-			_vol_button.position.y + _vol_button.size.y + 3.0)
-	_vol_panel.visible = false
+## Настройки: шестерёнка в правом верхнем углу; по нажатию под ней — меню настроек (SettingsPanel: громкость,
+## управление, вид сзади); пока открыто — W / S, A / D его, Esc или клик мимо — закрыть.
+func _build_settings() -> void:
+	_gear_button = UiKit.button("", "")
+	_gear_button.custom_minimum_size = Vector2(22, 22)
+	_gear_button.draw.connect(_draw_gear_button)
+	_gear_button.pressed.connect(_toggle_settings)
+	_place(_gear_button, Vector2(VIEW.x - 10, 16), false, true)
+	_settings = SettingsPanel.new()
+	add_child(_settings)
+	_settings.position = Vector2(_gear_button.position.x + _gear_button.size.x - _settings.size.x,
+			_gear_button.position.y + _gear_button.size.y + 3.0)
+	_settings.visible = false
 
 
-func _toggle_volume() -> void:
-	_vol_panel.visible = not _vol_panel.visible
-	_vol_button.queue_redraw()
+func _toggle_settings() -> void:
+	_settings.visible = not _settings.visible
+	_gear_button.queue_redraw()
 
 
-func _draw_speaker_button() -> void:
-	var o := (_vol_button.size - Vector2(11, 9)) * 0.5
-	o = o.floor()
-	var level := roundi(Settings.master_volume * VolumeSlider.STEPS)
-	var c := UiKit.COLOR_MARK if _vol_panel != null and _vol_panel.visible else (UiKit.COLOR_TEXT if level > 0 else UiKit.COLOR_DIM)
-	_vol_button.draw_rect(Rect2(o + Vector2(0, 3), Vector2(2, 3)), c)
-	_vol_button.draw_colored_polygon(PackedVector2Array([o + Vector2(2, 3), o + Vector2(5, 0), o + Vector2(5, 9),
-			o + Vector2(2, 6)]), c)
-	if level == 0:
-		for i in 4:
-			_vol_button.draw_rect(Rect2(o + Vector2(7 + i, 2 + i), Vector2.ONE), c)
-			_vol_button.draw_rect(Rect2(o + Vector2(10 - i, 2 + i), Vector2.ONE), c)
-		return
-	_vol_button.draw_rect(Rect2(o + Vector2(7, 3), Vector2(1, 3)), c)
-	if level > VolumeSlider.STEPS / 2:
-		_vol_button.draw_rect(Rect2(o + Vector2(9, 1), Vector2(1, 7)), c)
+## Шестерёнка GEAR по центру кнопки: каждая строка — отрезками подряд идущих «#».
+func _draw_gear_button() -> void:
+	var o := ((_gear_button.size - Vector2(GEAR[0].length(), GEAR.size())) * 0.5).floor()
+	var c := UiKit.COLOR_MARK if _settings != null and _settings.visible else UiKit.COLOR_TEXT
+	for y in GEAR.size():
+		var row := GEAR[y]
+		var x := 0
+		while x < row.length():
+			if row[x] != "#":
+				x += 1
+				continue
+			var end := x
+			while end < row.length() and row[end] == "#":
+				end += 1
+			_gear_button.draw_rect(Rect2(o + Vector2(x, y), Vector2(end - x, 1)), c)
+			x = end
 
 
 ## Кнопку — в точку: по вертикали всегда центром; по горизонтали — центром (center), правым краем
@@ -676,9 +694,10 @@ func _process(dt: float) -> void:
 
 
 ## Прогрев под экраном загрузки: варианты шейдеров трюма при всех сочетаниях света, что бывают в игре
-## (иначе они компилируются на первом A / D и в момент «Высадки» — в браузере это рывок): все прожекторы;
-## прожекторы и зарево шахты под каждым люком (спуск) и одно зарево; все прожекторы погашены (машина, с которой выбор
-## ушёл); обычный свет. WARM_HOLD кадров на шаг; потом — как обычно, материалы трюма — в ShaderCache.
+## (иначе они компилируются на первом A / D и в момент «Высадки» — в браузере это рывок). Точечный свет в трюме
+## есть всегда (невидимая лампа, _lamp), поэтому зарево шахты варианта не меняет; остаются прожекторы: все
+## горят; все погашены (машина, с которой выбор ушёл); обычный свет. WARM_HOLD кадров на шаг; потом — как
+## обычно, материалы трюма — в ShaderCache.
 const WARM_HOLD := 3
 var _warm_frame := 0
 
@@ -686,23 +705,14 @@ var _warm_frame := 0
 func _warm_lights() -> void:
 	var step := _warm_frame / WARM_HOLD
 	_warm_frame += 1
-	var bays := _doors.size()
-	# Шаги: 0 — все прожекторы; 1…bays — прожекторы и зарево под люком; bays+1…2·bays — только зарево (его
-	# достаёт и то, куда прожектор не светит); 2·bays+1 — всё погашено; 2·bays+2 — обычный свет.
-	var glow_bay := step - 1 if step <= bays else step - 1 - bays
-	var spots_on := step <= bays
-	for i in _spots.size():
-		_spots[i].visible = spots_on
-		_spots[i].light_energy = SPOT_ON
-	_shaft_glow.visible = step >= 1 and step <= 2 * bays
-	if _shaft_glow.visible:
-		_shaft_glow.position = Vector3(_doors[glow_bay].position.x, -1.5, 0)
-		_shaft_glow.light_energy = GLOW_ON
-	if step == 2 * bays + 2:
+	if step <= 1:
+		for i in _spots.size():
+			_spots[i].visible = step == 0
+			_spots[i].light_energy = SPOT_ON
+	if step == 2:
 		_apply_lights(0.0)                       # обычный свет — тоже кадрами под экраном
-	if step > 2 * bays + 2:
+	if step > 2:
 		warmed = true
-		_shaft_glow.visible = false
 		ShaderCache.keep(_vp)
 		_apply_lights(0.0)
 
@@ -710,15 +720,12 @@ func _warm_lights() -> void:
 ## Клавиши трюма: A / D — машина, F / Enter — высадка. Пока открыто окошко громкости: A / D — громкость,
 ## Esc — закрыть; выбор машины и высадка ждут.
 func _keys() -> void:
-	if _vol_panel.visible:
-		if Input.is_action_just_pressed(&"move_left") or Input.is_action_just_pressed(&"ui_left"):
-			_vol_slider.nudge(-1)
-			_vol_button.queue_redraw()
-		elif Input.is_action_just_pressed(&"move_right") or Input.is_action_just_pressed(&"ui_right"):
-			_vol_slider.nudge(1)
-			_vol_button.queue_redraw()
+	if _settings.visible:
+		var action := SettingsPanel.pressed_action()
+		if action != &"":
+			_settings.handle(action)
 		elif Input.is_action_just_pressed(&"pause") or Input.is_action_just_pressed(&"ui_cancel"):
-			_toggle_volume()
+			_toggle_settings()
 		return
 	if Input.is_action_just_pressed(&"move_left") or Input.is_action_just_pressed(&"ui_left"):
 		_step(-1)
@@ -732,8 +739,8 @@ func _keys() -> void:
 func _unhandled_input(event: InputEvent) -> void:
 	if locked or _leave_t >= 0.0 or HelpScreen.shown(get_tree()) or not UiKit.is_click(event):
 		return
-	if _vol_panel.visible:
-		_toggle_volume()                     # клик мимо окошка громкости — закрыть его
+	if _settings.visible:
+		_toggle_settings()                   # клик мимо меню настроек — закрыть его
 		get_viewport().set_input_as_handled()
 		return
 	var p: Vector2 = (event as InputEventMouseButton).position

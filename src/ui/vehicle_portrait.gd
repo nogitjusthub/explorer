@@ -30,6 +30,13 @@ func _init(class_id: StringName, px: Vector2i = Vector2i(64, 48)) -> void:
 	sun.rotation = Vector3(deg_to_rad(-55.0), deg_to_rad(30.0), 0.0)
 	sun.light_energy = 1.3
 	vp.add_child(sun)
+	# Невидимая лампа, как в трюме и в мире: варианты шейдеров машины — те же, что прогреты в трюме.
+	var lamp := OmniLight3D.new()
+	lamp.omni_range = 10.0
+	lamp.light_energy = 0.001
+	lamp.light_specular = 0.0
+	lamp.position = Vector3(0, 3.0, 0)
+	vp.add_child(lamp)
 	var cam := Camera3D.new()
 	cam.projection = Camera3D.PROJECTION_ORTHOGONAL
 	cam.size = 1.3

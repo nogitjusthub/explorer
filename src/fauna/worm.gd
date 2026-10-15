@@ -24,9 +24,6 @@ extends Creature
 
 enum State { IDLE, HUNT, TELEGRAPH, STRIKE, COOLDOWN }
 
-const SAND_COLOR := Color(0.62, 0.52, 0.38)      ## пыль на песке — в тон песка, темнее
-const GROUND_DUST := Color(0.62, 0.42, 0.34)     ## пыль на грунте равнин — терракотовая
-const SAND_BURST := Color(0.74, 0.64, 0.46)      ## выброс песка при броске
 const BODY_COLOR := Color(0.7, 0.6, 0.52)
 const RING_COLOR := Color(0.47, 0.39, 0.34)
 const THROAT_COLOR := Color(0.16, 0.06, 0.07)
@@ -69,7 +66,8 @@ var _ground := 0.0
 var _bitten := false
 var _time := 0.0
 var _heading := Vector2.RIGHT
-var _wake: CPUParticles3D
+var _wake: CPUParticles3D                ## пыль над валом (PixelFx.dust — как у всех)…
+var _wake_clods: CPUParticles3D          ## …и комья
 var _ridge_from := Vector2.ZERO
 var _ridge_timer := 0.0
 var _raised: Dictionary = {}             ## поднятые углы: Vector3i(tx, tz, угол) → исходный ярус
@@ -77,7 +75,8 @@ var _hum: AudioStreamPlayer               ## гул под песком (пет�
 var _hum_level := 0.0
 var _ring: Node3D
 var _ring_mat: StandardMaterial3D
-var _burst: CPUParticles3D
+var _burst: CPUParticles3D               ## бросок: комья…
+var _burst_dust: CPUParticles3D          ## …и пыль
 var _body: Node3D
 var _jaws: Array[Node3D] = []
 var _lean := Vector2.ZERO                ## наклон тела в этом броске (тангаж, крен)
@@ -184,10 +183,12 @@ func step(dt: float) -> void:
 	if not underground:
 		_settle(-1.0)            # ушёл в глубину — вал оседает целиком
 	_wake.emitting = underground
+	_wake_clods.emitting = underground
 	if underground:
 		_tint_dust()
 		_wake.position = Vector3(pos.x, ground_y(pos) + 0.1, pos.y)
 		_wake.rotation.y = atan2(-_heading.x, -_heading.y)
+		_wake_clods.transform = _wake.transform
 
 
 ## Шаг погони по своему грунту: прямо, а упёрся (камень, вода) — вдоль препятствия по одной из осей.
@@ -281,9 +282,10 @@ func _strike() -> void:
 	_body.visible = true
 	_lean = Vector2.from_angle(rng.randf() * TAU) * LEAN
 	_pose(-4.0, 0.0)
-	_burst.position = Vector3(_strike_at.x, _ground + 0.1, _strike_at.y)
-	_burst.restart()
-	_burst.emitting = true
+	for p: CPUParticles3D in [_burst, _burst_dust]:
+		p.position = Vector3(_strike_at.x, _ground + 0.1, _strike_at.y)
+		p.restart()
+		p.emitting = true
 	EventBus.camera_shake_requested.emit(1.2, 0.8)
 	_fell_trees(_strike_at, R + 0.8)
 	EventBus.fauna_alerted.emit(&"worm_strike", Vector3(_strike_at.x, _ground, _strike_at.y))
@@ -352,20 +354,24 @@ func _build() -> void:
 	_hum = AudioStreamPlayer.new()
 	_hum.volume_db = -80.0
 	add_child(_hum)
-	_wake = _dust(SAND_COLOR.darkened(0.2), 70, 1.2, Vector3.UP, 60.0, 0.8, 2.4, 2)
-	_wake.emission_shape = CPUParticles3D.EMISSION_SHAPE_BOX
-	_wake.emission_box_extents = Vector3(0.8, 0.05, 1.4)
+	_wake = _ground_fx(PixelFx.dust(40, 1.2), 60.0, 0.8, 2.0)
+	_wake_clods = _ground_fx(PixelFx.clods(30, 0.8), 45.0, 1.5, 3.0)
+	for p: CPUParticles3D in [_wake, _wake_clods]:
+		p.emission_shape = CPUParticles3D.EMISSION_SHAPE_BOX
+		p.emission_box_extents = Vector3(0.8, 0.05, 1.4)
 	_build_ring()
 	_build_body()
-	_burst = _dust(SAND_BURST, 90, 1.4, Vector3.UP, 30.0, 4.0, 9.0, 3)
-	_burst.one_shot = true
-	_burst.explosiveness = 0.8
-	_burst.emission_shape = CPUParticles3D.EMISSION_SHAPE_RING
-	_burst.emission_ring_axis = Vector3.UP
-	_burst.emission_ring_radius = R + 0.3
-	_burst.emission_ring_inner_radius = R * 0.6
-	_burst.emission_ring_height = 0.1
-	_burst.emitting = false
+	_burst = _ground_fx(PixelFx.clods(60, 1.2), 30.0, 4.0, 9.0)
+	_burst_dust = _ground_fx(PixelFx.dust(40, 1.4), 50.0, 1.5, 3.5)
+	for p: CPUParticles3D in [_burst, _burst_dust]:
+		p.one_shot = true
+		p.explosiveness = 0.8
+		p.emission_shape = CPUParticles3D.EMISSION_SHAPE_RING
+		p.emission_ring_axis = Vector3.UP
+		p.emission_ring_radius = R + 0.3
+		p.emission_ring_inner_radius = R * 0.6
+		p.emission_ring_height = 0.1
+		p.emitting = false
 
 
 ## Кольцо трещин вокруг точки броска.
@@ -497,25 +503,18 @@ static func _jaw_mesh() -> ArrayMesh:
 
 ## Пыль — в цвет грунта под червём: песочная над песком, терракотовая над грунтом равнин.
 func _tint_dust() -> void:
-	var t := Grid.tile_of_world(pos.x, pos.y)
-	var sand := query.is_loaded(t.x, t.y) and query.material(t.x, t.y) == ChunkData.Mat.SAND
-	var wake := (_wake.mesh as QuadMesh).material as StandardMaterial3D
-	wake.albedo_color = SAND_COLOR.darkened(0.2) if sand else GROUND_DUST.darkened(0.15)
-	var burst := (_burst.mesh as QuadMesh).material as StandardMaterial3D
-	burst.albedo_color = SAND_BURST if sand else GROUND_DUST.lightened(0.1)
+	var dust := PixelFx.dust_color(query, pos.x, pos.y)
+	var clod := PixelFx.clod_color(query, pos.x, pos.y)
+	_wake.color = dust
+	_burst_dust.color = dust
+	_wake_clods.color = clod
+	_burst.color = clod
 
 
-func _dust(color: Color, amount: int, lifetime: float, direction: Vector3, spread: float,
-		v_min: float, v_max: float, texels: int) -> CPUParticles3D:
-	var p := CPUParticles3D.new()
-	p.amount = amount
-	p.lifetime = lifetime
-	p.direction = direction
+## Пыль или комья (PixelFx) из-под земли вверх: разброс и скорость — свои у вала и броска.
+func _ground_fx(p: CPUParticles3D, spread: float, v_min: float, v_max: float) -> CPUParticles3D:
 	p.spread = spread
 	p.initial_velocity_min = v_min
 	p.initial_velocity_max = v_max
-	p.gravity = Vector3(0, -7.0, 0)
-	p.local_coords = false
-	p.mesh = PixelFx.quad(texels, color)
 	add_child(p)
 	return p

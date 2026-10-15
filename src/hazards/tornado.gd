@@ -39,6 +39,8 @@ var _carried: Array[Dictionary] = []     ## {kind, left}
 var _ploughed: Dictionary = {}           ## вершины, уже опущенные этим смерчем
 var _fade := -1.0
 var _funnel: Node3D
+var _dust: CPUParticles3D                ## пыль у основания (PixelFx — как у всех), цвет грунта под смерчем
+var _clods: CPUParticles3D               ## и комья из борозды
 var _audio: AudioStreamPlayer
 var _spin := 0.0
 
@@ -84,6 +86,8 @@ func step(dt: float) -> void:
 		_start_sound()
 	_spin += dt * 9.0
 	_funnel.rotation.y = _spin
+	_dust.color = PixelFx.dust_color(query, pos.x, pos.y)
+	_clods.color = PixelFx.clod_color(query, pos.x, pos.y)
 	if _fade >= 0.0:
 		_fade -= dt
 		_funnel.scale = Vector3.ONE * maxf(_fade / FADE_S, 0.01)
@@ -218,23 +222,24 @@ func _build() -> void:
 		mi.position = Vector3(0.15 * sin(i * 2.1), (p[0] + p[1]) * 0.5, 0.15 * cos(i * 2.1))
 		mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		_funnel.add_child(mi)
-	var dust := CPUParticles3D.new()
-	dust.amount = 40
-	dust.lifetime = 1.0
-	dust.emission_shape = CPUParticles3D.EMISSION_SHAPE_RING
-	dust.emission_ring_axis = Vector3.UP
-	dust.emission_ring_radius = 1.2
-	dust.emission_ring_inner_radius = 0.4
-	dust.emission_ring_height = 0.1
-	dust.direction = Vector3.UP
-	dust.spread = 30.0
-	dust.initial_velocity_min = 1.0
-	dust.initial_velocity_max = 2.5
-	dust.gravity = Vector3(0, -1.0, 0)
-	dust.tangential_accel_min = 5.0
-	dust.tangential_accel_max = 8.0
-	dust.mesh = PixelFx.quad(4, Color(COLOR_FUNNEL, 1.0))
-	add_child(dust)
+	# Пыль и комья у основания закручиваются вокруг воронки (касательное ускорение).
+	_dust = PixelFx.dust(40, 1.0)
+	_clods = PixelFx.clods(16, 0.8)
+	for p: CPUParticles3D in [_dust, _clods]:
+		p.emission_shape = CPUParticles3D.EMISSION_SHAPE_RING
+		p.emission_ring_axis = Vector3.UP
+		p.emission_ring_radius = 1.2
+		p.emission_ring_inner_radius = 0.4
+		p.emission_ring_height = 0.1
+		p.spread = 30.0
+		p.tangential_accel_min = 5.0
+		p.tangential_accel_max = 8.0
+		p.emitting = true
+		add_child(p)
+	_dust.initial_velocity_min = 1.0
+	_dust.initial_velocity_max = 2.5
+	_clods.initial_velocity_min = 2.0
+	_clods.initial_velocity_max = 4.0
 	_audio = AudioStreamPlayer.new()
 	_audio.volume_db = -40.0
 	add_child(_audio)

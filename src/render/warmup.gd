@@ -4,17 +4,20 @@ extends Node3D
 ## при первом показе: первый червь в браузере вешал игру на пару секунд. На старте (игрок ещё в трюме)
 ## отдельная невидимая камера (SubViewport с общим миром) по одному образцу снимает копии всего, что
 ## появится позже: эффекты погоды и угроз, существ, водоворот, челноки, капсулу десанта, все три машины —
-## со всеми частями (и спрятанными до поры) и частицами. Каждый образец — дважды: под точечным светом и
-## без него (вариант шейдера выбирается по тому, задевает ли объект точечный свет: маячок, молния,
-## пламя капсулы). Образцы — глубоко под миром, в кадр игрока не попадают; их материалы остаются в
-## ShaderCache, иначе Godot выбросил бы шейдеры вместе с образцом. Последним, когда мир вокруг старта
-## догружен (look_at_world), камера смотрит на настоящий рельеф, воду, деревья и находки — тоже под
-## светом и без. Затем finished, узел убирает себя; высадка ждёт его (трюм держит затемнение).
+## со всеми частями (и спрятанными до поры) и частицами. Вариант шейдера зависит от того, задевает ли объект
+## точечный свет; в мире всегда горит фонарь машины (GameFlow, LAMP_*) — поэтому образцы снимаются только под
+## точечным светом (свой свет камеры прогрева на весь её кадр), без второй половины «без света». Образцы —
+## глубоко под миром, в кадр игрока не попадают; их материалы остаются в ShaderCache, иначе Godot выбросил бы
+## шейдеры вместе с образцом. Последним, когда мир вокруг старта догружен (look_at_world), камера смотрит на
+## настоящий рельеф, воду, деревья и находки. Затем finished, узел убирает себя; экран загрузки ждёт его.
 
 signal finished
 
-const HOLD_FRAMES := 4                   ## кадров на образец…
-const UNLIT_FRAMES := 2                  ## …из них последние — без точечного света
+const HOLD_FRAMES := 2                   ## кадров на образец…
+## …и потом столько кадров подряд без программ в фоновой сборке (веб, ShaderCache.pending_programs): пока
+## основная программа объекта не готова, Godot не заказывает его следующие проходы (свет солнца с тенью) —
+## образец держим, пока не соберётся всё
+const QUIET_FRAMES := 2
 const DEPTH := 300.0                     ## образцы — на столько ниже точки старта
 const VIEW_SIZE := 30.0                  ## тайлов в кадре камеры прогрева — с запасом: червь под землёй, шея Нессы, смерч
 const WORLD_VIEW_SIZE := 60.0            ## взгляд на настоящий мир — шире: побольше разных чанков
@@ -36,6 +39,7 @@ var done := false
 var _makers: Array[Callable] = []
 var _sample: Node3D
 var _hold := 0
+var _quiet := 0
 var _spot := Vector3.ZERO                ## куда смотрит камера прогрева
 var _cam: Camera3D
 var _light: OmniLight3D
@@ -60,7 +64,7 @@ func _ready() -> void:
 	_cam.global_transform = Transform3D(Basis.looking_at(Vector3(0, -1, -1)), _spot + Vector3(0, 30, 30))
 	_light = OmniLight3D.new()
 	_light.light_energy = 0.5
-	_light.omni_range = 6.0
+	_light.omni_range = VIEW_SIZE            # задевает весь образец: шея Нессы, смерч, тело червя
 	_light.shadow_enabled = false
 	_light.position = _spot + Vector3(0, 1.5, 0)
 	add_child(_light)
@@ -85,9 +89,13 @@ func look_at_world(p: Vector3) -> void:
 func _process(_dt: float) -> void:
 	if _hold > 0:
 		_hold -= 1
-		if _hold == UNLIT_FRAMES:
-			_light.visible = false       # вторая половина — тот же образец без точечного света
 		return
+	if _sample != null or not _makers.is_empty():
+		# Образец (или прошлый взгляд на мир) ещё собирается в фоне — ждём тишины QUIET_FRAMES кадров.
+		_quiet = 0 if ShaderCache.pending_programs() > 0 else _quiet + 1
+		if _quiet < QUIET_FRAMES:
+			return
+	_quiet = 0
 	if _sample != null:
 		_sample.queue_free()
 		_sample = null
@@ -95,7 +103,6 @@ func _process(_dt: float) -> void:
 		if not wait_world:
 			_finish()
 		return
-	_light.visible = true
 	var make: Callable = _makers.pop_front()
 	_taken += 1
 	DevTools.mark("warmup:" + make.get_method())

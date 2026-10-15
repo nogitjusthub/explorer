@@ -129,5 +129,5 @@ func _draw_menu() -> void:
 			var o := ax + side * j * 3.0
 			_canvas.draw_colored_polygon(PackedVector2Array([Vector2(o, SLIDER_Y - 2.5),
 					Vector2(o + side * 3.0, SLIDER_Y + 0.5), Vector2(o, SLIDER_Y + 3.5)]), UiKit.COLOR_DIM)
-	UiKit.text(_canvas, Vector2(x, SLIDER_Y + 30), "-%d очков, груз в трюме — за полцены" % penalty, UiKit.TEXT,
+	UiKit.text(_canvas, Vector2(x, SLIDER_Y + 30), "-%d очков, груз — за полцены" % penalty, UiKit.TEXT,
 			UiKit.COLOR_DIM, HORIZONTAL_ALIGNMENT_CENTER, w)

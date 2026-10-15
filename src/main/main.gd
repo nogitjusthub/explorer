@@ -7,6 +7,13 @@ enum Phase { START, DROP, RUN, OVER, RESULTS }
 
 const SUN_ENERGY := 1.25
 const AMBIENT_ENERGY := 0.5
+## Фонарь машины — точечный свет, который в мире горит всегда (днём — почти нулевой яркости): каждый объект в
+## кадре задет хотя бы одним точечным светом, поэтому шейдеру нужен один вариант («с точечным светом»), а не два
+## (вариант выбирается по тому, задевает ли объект такой свет). Вдвое меньше программ GPU — в браузере это
+## секунды загрузки. Ночь (если будет) — та же лампа ярче: новых вариантов не появится.
+const LAMP_RANGE := 48.0                 ## тайлов: весь кадр с упреждением камеры и челнок в небе
+const LAMP_ENERGY := 0.001               ## днём не видно (нулевую яркость движок мог бы пропустить)
+const LAMP_HEIGHT := 1.5
 const EVAC_SCENE_S := 3.4         ## эвакуация: машину втягивает в челнок, он уходит вверх
 const LANDING_TRIES := 40
 const LANDING_DRY := 5            ## капсула садится не ближе 5 тайлов к воде (если такое место нашлось)
@@ -14,6 +21,7 @@ const SPAWN_HEADING := -PI * 0.75
 const SPAWN_PAD_OFFSET := 2.0     ## без десанта машина стоит на краю площадки — в зоне погрузки, не под челноком
 const LOADING_JOB_BUDGET_USEC := 30000  ## под экраном загрузки кадров не видно — мир догружается с большим бюджетом
 const LOADING_SYNTH_USEC := 20000       ## …и звуки синтезируются быстрее
+const SHADERS_QUIET_FRAMES := 3         ## загрузка кончается после стольких кадров без фоновой сборки шейдеров
 
 var run_seed: int
 var terrain: TerrainData
@@ -40,6 +48,7 @@ var _map: WorldMap
 var _help: HelpScreen
 var _no_drop := false
 var _sun: DirectionalLight3D
+var _lamp: OmniLight3D               ## фонарь машины (LAMP_*)
 var _env: Environment
 var _weather_k := {&"storm": 0.0, &"murk": 0.0}
 var _spawn := Vector2.ZERO
@@ -52,6 +61,9 @@ var _begin_waiting := false        ## игрок уже нажал «Высад�
 var _loading: LoadingScreen        ## экран загрузки (мир, прогрев, звуки, трюм) — до трюма и после «Заново»
 var _begin_after_loading := false  ## «Заново»: после загрузки — сразу десант
 var _sounds_total := 1             ## звуков в очереди синтеза в начале загрузки (для прогресса)
+var _sounds_marked := false        ## метка sounds_done уже поставлена
+var _shaders_peak := 0             ## больше всего программ в фоновой сборке за загрузку (для прогресса)
+var _shaders_quiet := 0            ## кадров подряд без программ в фоновой сборке
 var _audio: AudioDirector
 var _job_budget := 0
 
@@ -134,6 +146,14 @@ func _build_world(args: Dictionary) -> void:
 	sun.shadow_blur = 0.0
 	add_child(sun)
 	_sun = sun
+	# Фонарь — отдельный узел, а не часть машины: светит и пока машина спрятана (трюм, десант).
+	_lamp = OmniLight3D.new()
+	_lamp.name = "VehicleLamp"
+	_lamp.omni_range = LAMP_RANGE
+	_lamp.light_energy = LAMP_ENERGY
+	_lamp.light_specular = 0.0
+	_lamp.shadow_enabled = false
+	add_child(_lamp)
 	EventBus.weather_changed.connect(_on_weather_changed)
 
 	terrain = TerrainData.new()
@@ -249,6 +269,7 @@ func _build_world(args: Dictionary) -> void:
 
 	_pause = PauseOverlay.new()
 	add_child(_pause)
+	_pause.settings.changed.connect(_apply_controls)    # управление сменили на паузе — камера сразу
 	_help = HelpScreen.new()
 	add_child(_help)
 
@@ -419,6 +440,7 @@ func _begin() -> void:
 	vehicle.visible = false
 	vehicle.control_enabled = false
 	var pod := DropPod.new()
+	pod.query = query
 	add_child(pod)
 	pod.start(Vector3(_spawn.x, query.surface_y(_spawn.x, _spawn.y), _spawn.y))
 	pod.landed.connect(_on_drop_landed)
@@ -442,6 +464,7 @@ func _start_run() -> void:
 	_pause.enabled = true
 	_help.pause_game = true
 	_map.enabled = true
+	_apply_controls()
 	hud.visible = true
 	dev.mark_start()
 	vehicle.control_enabled = true
@@ -480,17 +503,33 @@ func _step(dt: float) -> void:
 	hud.radar.jammed = threats.radar_jammed()
 
 
+## Режим управления из настроек: «вид сзади» — камера за курсом (только во время вылазки).
+func _apply_controls() -> void:
+	rig.chase = Settings.chase() and phase == Phase.RUN
+
+
 ## Экран загрузки: прогресс по мир / прогрев / звуки / свет трюма; всё готово — экран уходит, трюм открывается
 ## (или «Заново» — сразу десант).
 func _update_loading() -> void:
 	var world := 1.0 if not _world_pending else streamer.ready_fraction(_spawn)
 	var warm := _warmup.progress() if _warmup != null and is_instance_valid(_warmup) else 1.0
 	var sounds := 1.0 - float(Sfx.pending()) / _sounds_total
+	if Sfx.pending() == 0 and not _sounds_marked:
+		_sounds_marked = true
+		DevTools.mark("sounds_done")
 	var hangar_ready := _hangar == null or not is_instance_valid(_hangar) or _hangar.warmed
-	var p := 0.4 * world + 0.45 * warm + 0.1 * sounds + (0.05 if hangar_ready else 0.0)
-	var text := "сборка мира" if world < 1.0 else ("прогрев графики" if warm < 1.0 else ("звуки" if sounds < 1.0 else "трюм"))
+	# Браузер ещё собирает программы в фоне (веб) — объекты с ними пока не рисуются: ждём.
+	var shaders := ShaderCache.pending_programs()
+	if shaders > _shaders_peak:
+		_shaders_peak = shaders
+	# Ноль — несколько кадров подряд: готовая программа объекта заказывает его следующие проходы только при
+	# отрисовке (после этого кадра).
+	_shaders_quiet = 0 if shaders > 0 else _shaders_quiet + 1
+	var compiled := 1.0 - float(shaders) / maxi(_shaders_peak, 1)
+	var p := 0.4 * world + 0.35 * warm + 0.1 * compiled + 0.1 * sounds + (0.05 if hangar_ready else 0.0)
+	var text := "сборка мира" if world < 1.0 else ("прогрев графики" if warm < 1.0 or shaders > 0 else ("звуки" if sounds < 1.0 else "трюм"))
 	_loading.set_progress(p, text)
-	if not _preparing() and Sfx.pending() == 0 and hangar_ready:
+	if not _preparing() and Sfx.pending() == 0 and hangar_ready and _shaders_quiet >= SHADERS_QUIET_FRAMES:
 		_on_loaded()
 
 
@@ -517,11 +556,13 @@ func _on_world_ready() -> void:
 		_spawn = _landing_point(_spawn)
 	vehicle.place(_spawn, SPAWN_HEADING)
 	vehicle.set_physics_process(true)
+	rig.snap_to_target()               # «Заново»: загрузка кончается в этом же кадре — без пролёта камеры
 	if _warmup != null and is_instance_valid(_warmup):
 		_warmup.look_at_world(Vector3(_spawn.x, vehicle.state.y, _spawn.y))
 
 
 func _process(dt: float) -> void:
+	_lamp.position = Vector3(vehicle.state.pos.x, vehicle.state.y + LAMP_HEIGHT, vehicle.state.pos.y)
 	if _world_pending and streamer.ready_around(_spawn):
 		_on_world_ready()
 	if _loading != null:
@@ -552,7 +593,7 @@ func _collect_pickups() -> void:
 			if not offer.accepted:
 				if key != _refused_key:
 					_refused_key = key
-					hud.popup("ТРЮМ ПОЛОН", Hud.COLOR_DAMAGE)
+					hud.popup("НЕТ МЕСТА ДЛЯ ГРУЗА", Hud.COLOR_DAMAGE)
 				continue
 			for displaced in offer.displaced:
 				pickups.drop(displaced.id, s.pos, rules.pickup_radius + 0.5)
@@ -631,6 +672,8 @@ func _on_run_ended(cause: StringName) -> void:
 	_help.pause_game = false
 	_map.enabled = false
 	_map.set_open(false)
+	rig.turn_enabled = false           # Q / E — не камера: забег кончился (на экране итога — набор имени)
+	rig.chase = false
 	shuttles.stop()                    # открытое меню челнока или вызова закрывается вместе с забегом
 	vehicle.control_enabled = false
 	if cause == &"whirlpool":

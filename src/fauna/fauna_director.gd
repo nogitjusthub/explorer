@@ -122,7 +122,12 @@ func step(dt: float) -> void:
 	for i in range(_creatures.size() - 1, -1, -1):
 		var c := _creatures[i]
 		if c is Stargazer:
-			continue                      # троеглазки уходят вместе с чанком
+			if c.finished:                # мелкой воды под ней не стало (засыпка ямы, деформация) — ушла
+				var t := Grid.tile_of_world(c.pos.x, c.pos.y)
+				(_rays.get(Grid.chunk_of_tile(t.x, t.y), []) as Array).erase(c)
+				c.queue_free()
+				_creatures.remove_at(i)
+			continue                      # иначе троеглазки уходят вместе с чанком
 		if c.finished or (not c.aggressive and c.pos.distance_to(s.pos) > rules.fauna_despawn):
 			if c is Worm:
 				_worm_wait = rules.worm_gap_s       # следующий червь — не раньше чем через столько после ухода этого

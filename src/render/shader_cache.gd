@@ -27,6 +27,16 @@ func kept_count() -> int:
 	return _kept.size()
 
 
+## Программы шейдеров, которые браузер ещё собирает в фоне: в вебе Godot (правка движка 0002) не ждёт сборки
+## программы сцены — объект пропускается, пока она не готова; счёт ведёт оболочка страницы
+## (assets/web/shell.html, window.explorerShaders). Экран загрузки ждёт нуля. На ПК — всегда 0.
+static func pending_programs() -> int:
+	if not OS.has_feature("web"):
+		return 0
+	var n: Variant = JavaScriptBridge.eval("window.explorerShaders ? window.explorerShaders.pending() : 0")
+	return int(n) if n != null else 0
+
+
 func _keep(m: Material) -> void:
 	while m != null and not _kept.has(m):
 		_kept[m] = true

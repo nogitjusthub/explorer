@@ -1,9 +1,10 @@
 class_name ResultsScreen
 extends CanvasLayer
 ## Экран итога (GDD §6): причина конца, разбор счёта, ввод имени при попадании в топ-10 класса
-## (до Leaderboard.NAME_MAX знаков: с клавиатуры набирается прямо — буквы, цифры, дефис, пробел, Backspace
-## стирает; аркадный выбор для геймпада и стрелок: ↑/↓ — знак, ←/→ — позиция; Enter — готово; на телефоне —
-## тап по стрелкам над и под знаком и кнопка «Готово»; пустые позиции — пробел, по краям обрезается),
+## (до Leaderboard.NAME_MAX знаков — всё, что есть на обычной клавиатуре: латиница, кириллица, цифры, пробел,
+## знаки; с клавиатуры набирается прямо, Backspace стирает; аркадный выбор для геймпада и стрелок: ↑/↓ — знак,
+## ←/→ — позиция; Enter — готово; на телефоне — тап по стрелкам над и под знаком и кнопка «Готово»; пустые
+## позиции — пробел, по краям обрезается),
 ## затем таблица рекордов и две кнопки с хоткеями:
 ## «Заново» (R) — сразу новый забег на той же машине, «Выход» (Esc) — в трюм челнока к выбору машины.
 ## Класс машины показан портретом — названий классов игроку не показываем.
@@ -11,7 +12,9 @@ extends CanvasLayer
 signal restart_requested
 signal exit_requested
 
-const LETTERS := " ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-"   ## первый — пусто (пробел)
+## Знаки имени — всё, что есть на обычной клавиатуре (латиница, кириллица, цифры, знаки ASCII): первый — пусто
+## (пробел); буквы заглавные — набор переводится в них.
+const LETTERS := " ABCDEFGHIJKLMNOPQRSTUVWXYZАБВГДЕЁЖЗИЙКЛМНОПРСТУФХЦЧШЩЪЫЬЭЮЯ0123456789-_.,!?#@$%&*+=/\\|:;'\"()[]{}<>^~`"
 const LETTERS_Y := 166.0
 const SLOT_W := 18.0                     ## шаг позиций имени: знак кеглем 20 — до 16 пикселей
 const LINE_H := 11.0                     ## шаг строк таблиц: шрифт 10 px и пиксель зазора
@@ -51,6 +54,7 @@ var _entering := false
 var _highlight := -1
 var _letters := PackedInt32Array()       ## индексы знаков в LETTERS по позициям имени
 var _cursor := 0
+var _fresh := true                       ## прошлое имя ещё не трогали: первый набранный знак его стирает
 var _age := 0.0
 var _canvas: Control
 var _font: Font
@@ -89,7 +93,7 @@ func _ready() -> void:
 	_entering = _rank >= 0
 	_update_buttons()
 	_letters = letters_of(Settings.player_name)
-	_cursor = mini(Settings.player_name.strip_edges().length(), Leaderboard.NAME_MAX - 1)   # набор — за прошлым именем
+	_cursor = 0                              # прошлое имя подставлено, набор — с первой позиции
 
 
 ## Имя → индексы знаков (до NAME_MAX позиций, незнакомые знаки и хвост — пусто).
@@ -144,7 +148,13 @@ func _slot_x(i: int) -> float:
 	return _canvas.size.x * 0.5 - SLOT_W * Leaderboard.NAME_MAX * 0.5 + i * SLOT_W
 
 
-## Стрелки над и под знаком (тап меняет знак): прямоугольники для попадания.
+## Стрелки над и под знаком выбранной позиции (тап меняет знак): прямоугольники для попадания.
+
+## Позиция i имени целиком (тап по знаку — выбрать позицию).
+func _letter_slot(i: int) -> Rect2:
+	return Rect2(_slot_x(i), LETTERS_Y - 16.0, SLOT_W, 20.0)
+
+
 func _letter_arrow(i: int, up: bool) -> Rect2:
 	return Rect2(_slot_x(i) + 2.0, LETTERS_Y - (25.0 if up else -3.0), 14, 10)
 
@@ -153,14 +163,18 @@ func _input(event: InputEvent) -> void:
 	if _age < INPUT_DELAY_S or HelpScreen.shown(get_tree()):
 		return
 	if _entering and UiKit.is_click(event):
+		_fresh = false                           # правка стрелками или выбор позиции — имя уже правят
 		var p: Vector2 = (event as InputEventMouseButton).position
+		for up: bool in [true, false]:                 # стрелки — только у выбранной позиции
+			if _letter_arrow(_cursor, up).grow(2.0).has_point(p):
+				_letters[_cursor] = (_letters[_cursor] + (1 if up else LETTERS.length() - 1)) % LETTERS.length()
+				get_viewport().set_input_as_handled()
+				return
 		for i in Leaderboard.NAME_MAX:
-			for up: bool in [true, false]:
-				if _letter_arrow(i, up).grow(2.0).has_point(p):
-					_cursor = i
-					_letters[i] = (_letters[i] + (1 if up else LETTERS.length() - 1)) % LETTERS.length()
-					get_viewport().set_input_as_handled()
-					return
+			if _letter_slot(i).has_point(p):
+				_cursor = i
+				get_viewport().set_input_as_handled()
+				return
 		return
 	if not (event is InputEventKey or event is InputEventJoypadButton or event is InputEventJoypadMotion \
 			or event is InputEventAction):
@@ -170,19 +184,11 @@ func _input(event: InputEvent) -> void:
 		return
 	var confirm := event.is_action_pressed(&"radio") or event.is_action_pressed(&"ui_accept")
 	if _entering:
-		if event.is_action_pressed(&"move_up", true):
-			_letters[_cursor] = (_letters[_cursor] + 1) % LETTERS.length()
-		elif event.is_action_pressed(&"move_down", true):
-			_letters[_cursor] = (_letters[_cursor] + LETTERS.length() - 1) % LETTERS.length()
-		elif event.is_action_pressed(&"move_left", true):
-			_cursor = maxi(_cursor - 1, 0)
-		elif event.is_action_pressed(&"move_right", true):
-			_cursor = mini(_cursor + 1, Leaderboard.NAME_MAX - 1)
+		if _arcade(event):
+			get_viewport().set_input_as_handled()
 		elif confirm:
 			_save_entry()
-		else:
-			return
-		get_viewport().set_input_as_handled()
+			get_viewport().set_input_as_handled()
 	elif event.is_action_pressed(&"restart"):
 		get_viewport().set_input_as_handled()
 		restart_requested.emit()
@@ -191,12 +197,35 @@ func _input(event: InputEvent) -> void:
 		exit_requested.emit()
 
 
-## Набор с клавиатуры: знак из LETTERS (буквы, цифры, дефис, пробел; W/A/S/D при наборе имени — тоже буквы)
+## Аркадный выбор: ↑ / ↓ — знак выбранной позиции, ← / → — позиция. Стрелки клавиатуры и крестовина (ui_*, с
+## автоповтором) и стик (move_*; W / A / S / D клавиатуры сюда не доходят — при наборе имени это буквы).
+## true — событие съедено.
+func _arcade(event: InputEvent) -> bool:
+	if _pressed(event, &"ui_up", &"move_up"):
+		_letters[_cursor] = (_letters[_cursor] + 1) % LETTERS.length()
+	elif _pressed(event, &"ui_down", &"move_down"):
+		_letters[_cursor] = (_letters[_cursor] + LETTERS.length() - 1) % LETTERS.length()
+	elif _pressed(event, &"ui_left", &"move_left"):
+		_cursor = maxi(_cursor - 1, 0)
+	elif _pressed(event, &"ui_right", &"move_right"):
+		_cursor = mini(_cursor + 1, Leaderboard.NAME_MAX - 1)
+	else:
+		return false
+	_fresh = false
+	return true
+
+
+static func _pressed(event: InputEvent, a: StringName, b: StringName) -> bool:
+	return event.is_action_pressed(a, true) or event.is_action_pressed(b, true)
+
+
+## Набор с клавиатуры: знак из LETTERS (всё с обычной клавиатуры; W/A/S/D при наборе имени — тоже буквы)
 ## встаёт в позицию, курсор идёт дальше; Backspace стирает назад. true — клавиша съедена.
 func _type_key(k: InputEventKey) -> bool:
 	if not k.pressed:
 		return false
 	if k.keycode == KEY_BACKSPACE:
+		_fresh = false
 		if _letters[_cursor] == 0 and _cursor > 0:
 			_cursor -= 1
 		_letters[_cursor] = 0
@@ -206,6 +235,10 @@ func _type_key(k: InputEventKey) -> bool:
 	var idx := LETTERS.find(String.chr(k.unicode).to_upper())
 	if idx < 0:
 		return false
+	if _fresh:                               # прошлое имя — как выделенный текст: набор его заменяет
+		_letters.fill(0)
+		_cursor = 0
+	_fresh = false
 	_letters[_cursor] = idx
 	_cursor = mini(_cursor + 1, Leaderboard.NAME_MAX - 1)
 	return true
@@ -236,9 +269,9 @@ func _draw_screen() -> void:
 	if int(result["emergency_calls"]) > 0:
 		lines.append(["  в т. ч. аварийных вызовов", str(int(result["emergency_calls"]))])
 	if evacuated:
-		lines.append(["Бонус (броня × 3 + топливо × 2)", "+%d" % int(result["bonus"])])
+		lines.append(["Бонус (корпус × 3 + топливо × 2)", "+%d" % int(result["bonus"])])
 	else:
-		lines.append(["Груз в трюме", "потерян"])
+		lines.append(["Груз", "потерян"])
 	lines.append(["Время забега", _format_time(float(result["time"]))])
 	lines.append(["Рейсов челнока", str(int(result["shipments"]))])
 	var y := 52.0
@@ -261,11 +294,13 @@ func _draw_screen() -> void:
 				_canvas.draw_rect(Rect2(x + 1, y + 3, 12, 2), COLOR_MARK)
 			elif i != _cursor and _letters[i] == 0:
 				_canvas.draw_rect(Rect2(x + 3, y + 3, 8, 1), COLOR_DIM)      # пустая позиция — черта
+			if i != _cursor:
+				continue
 			for up: bool in [true, false]:
 				var c := _letter_arrow(i, up).get_center()
 				var s := -1.0 if up else 1.0
 				_canvas.draw_colored_polygon(PackedVector2Array([c + Vector2(-4, -2 * s), c + Vector2(4, -2 * s),
-						c + Vector2(0, 3 * s)]), COLOR_MARK if i == _cursor else COLOR_DIM)
+						c + Vector2(0, 3 * s)]), COLOR_MARK)
 		_text(Vector2(0, y + 24), "Набери имя (до %d знаков), Backspace — стереть" % Leaderboard.NAME_MAX,
 				UiKit.TEXT, COLOR_DIM, HORIZONTAL_ALIGNMENT_CENTER, w)
 		_text(Vector2(0, y + 24 + LINE_H), "↑ ↓ — знак,  ← → — позиция,  Enter — готово", UiKit.TEXT, COLOR_DIM,

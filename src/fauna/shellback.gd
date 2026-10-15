@@ -86,6 +86,7 @@ func step(dt: float) -> void:
 				state = State.DIG
 				_timer = rules.shellback_dig_s
 				_charge_dir = (vp - pos).normalized()
+				_dust.color = PixelFx.clod_color(query, pos.x, pos.y)
 				_dust.emitting = true
 				_alert(&"shellback_dig")
 			else:
@@ -308,17 +309,10 @@ func _build_model() -> Node3D:
 			l.material_override = leg
 			l.position = Vector3(x, 0.05, z)
 			root.add_child(l)
-	_dust = CPUParticles3D.new()
-	_dust.amount = 20
-	_dust.lifetime = 0.6
-	_dust.emitting = false
-	_dust.direction = Vector3.UP
+	_dust = PixelFx.clods(20, 0.6)               # роет — комья (PixelFx, как у всех), цвет грунта
 	_dust.spread = 60.0
 	_dust.initial_velocity_min = 1.0
 	_dust.initial_velocity_max = 2.4
-	_dust.gravity = Vector3(0, -5.0, 0)
-	_dust.mesh = PixelFx.quad(2, Color(0.55, 0.42, 0.35))
-	_dust.local_coords = false
 	add_child(_dust)
 	return top
 

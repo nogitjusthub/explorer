@@ -1,0 +1,291 @@
+diff --git a/drivers/gles3/rasterizer_scene_gles3.cpp b/drivers/gles3/rasterizer_scene_gles3.cpp
+index bf41012..b7eac41 100644
+--- a/drivers/gles3/rasterizer_scene_gles3.cpp
++++ b/drivers/gles3/rasterizer_scene_gles3.cpp
+@@ -52,6 +52,10 @@
+ #include "servers/rendering/rendering_server_types.h"
+ #include "servers/rendering/storage/ltc_lut.gen.h"
+ 
++#ifdef WEB_ENABLED
++#include <emscripten/html5.h>
++#endif
++
+ RasterizerSceneGLES3 *RasterizerSceneGLES3::singleton = nullptr;
+ 
+ RenderGeometryInstance *RasterizerSceneGLES3::geometry_instance_create(RID p_base) {
+@@ -4614,6 +4618,13 @@ RasterizerSceneGLES3::RasterizerSceneGLES3() {
+ 			global_defines += "\n#define SPECULAR_OCCLUSION_DISABLED\n";
+ 		}
+ 		material_storage->shaders.scene_shader.initialize(global_defines);
++#ifdef WEB_ENABLED
++		// Explorer patch: WebGL links programs synchronously only when asked for the link status right away.
++		// With KHR_parallel_shader_compile the browser builds scene programs in the background (often on
++		// several threads) while the game keeps running; an object whose program is not ready yet is skipped
++		// for that frame (_render_list_template already does so when binding fails).
++		material_storage->shaders.scene_shader.async_compile = emscripten_webgl_enable_extension(emscripten_webgl_get_current_context(), "KHR_parallel_shader_compile");
++#endif
+ 		scene_globals.shader_default_version = material_storage->shaders.scene_shader.version_create();
+ 		material_storage->shaders.scene_shader.version_bind_shader(scene_globals.shader_default_version, SceneShaderGLES3::MODE_COLOR);
+ 	}
+diff --git a/drivers/gles3/shader_gles3.cpp b/drivers/gles3/shader_gles3.cpp
+index 60c1265..c6b6f8b 100644
+--- a/drivers/gles3/shader_gles3.cpp
++++ b/drivers/gles3/shader_gles3.cpp
+@@ -305,9 +305,14 @@ void ShaderGLES3::_get_uniform_locations(Version::Specialization &spec, Version
+ }
+ 
+ void ShaderGLES3::_compile_specialization(Version::Specialization &spec, uint32_t p_variant, Version *p_version, uint64_t p_specialization) {
++	_compile_specialization_begin(spec, p_variant, p_version, p_specialization);
++	_compile_specialization_finish(spec, p_variant, p_version, p_specialization);
++}
++
++void ShaderGLES3::_compile_specialization_begin(Version::Specialization &spec, uint32_t p_variant, Version *p_version, uint64_t p_specialization) {
+ 	spec.id = glCreateProgram();
+ 	spec.ok = false;
+-	GLint status;
++	spec.build_queued = true;
+ 
+ 	//vertex stage
+ 	{
+@@ -321,40 +326,6 @@ void ShaderGLES3::_compile_specialization(Version::Specialization &spec, uint32_
+ 		GLint cstr_len = cs.length();
+ 		glShaderSource(spec.vert_id, 1, &cstr, &cstr_len);
+ 		glCompileShader(spec.vert_id);
+-
+-		glGetShaderiv(spec.vert_id, GL_COMPILE_STATUS, &status);
+-		if (status == GL_FALSE) {
+-			GLsizei iloglen;
+-			glGetShaderiv(spec.vert_id, GL_INFO_LOG_LENGTH, &iloglen);
+-
+-			if (iloglen < 0) {
+-				glDeleteShader(spec.vert_id);
+-				glDeleteProgram(spec.id);
+-				spec.id = 0;
+-
+-				ERR_PRINT("No OpenGL vertex shader compiler log.");
+-			} else {
+-				if (iloglen == 0) {
+-					iloglen = 4096; // buggy driver (Adreno 220+)
+-				}
+-
+-				char *ilogmem = (char *)Memory::alloc_static_zeroed(iloglen + 1);
+-				glGetShaderInfoLog(spec.vert_id, iloglen, &iloglen, ilogmem);
+-
+-				String err_string = name + ": Vertex shader compilation failed:\n";
+-
+-				err_string += ilogmem;
+-
+-				_display_error_with_code(err_string, builder_string);
+-
+-				Memory::free_static(ilogmem);
+-				glDeleteShader(spec.vert_id);
+-				glDeleteProgram(spec.id);
+-				spec.id = 0;
+-			}
+-
+-			ERR_FAIL();
+-		}
+ 	}
+ 
+ 	//fragment stage
+@@ -369,40 +340,6 @@ void ShaderGLES3::_compile_specialization(Version::Specialization &spec, uint32_
+ 		GLint cstr_len = cs.length();
+ 		glShaderSource(spec.frag_id, 1, &cstr, &cstr_len);
+ 		glCompileShader(spec.frag_id);
+-
+-		glGetShaderiv(spec.frag_id, GL_COMPILE_STATUS, &status);
+-		if (status == GL_FALSE) {
+-			GLsizei iloglen;
+-			glGetShaderiv(spec.frag_id, GL_INFO_LOG_LENGTH, &iloglen);
+-
+-			if (iloglen < 0) {
+-				glDeleteShader(spec.frag_id);
+-				glDeleteProgram(spec.id);
+-				spec.id = 0;
+-
+-				ERR_PRINT("No OpenGL fragment shader compiler log.");
+-			} else {
+-				if (iloglen == 0) {
+-					iloglen = 4096; // buggy driver (Adreno 220+)
+-				}
+-
+-				char *ilogmem = (char *)Memory::alloc_static_zeroed(iloglen + 1);
+-				glGetShaderInfoLog(spec.frag_id, iloglen, &iloglen, ilogmem);
+-
+-				String err_string = name + ": Fragment shader compilation failed:\n";
+-
+-				err_string += ilogmem;
+-
+-				_display_error_with_code(err_string, builder_string);
+-
+-				Memory::free_static(ilogmem);
+-				glDeleteShader(spec.frag_id);
+-				glDeleteProgram(spec.id);
+-				spec.id = 0;
+-			}
+-
+-			ERR_FAIL();
+-		}
+ 	}
+ 
+ 	glAttachShader(spec.id, spec.frag_id);
+@@ -425,6 +362,95 @@ void ShaderGLES3::_compile_specialization(Version::Specialization &spec, uint32_
+ 	}
+ 
+ 	glLinkProgram(spec.id);
++}
++
++bool ShaderGLES3::_specialization_complete(const Version::Specialization &spec) {
++	// GL_COMPLETION_STATUS_KHR (KHR_parallel_shader_compile): a query that does not wait for the build.
++	GLint done = 1;
++	glGetProgramiv(spec.id, 0x91B1, &done);
++	return done != 0;
++}
++
++void ShaderGLES3::_compile_specialization_finish(Version::Specialization &spec, uint32_t p_variant, Version *p_version, uint64_t p_specialization) {
++	spec.build_queued = false;
++	if (spec.id == 0) {
++		return;
++	}
++	GLint status;
++
++	//vertex stage
++	glGetShaderiv(spec.vert_id, GL_COMPILE_STATUS, &status);
++	if (status == GL_FALSE) {
++		GLsizei iloglen;
++		glGetShaderiv(spec.vert_id, GL_INFO_LOG_LENGTH, &iloglen);
++
++		if (iloglen < 0) {
++			glDeleteShader(spec.vert_id);
++			glDeleteProgram(spec.id);
++			spec.id = 0;
++
++			ERR_PRINT("No OpenGL vertex shader compiler log.");
++		} else {
++			if (iloglen == 0) {
++				iloglen = 4096; // buggy driver (Adreno 220+)
++			}
++
++			char *ilogmem = (char *)Memory::alloc_static_zeroed(iloglen + 1);
++			glGetShaderInfoLog(spec.vert_id, iloglen, &iloglen, ilogmem);
++
++			String err_string = name + ": Vertex shader compilation failed:\n";
++
++			err_string += ilogmem;
++
++			StringBuilder builder;
++			_build_variant_code(builder, p_variant, p_version, STAGE_TYPE_VERTEX, p_specialization);
++			_display_error_with_code(err_string, builder.as_string());
++
++			Memory::free_static(ilogmem);
++			glDeleteShader(spec.vert_id);
++			glDeleteProgram(spec.id);
++			spec.id = 0;
++		}
++
++		ERR_FAIL();
++	}
++
++	//fragment stage
++	glGetShaderiv(spec.frag_id, GL_COMPILE_STATUS, &status);
++	if (status == GL_FALSE) {
++		GLsizei iloglen;
++		glGetShaderiv(spec.frag_id, GL_INFO_LOG_LENGTH, &iloglen);
++
++		if (iloglen < 0) {
++			glDeleteShader(spec.frag_id);
++			glDeleteProgram(spec.id);
++			spec.id = 0;
++
++			ERR_PRINT("No OpenGL fragment shader compiler log.");
++		} else {
++			if (iloglen == 0) {
++				iloglen = 4096; // buggy driver (Adreno 220+)
++			}
++
++			char *ilogmem = (char *)Memory::alloc_static_zeroed(iloglen + 1);
++			glGetShaderInfoLog(spec.frag_id, iloglen, &iloglen, ilogmem);
++
++			String err_string = name + ": Fragment shader compilation failed:\n";
++
++			err_string += ilogmem;
++
++			StringBuilder builder;
++			_build_variant_code(builder, p_variant, p_version, STAGE_TYPE_FRAGMENT, p_specialization);
++			_display_error_with_code(err_string, builder.as_string());
++
++			Memory::free_static(ilogmem);
++			glDeleteShader(spec.frag_id);
++			glDeleteProgram(spec.id);
++			spec.id = 0;
++		}
++
++		ERR_FAIL();
++	}
+ 
+ 	glGetProgramiv(spec.id, GL_LINK_STATUS, &status);
+ 	if (status == GL_FALSE) {
+diff --git a/drivers/gles3/shader_gles3.h b/drivers/gles3/shader_gles3.h
+index 4ff35c1..0b09a22 100644
+--- a/drivers/gles3/shader_gles3.h
++++ b/drivers/gles3/shader_gles3.h
+@@ -107,6 +107,12 @@ private:
+ 
+ 	void _get_uniform_locations(Version::Specialization &spec, Version *p_version);
+ 	void _compile_specialization(Version::Specialization &spec, uint32_t p_variant, Version *p_version, uint64_t p_specialization);
++	// Explorer patch: compilation split in two. _begin issues compile and link without asking for any status
++	// (with KHR_parallel_shader_compile the browser builds the program in the background); _finish checks the
++	// status, reports errors and fetches uniform locations once the program is complete.
++	void _compile_specialization_begin(Version::Specialization &spec, uint32_t p_variant, Version *p_version, uint64_t p_specialization);
++	void _compile_specialization_finish(Version::Specialization &spec, uint32_t p_variant, Version *p_version, uint64_t p_specialization);
++	bool _specialization_complete(const Version::Specialization &spec);
+ 
+ 	void _clear_version(Version *p_version);
+ 	void _initialize_version(Version *p_version);
+@@ -174,6 +180,14 @@ private:
+ 	int variant_count = 0;
+ 
+ 	int base_texture_index = 0;
++
++public:
++	// Explorer patch: when true, a specialization that is not built yet is compiled without blocking and
++	// _version_bind_shader returns false (the caller skips the draw) until the browser has finished it.
++	// Set only for the scene shader on the web when KHR_parallel_shader_compile is available.
++	bool async_compile = false;
++
++private:
+ 	Version::Specialization *current_shader = nullptr;
+ 
+ protected:
+@@ -199,6 +213,12 @@ protected:
+ 			} else {
+ 				// Compile on the spot
+ 				Version::Specialization s;
++				if (async_compile) {
++					// Explorer patch: start building and skip this draw; the program is bound once complete.
++					_compile_specialization_begin(s, p_variant, version, p_specialization);
++					version->variants[p_variant].insert(p_specialization, s);
++					return false;
++				}
+ 				_compile_specialization(s, p_variant, version, p_specialization);
+ 				version->variants[p_variant].insert(p_specialization, s);
+ 				spec = version->variants[p_variant].getptr(p_specialization);
+@@ -207,8 +227,16 @@ protected:
+ 				}
+ 			}
+ 		} else if (spec->build_queued) {
+-			// Still queued, wait
+-			spec = version->variants[p_variant].getptr(specialization_default_mask);
++			if (async_compile) {
++				// Explorer patch: still being built in the background — skip the draw; done — finish and bind.
++				if (!_specialization_complete(*spec)) {
++					return false;
++				}
++				_compile_specialization_finish(*spec, p_variant, version, p_specialization);
++			} else {
++				// Still queued, wait
++				spec = version->variants[p_variant].getptr(specialization_default_mask);
++			}
+ 		}
+ 
+ 		if (!spec || !spec->ok) {

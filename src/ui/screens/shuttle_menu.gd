@@ -107,7 +107,7 @@ func _draw_menu() -> void:
 	var hint := ""
 	match _selected:
 		Item.SHIP:
-			hint = "+%d очков, челнок улетит" % cargo_value if cargo_value > 0 else "трюм пуст"
+			hint = "+%d очков, челнок улетит" % cargo_value if cargo_value > 0 else "груза нет"
 		Item.EVACUATE:
 			hint = "груз %d + бонус %d, конец забега" % [cargo_value, bonus]
 	UiKit.text(_canvas, Vector2(PANEL.position.x, PANEL.end.y - 6), hint, UiKit.TEXT, COLOR_DIM,

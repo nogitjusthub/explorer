@@ -40,7 +40,7 @@ powershell -ExecutionPolicy Bypass -File tools\scripts\test.ps1 -Filter smoke
 ## Запуск и инструменты
 
 ```powershell
-# Игра (W/A/S/D — движение, F — аварийный челнок, Q/E — камера, M — карта, Esc — пауза, F1 — справка, F3 — отладка). Параметры — play.cmd --help
+# Игра (W/A/S/D — движение, F — аварийный челнок, Q/E — камера, M — карта, Esc — пауза и настройки, F1 — справка, F3 — отладка). Параметры — play.cmd --help
 .\play.cmd --seed=7
 
 # Бенчмарк: автопилот 40 с, печать FPS, стриминга и расхода топлива
