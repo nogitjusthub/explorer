@@ -677,11 +677,11 @@ func _on_run_ended(cause: StringName) -> void:
 	shuttles.stop()                    # открытое меню челнока или вызова закрывается вместе с забегом
 	vehicle.control_enabled = false
 	if cause == &"whirlpool":
-		hud.banner("МАШИНА УТОНУЛА", Hud.COLOR_DAMAGE)     # затянуло под воду — корпус цел
+		hud.banner(DeathText.banner(&"sunk"), Hud.COLOR_DAMAGE)     # затянуло под воду — корпус цел
 	elif cause != RunState.CAUSE_EVACUATED and cause != &"drowned":
 		if not vehicle.wrecked:
 			vehicle.wreck()
-		hud.banner("МАШИНА РАЗБИТА", Hud.COLOR_DAMAGE)
+		hud.banner(DeathText.banner(&"wrecked"), Hud.COLOR_DAMAGE)
 	if cause != RunState.CAUSE_EVACUATED:
 		vehicle.sink_on_water()        # разбитая или затянутая на воде — идёт ко дну
 	_over_timer = EVAC_SCENE_S if cause == RunState.CAUSE_EVACUATED else rules.death_delay_s

@@ -19,28 +19,8 @@ const LETTERS_Y := 166.0
 const SLOT_W := 18.0                     ## шаг позиций имени: знак кеглем 20 — до 16 пикселей
 const LINE_H := 11.0                     ## шаг строк таблиц: шрифт 10 px и пиксель зазора
 const INPUT_DELAY_S := 0.8             ## нажатия в первые доли секунды игнорируются (палец ещё на газе)
-## Причина конца — заголовок итога. Говорим о машине (её портрет рядом): женский род, без слова «машина».
-const CAUSE_TEXT := {
-	"evacuated": "ВОЗВРАЩЕНИЕ НА ОРБИТУ",
-	"drowned": "УТОНУЛА",
-	"fall": "РАЗБИТА ПРИ ПАДЕНИИ",
-	"tree": "РАЗБИТА О ДЕРЕВЬЯ",
-	"ram": "РАЗБИТА О ЗВЕРЕЙ",
-	"wall": "РАЗБИТА О СКАЛЫ",
-	"lightning": "СГОРЕЛА ОТ МОЛНИИ",
-	"quake": "РАЗБИТА ЗЕМЛЕТРЯСЕНИЕМ",
-	"acid": "РАЗЪЕДЕНА КИСЛОТНЫМ ГАЗОМ",
-	"tornado": "РАЗБИТА СМЕРЧЕМ",
-	"hopper": "ЗАГРЫЗЕНА СКАКУНАМИ",
-	"worm": "ПРОГЛОЧЕНА ЧЕРВЁМ",
-	"shellback": "РАЗБИТА ПАНЦИРНИКОМ",
-	"empty_tank": "ОСТАЛАСЬ БЕЗ ТОПЛИВА",
-	"shuttle": "РАЗДАВЛЕНА ЧЕЛНОКОМ",
-	"whirlpool": "УТОНУЛА В ВОДОВОРОТЕ",
-	"ray": "СОЖЖЕНА ТРОЕГЛАЗКОЙ",
-	"shark": "РАЗОРВАНА ИЛОЗУБОМ",
-	"nessie": "РАЗБИТА ОЗЁРНЫМ ЧУДОВИЩЕМ",
-}
+## Заголовок итога: успех — так; гибель — DeathText.cause (три набора надписей, активный — DeathText.STYLE).
+const EVACUATED_TEXT := "ВОЗВРАЩЕНИЕ НА ОРБИТУ"
 const COLOR_TEXT := Color(0.95, 0.92, 0.85)
 const COLOR_DIM := Color(0.62, 0.58, 0.66)
 const COLOR_GOOD := Color(0.46, 0.9, 0.4)
@@ -257,7 +237,7 @@ func _draw_screen() -> void:
 	var w := _canvas.size.x
 	var cause := String(result["cause"])
 	var evacuated := cause == String(RunState.CAUSE_EVACUATED)
-	_text(Vector2(0, 30), CAUSE_TEXT.get(cause, "УНИЧТОЖЕНА"), UiKit.TITLE,
+	_text(Vector2(0, 30), EVACUATED_TEXT if evacuated else DeathText.cause(cause), UiKit.TITLE,
 			COLOR_GOOD if evacuated else COLOR_BAD, HORIZONTAL_ALIGNMENT_CENTER, w)
 
 	var lines: Array[Array] = []

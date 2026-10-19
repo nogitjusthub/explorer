@@ -201,19 +201,19 @@ func test_stalks_through_water_and_gives_up() -> void:
 		t += DT
 	assert_false(s.aggressive, "loses interest")
 	assert_near(t, arrived + s.rules.fauna_give_up_s, 1.0, "after fauna_give_up_s without progress")
-	# Сдался — CALM_S не слышит даже шумную машину, потом снова охотится.
+	# Сдался — shark_calm_s не слышит даже шумную машину, потом снова охотится.
 	s.noise.update_vehicle(s.vehicle.state.pos, 10.0, 10.0)
 	var calm := 0.0
-	while not s.aggressive and calm < MireShark.CALM_S + 2.0:
+	while not s.aggressive and calm < s.rules.shark_calm_s + 2.0:
 		s.step(DT)
 		calm += DT
 	assert_true(s.aggressive, "hears the vehicle again")
-	assert_near(calm, MireShark.CALM_S, 0.2, "ignores the vehicle for CALM_S")
+	assert_near(calm, s.rules.shark_calm_s, 0.2, "ignores the vehicle for shark_calm_s")
 	_dispose(s)
 
 
 ## Погоня — не дальше shark_chase_r от своего места: машина ушла дальше — бросает погоню, плывёт домой и
-## CALM_S не слышит её, даже вернувшуюся.
+## shark_calm_s не слышит её, даже вернувшуюся.
 func test_breaks_off_beyond_the_chase_radius() -> void:
 	var f := TerrainFixture.new(4)
 	_banked_lake(f, 2, 4, 26, 10, 3)                               # мелководье: место — в воде
@@ -236,11 +236,11 @@ func test_breaks_off_beyond_the_chase_radius() -> void:
 		t += DT
 		farthest = maxf(farthest, s.pos.distance_to(den))
 	assert_false(s.aggressive, "breaks off once the hover is beyond shark_chase_r")
-	# Машина вернулась и шумит — илозуб её не слышит CALM_S и плывёт домой.
+	# Машина вернулась и шумит — илозуб её не слышит shark_calm_s и плывёт домой.
 	s.vehicle.state.pos = near
 	s.noise.update_vehicle(near, 7.5, 7.5)
 	t = 0.0
-	while t < MireShark.CALM_S - 0.5:
+	while t < s.rules.shark_calm_s - 0.5:
 		s.step(DT)
 		t += DT
 		farthest = maxf(farthest, s.pos.distance_to(den))

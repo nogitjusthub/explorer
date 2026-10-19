@@ -139,6 +139,10 @@ extends Resource
 @export var fauna_scare_tornado_r: float = 5.0   ## от смерча (каждый кадр, пока рядом)
 @export var fauna_scare_strike_r: float = 3.0    ## от точки удара молнии
 @export var fauna_scare_fault_r: float = 5.0     ## от линии разлома в момент толчка
+## Сколько длится испуг (и отказ от погони): столько зверь не замечает машину. Панцирник — shellback_calm_s.
+@export var hopper_retreat_s: float = 2.5        ## стая сначала отбегает от машины столько, потом — шагом домой
+@export var hopper_calm_s: float = 12.0          ## …и столько её не замечает (не кидается снова)
+@export var shark_calm_s: float = 10.0           ## илозуб ныряет и столько не слышит машину
 ## Скорости погони — между Vmax танка (4) и ровера (6,5): ровер и ховер уходят от фауны, танк — нет.
 @export var hopper_speed: float = 4.7
 @export var hopper_wander_speed: float = 1.0       ## патрулирует медленно
