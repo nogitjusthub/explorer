@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="ru">
+	<head>
+		<meta charset="utf-8">
+		<meta name="viewport" content="width=device-width, user-scalable=no, initial-scale=1.0">
+		<title>Explorer</title>
+		<!--
+			Оболочка страницы веб-версии Explorer (export_presets.cfg: html/custom_html_shell). Основа — штатная
+			godot.html шаблона 4.7.2. Отличие: заставка с одной полосой загрузки держится до готовности игры, а не
+			до старта движка: скачивание (0–40 %), запуск движка (40–45 %), подготовка игры (45–100 % — шлёт игра:
+			window.explorerBoot.progress(p, text), конец — explorerBoot.done(); см. src/ui/screens/loading_screen.gd).
+			Блик на полосе — CSS-анимация transform: она живёт и тогда, когда поток страницы стоит на компиляции
+			шейдера. Игра молчит слишком долго (отладочный запуск, ошибка) — заставка уходит сама.
+		-->
+		<style>
+html, body, #canvas {
+	margin: 0;
+	padding: 0;
+	border: 0;
+}
+
+body {
+	color: #f2ebd9;
+	background-color: #08060f;
+	overflow: hidden;
+	touch-action: none;
+}
+
+#canvas {
+	display: block;
+}
+
+#canvas:focus {
+	outline: none;
+}
+
+#status {
+	position: absolute;
+	inset: 0;
+	background-color: #08060f;
+	display: flex;
+	flex-direction: column;
+	justify-content: center;
+	align-items: center;
+	gap: 14px;
+	font-family: 'Consolas', 'Lucida Console', 'Courier New', monospace;
+	image-rendering: pixelated;
+	z-index: 2;
+}
+
+#status-title {
+	font-size: 34px;
+	letter-spacing: 6px;
+	color: #ffcc4d;
+	text-shadow: 3px 3px 0 #000;
+}
+
+#status-bar {
+	position: relative;
+	width: min(420px, 70vw);
+	height: 12px;
+	border: 2px solid #9e94a8;
+	overflow: hidden;
+	background: #110d1c;
+}
+
+#status-fill {
+	position: absolute;
+	left: 0;
+	top: 0;
+	bottom: 0;
+	width: 0;
+	background: #ffcc4d;
+	transition: width 0.2s steps(4);
+}
+
+/* Блик бежит по полосе: transform анимирует компоновщик браузера — без главного потока. */
+#status-shine {
+	position: absolute;
+	top: 0;
+	bottom: 0;
+	left: 0;
+	width: 22%;
+	background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.35), transparent);
+	animation: shine 1.4s steps(14) infinite;
+	will-change: transform;
+}
+
+@keyframes shine {
+	from { transform: translateX(-100%); }
+	to { transform: translateX(460%); }
+}
+
+#status-text {
+	font-size: 15px;
+	min-height: 1.3em;
+}
+
+#status-notice {
+	display: none;
+	background-color: #5b3943;
+	border: 2px solid #9b3943;
+	color: #e0e0e0;
+	padding: 1rem;
+	text-align: center;
+	max-width: 80vw;
+	line-height: 1.4;
+}
+
+#status-notice button {
+	margin-top: 0.8rem;
+	font: inherit;
+	padding: 0.3rem 1rem;
+	cursor: pointer;
+}
+		</style>
+		<link id="-gd-engine-icon" rel="icon" type="image/png" href="index.icon.png" />
+<link rel="apple-touch-icon" href="index.apple-touch-icon.png"/>
+
+	</head>
+	<body>
+		<canvas id="canvas">
+			Ваш браузер не поддерживает canvas.
+		</canvas>
+
+		<noscript>
+			Для игры нужен JavaScript.
+		</noscript>
+
+		<div id="status">
+			<div id="status-title">EXPLORER</div>
+			<div id="status-bar"><div id="status-fill"></div><div id="status-shine"></div></div>
+			<div id="status-text">загрузка…</div>
+			<div id="status-notice"></div>
+		</div>
+
+		<script>
+// Программы шейдеров, которые браузер ещё собирает в фоне: правка движка 0002 не ждёт сборки
+// (KHR_parallel_shader_compile), и экран загрузки ждёт, пока таких не останется (ShaderCache.pending_programs).
+// Без расширения программа собирается сразу — её не считаем.
+(function () {
+	const COMPLETION_STATUS_KHR = 0x91B1;
+	const pending = new Map();         // программа → контекст
+	const parallel = new WeakMap();    // контекст → есть ли расширение
+	const proto = WebGL2RenderingContext.prototype;
+	const link = proto.linkProgram;
+	proto.linkProgram = function (program) {
+		link.call(this, program);
+		if (!parallel.has(this)) parallel.set(this, this.getExtension('KHR_parallel_shader_compile') !== null);
+		if (parallel.get(this)) pending.set(program, this);
+	};
+	const remove = proto.deleteProgram;
+	proto.deleteProgram = function (program) {
+		pending.delete(program);
+		return remove.call(this, program);
+	};
+	window.explorerShaders = {
+		pending() {
+			for (const [program, gl] of pending) {
+				if (gl.isContextLost() || gl.getProgramParameter(program, COMPLETION_STATUS_KHR)) pending.delete(program);
+			}
+			return pending.size;
+		},
+	};
+}());
+		</script>
+		<script src="index.js"></script>
+		<script>
+const GODOT_CONFIG = {"args":[],"canvasResizePolicy":2,"emscriptenPoolSize":8,"ensureCrossOriginIsolationHeaders":true,"executable":"index","experimentalVK":false,"fileSizes":{"index.pck":771276,"index.wasm":22182944},"focusCanvas":true,"gdextensionLibs":[],"godotPoolSize":4};
+const GODOT_THREADS_ENABLED = false;
+const engine = new Engine(GODOT_CONFIG);
+
+(function () {
+	const overlay = document.getElementById('status');
+	const fill = document.getElementById('status-fill');
+	const text = document.getElementById('status-text');
+	const notice = document.getElementById('status-notice');
+	const canvas = document.getElementById('canvas');
+	const SILENCE_MS = 120000;         // игра молчит дольше — заставку убираем (отладочный запуск, ошибка)
+	let shown = 0;
+	let finished = false;
+	let watchdog = 0;
+
+	function setProgress(p, label) {
+		shown = Math.max(shown, Math.min(Math.max(p, 0), 1));
+		fill.style.width = (shown * 100).toFixed(1) + '%';
+		if (label !== undefined) text.textContent = label;
+	}
+
+	function hide() {
+		if (finished) return;
+		finished = true;
+		clearTimeout(watchdog);
+		overlay.remove();
+		canvas.focus();
+	}
+
+	function armWatchdog() {
+		clearTimeout(watchdog);
+		watchdog = setTimeout(hide, SILENCE_MS);
+	}
+
+	function fail(message, reload) {
+		console.error(message);
+		text.textContent = '';
+		notice.textContent = '';
+		for (const line of String(message).split('\n')) {
+			notice.appendChild(document.createTextNode(line));
+			notice.appendChild(document.createElement('br'));
+		}
+		if (reload) {
+			const b = document.createElement('button');
+			b.textContent = 'Перезагрузить';
+			b.onclick = () => window.location.reload();
+			notice.appendChild(b);
+		}
+		notice.style.display = 'block';
+		finished = true;
+	}
+
+	// Игра (GDScript, JavaScriptBridge) докладывает подготовку: прогрев шейдеров, мир, звуки.
+	window.explorerBoot = {
+		progress(p, label) {
+			if (finished) return;
+			setProgress(0.45 + 0.55 * p, label);
+			armWatchdog();
+		},
+		done() {
+			setProgress(1, 'готово');
+			hide();
+		},
+	};
+
+	canvas.addEventListener('webglcontextlost', (e) => {
+		e.preventDefault();
+		if (!overlay.isConnected) document.body.appendChild(overlay);
+		finished = false;
+		fail('Браузер сбросил графику (WebGL).\nПерезагрузите страницу.', true);
+	});
+
+	const missing = Engine.getMissingFeatures({ threads: GODOT_THREADS_ENABLED });
+	if (missing.length !== 0) {
+		fail('Браузер не поддерживает нужное для игры:\n' + missing.join('\n'), false);
+		return;
+	}
+
+	setProgress(0, 'загрузка…');
+	engine.startGame({
+		'onProgress': function (current, total) {
+			if (current > 0 && total > 0) {
+				const mb = (v) => (v / 1048576).toFixed(1);
+				if (current < total) {
+					setProgress(0.4 * current / total, 'загрузка ' + mb(current) + ' / ' + mb(total) + ' МБ');
+				} else {
+					setProgress(0.4, 'запуск…');
+				}
+			}
+		},
+	}).then(() => {
+		setProgress(0.45, 'подготовка игры');
+		armWatchdog();
+	}, (err) => fail(err instanceof Error ? err.message : String(err), true));
+}());
+		</script>
+	</body>
+</html>
+
