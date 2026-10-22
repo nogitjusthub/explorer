@@ -1,7 +1,8 @@
 extends TestCase
-## Таран фауны машиной (GDD §5.4): порог — скорость валки деревьев класса, машина теряет скорость, как
-## после валки; панцирник выдерживает три удара, скакун и илозуб — один; один контакт — один удар;
-## илозуба таран достаёт только над поверхностью; убитые мигают, пропадают и не атакуют.
+## Таран фауны машиной (GDD §5.4): порог — своя скорость тарана класса (у ровера и ховера ниже валки
+## деревьев), достаёт до носа модели; машина теряет скорость, как после валки; панцирник выдерживает три
+## удара, скакун и илозуб — один, стаю скакунов давит один удар; один контакт — один удар; илозуба таран
+## достаёт только над поверхностью; убитые мигают, пропадают и не атакуют.
 
 const DT := 1.0 / 60.0
 
@@ -45,10 +46,10 @@ func _dispose(c: Creature) -> void:
 ## удары за этот кадр.
 func _touch(c: Creature, b: RamBody, speed: float, dir: Vector2 = Vector2.RIGHT) -> int:
 	var s := c.vehicle.state
-	s.pos = b.pos - dir * (VehicleKinematics.RADIUS + b.radius - 0.05)
+	s.pos = b.pos - dir * (b.reach_dist() - 0.05)
 	s.vel = dir * speed
 	s.y = b.y
-	return c.ram(s.pos, s.y, s.vel, VehicleKinematics.fells(c.vehicle.cls, speed))
+	return c.ram(s.pos, s.y, s.vel, VehicleKinematics.rams(c.vehicle.cls, speed))
 
 
 ## Машина далеко — касания нет.
@@ -67,26 +68,48 @@ func _mire(f: TerrainFixture, x0: int, z0: int, x1: int, z1: int) -> void:
 			f.set_flags(tx, tz, ChunkData.FLAG_MIRE)
 
 
-func test_threshold_is_the_tree_felling_speed() -> void:
+func test_threshold_is_the_class_ram_speed() -> void:
 	for id in ["rover", "tank", "hover"]:
 		var cls: VehicleClass = load("res://data/vehicles/%s.tres" % id)
-		var at := cls.tree_fell_speed_frac * cls.max_speed
-		assert_true(VehicleKinematics.fells(cls, at), "%s rams at %.2f" % [id, at])
-		assert_false(VehicleKinematics.fells(cls, at - 0.1), "%s does not ram slower" % id)
+		var at := cls.ram_speed_frac * cls.max_speed
+		assert_true(VehicleKinematics.rams(cls, at), "%s rams at %.2f" % [id, at])
+		assert_false(VehicleKinematics.rams(cls, at - 0.1), "%s does not ram slower" % id)
+		assert_true(cls.ram_speed_frac <= cls.tree_fell_speed_frac, "%s rams no later than it fells trees" % id)
 		var s := VehicleState.new()
 		s.vel = Vector2(cls.max_speed, 0.0)
 		VehicleKinematics.after_felling(s, cls)
 		assert_near(s.vel.length(), cls.tree_speed_after_frac * cls.max_speed, 1e-4, "%s slows down as after a tree" % id)
-	# Ровер: 90% Vmax — таран; медленнее — машина проезжает сквозь зверя без удара.
+	# Ровер: 60% Vmax — таран, хотя дерево на этой скорости ещё не валится; медленнее — машина проезжает
+	# сквозь зверя без удара.
 	var f := TerrainFixture.new(4)
 	var v := _vehicle(f, "rover", Vector2(5.5, 10.5))
 	var sb := _adopt(Shellback.new(), f, v) as Shellback
 	sb.setup(Vector2(10.5, 10.5))
-	var slow := v.cls.tree_fell_speed_frac * v.cls.max_speed - 0.1
-	assert_eq(_touch(sb, sb.bodies[0], slow), 0, "too slow — no hit")
+	var at := v.cls.ram_speed_frac * v.cls.max_speed
+	assert_false(VehicleKinematics.fells(v.cls, at), "a tree would stop the rover at this speed")
+	assert_eq(_touch(sb, sb.bodies[0], at - 0.1), 0, "too slow — no hit")
 	_leave(sb)
-	assert_eq(_touch(sb, sb.bodies[0], v.cls.max_speed), 1, "full speed — a hit")
+	assert_eq(_touch(sb, sb.bodies[0], at), 1, "the ram speed — a hit")
 	_dispose(sb)
+
+
+## Таран достаёт до носа модели (ram_vehicle_r), а не только до круга колёс (VehicleKinematics.RADIUS).
+func test_ram_reaches_the_nose() -> void:
+	var f := TerrainFixture.new(4)
+	var v := _vehicle(f, "rover", Vector2(5.5, 10.5))
+	var pack := _adopt(HopperPack.new(), f, v) as HopperPack
+	pack.setup(Vector2(12.5, 10.5), 1)
+	var b: RamBody = pack.bodies[0]
+	assert_true(pack.rules.ram_vehicle_r > VehicleKinematics.RADIUS, "reaches beyond the wheel circle")
+	assert_near(b.reach_dist(), pack.rules.ram_vehicle_r + b.radius, 1e-6)
+	var s := v.state
+	s.y = b.y
+	s.vel = Vector2.RIGHT * v.cls.max_speed
+	s.pos = b.pos - Vector2(b.reach_dist() + 0.05, 0.0)
+	assert_eq(pack.ram(s.pos, s.y, s.vel, true), 0, "just out of reach — no hit")
+	s.pos = b.pos - Vector2(VehicleKinematics.RADIUS + b.radius + 0.05, 0.0)
+	assert_eq(pack.ram(s.pos, s.y, s.vel, true), 1, "the nose hits before the wheel circle touches")
+	_dispose(pack)
 
 
 func test_hits_to_kill_per_species() -> void:
@@ -121,19 +144,16 @@ func test_hits_to_kill_per_species() -> void:
 	assert_true(sb.finished, "vanished — the director may remove it")
 	_dispose(sb)
 
-	# Скакуны: каждый — сам по себе, гибнет с одного удара; убиты все — стаи нет.
+	# Скакуны: удар по одному — удар по всей стае; каждый гибнет с одного удара — стая гибнет разом.
 	var w := _vehicle(f, "rover", Vector2(5.5, 10.5))
 	var pack := _adopt(HopperPack.new(), f, w) as HopperPack
 	pack.setup(Vector2(12.5, 10.5), 3)
 	assert_eq(pack.bodies.size(), 3, "a body per hopper")
-	var hits := 0
+	assert_eq(_touch(pack, pack.bodies[2], w.cls.max_speed), 1, "one hit")
 	for b in pack.bodies:
-		if b.alive():
-			_leave(pack)
-			hits += _touch(pack, b, w.cls.max_speed)
-			assert_false(b.alive(), "a hopper dies from one hit")
-	assert_eq(pack.kills, hits, "each hit killed one")
-	assert_true(pack.dead, "all hoppers killed — the pack is dead")
+		assert_false(b.alive(), "every hopper of the pack dies from it")
+	assert_eq(pack.kills, 3, "three killed")
+	assert_true(pack.dead, "the whole pack is crushed at once")
 	_dispose(pack)
 
 	# Илозуб на суше — один удар.
@@ -243,8 +263,8 @@ func test_dead_hoppers_do_not_attack() -> void:
 	_dispose(pack)
 
 
-## Директор: таран раз за кадр сбрасывает скорость, как валка дерева, ховер платит HP, как за дерево;
-## убитые учтены и убраны.
+## Директор: таран давит стаю разом и раз за кадр сбрасывает скорость, как валка дерева; ховер платит HP,
+## как за дерево, — за всю стаю один раз; убитые учтены и убраны.
 func test_director_ram_slows_the_vehicle_and_removes_the_dead() -> void:
 	var f := TerrainFixture.new(4)
 	for id in ["rover", "tank", "hover"]:
@@ -263,16 +283,13 @@ func test_director_ram_slows_the_vehicle_and_removes_the_dead() -> void:
 		d.damaged.connect(func(amount: int, source: StringName) -> void: dmg.append([amount, source]))
 		_ram_into(d, pack.bodies[0])
 		var s := v.state
-		assert_true(d.stats["rams"] >= 1 and d.stats["kills"] == d.stats["rams"], "%s killed a hopper" % id)
+		assert_eq(d.stats["rams"], 1, "%s: one hit" % id)
+		assert_eq(d.stats["kills"], 3, "%s: three kills counted" % id)
+		assert_true(pack.dead, "%s: the whole pack is crushed at once" % id)
 		assert_near(s.vel.length(), v.cls.tree_speed_after_frac * v.cls.max_speed, 1e-4, "%s slows down as after a tree" % id)
 		var cost: Array = [[v.cls.tree_fell_damage, &"ram"]] if v.cls.tree_fell_damage > 0 else []
-		assert_eq(dmg, cost, "%s pays for the ram as for a tree — once a frame" % id)
-		# Добить стаю — убитая стая мигает, пропадает и уходит из списка.
-		for b in pack.bodies:
-			if b.alive():
-				_ram_into(d, b)
-		assert_true(pack.dead, "%s: the pack is dead" % id)
-		assert_eq(d.stats["kills"], 3, "%s: three kills counted" % id)
+		assert_eq(dmg, cost, "%s pays for the pack as for one tree" % id)
+		# Убитая стая мигает, пропадает и уходит из списка.
 		s.vel = Vector2.ZERO
 		for _i in ceili((d.rules.ram_death_s + RamBody.PUFF_S) / DT) + 2:
 			d.step(DT)
@@ -288,7 +305,7 @@ func _ram_into(d: FaunaDirector, b: RamBody) -> void:
 	s.pos = Vector2(-100.0, -100.0)
 	s.vel = Vector2.ZERO
 	d._ram()
-	s.pos = b.pos - Vector2(VehicleKinematics.RADIUS + b.radius - 0.05, 0.0)
+	s.pos = b.pos - Vector2(b.reach_dist() - 0.05, 0.0)
 	s.y = b.y
 	s.vel = Vector2(d.vehicle.cls.max_speed, 0.0)
 	d._ram()

@@ -37,7 +37,7 @@ func step(_dt: float) -> void:
 
 
 ## Машина (центр at, днище на высоте vy, скорость vel) въехала в тела существа; fast — не медленнее порога
-## валки деревьев своего класса (VehicleKinematics.fells). Удар — по каждому телу, которого коснулась
+## тарана своего класса (VehicleKinematics.rams). Удар — по каждому телу, которого коснулась
 ## впервые (RamBody.struck); отклик — _on_rammed, все тела убиты — _on_died. Возвращает число ударов.
 func ram(at: Vector2, vy: float, vel: Vector2, fast: bool) -> int:
 	var hits := 0

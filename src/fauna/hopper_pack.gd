@@ -313,9 +313,14 @@ func _face(dir: Vector2) -> void:
 		_heading = dir.normalized()
 
 
-## Таран убил особь (или ударил, если ram_hits_hopper > 1): уцелевшие пригибаются, оглушённые.
-func _on_rammed(_b: RamBody, _dir: Vector2, _killed: bool) -> void:
+## Таран по одной особи — удар по всей стае (GDD §5.4): стая сбита в тесную кучку, давят её разом. Каждая
+## живая особь получает тот же удар; уцелевшие (если ram_hits_hopper > 1) пригибаются, оглушённые.
+func _on_rammed(b: RamBody, _dir: Vector2, _killed: bool) -> void:
 	_stun = STUN_S
+	for m in _members:
+		var other := m["ram"] as RamBody
+		if other != b and other.alive() and other.hit():
+			kills += 1
 
 
 ## Передний в строю — первый живой: он и бросается в укусе.

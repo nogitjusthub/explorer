@@ -1,8 +1,8 @@
 class_name RamBody
 extends RefCounted
 ## Тело существа под тараном машины (GDD §5.4): у панцирника и илозуба — одно, у стаи скакунов — по особи.
-## Машина въехала в тело (касание: центры ближе VehicleKinematics.RADIUS + radius, высоты рядом) на скорости
-## валки деревьев своего класса, двигаясь к нему, — удар. Удар засчитывается только с нового касания и не в
+## Машина въехала в тело (касание: центры ближе ram_vehicle_r + radius — до носа модели, высоты рядом) на
+## скорости тарана своего класса, двигаясь к нему, — удар. Удар засчитывается только с нового касания и не в
 ## неуязвимости после прошлого (ram_invuln_s): один контакт — один удар. Урон — мигание модели: белое
 ## наложение поверх всех её материалов (material_overlay, как у разряда по машине — ShockFx) сменяется
 ## обычным видом ступенями FLASH_STEP_S, без плавных переходов, ram_flash_s. Последний удар — гибель: тело
@@ -25,6 +25,7 @@ var y := 0.0                             ## высота основания те
 var life := Life.ALIVE
 var touching := false                    ## машина касалась тела в прошлый раз (удар — только с нового касания)
 
+var _vehicle_r := 0.4                    ## тайлов: досягаемость тарана от центра машины
 var _invuln_s := 0.5
 var _flash_s := 0.4
 var _death_s := 0.5
@@ -44,6 +45,7 @@ func _init(hits: int, body_radius: float, rules: BalanceRules, model: Node3D, pu
 		puff_color: Color) -> void:
 	hits_left = hits
 	radius = body_radius
+	_vehicle_r = rules.ram_vehicle_r
 	_invuln_s = rules.ram_invuln_s
 	_flash_s = rules.ram_flash_s
 	_death_s = rules.ram_death_s
@@ -80,14 +82,19 @@ func flashing() -> bool:
 
 
 ## Машина (центр at, днище на высоте vy, скорость vel) въехала в тело: касание новое (в прошлый раз не
-## касалась), не в неуязвимости, машина движется к телу; fast — не медленнее порога валки деревьев своего
-## класса; reach — тело досягаемо (илозуба в иле таран не достаёт). Касание запоминается в любом случае.
+## касалась), не в неуязвимости, машина движется к телу; fast — не медленнее порога тарана своего класса;
+## reach — тело досягаемо (илозуба в иле таран не достаёт). Касание запоминается в любом случае.
 func struck(at: Vector2, vy: float, vel: Vector2, fast: bool, reach: bool) -> bool:
-	var near := alive() and reach and at.distance_to(pos) < VehicleKinematics.RADIUS + radius \
+	var near := alive() and reach and at.distance_to(pos) < reach_dist() \
 			and absf(y - vy) < REACH_DY
 	var fresh := near and not touching
 	touching = near
 	return fresh and fast and _invuln <= 0.0 and vel.dot(pos - at) > 0.0
+
+
+## Касание: центр машины ближе этого к центру тела (досягаемость тарана + радиус тела).
+func reach_dist() -> float:
+	return _vehicle_r + radius
 
 
 ## Удар: −1 к запасу, неуязвимость и мигание; запас кончился — гибель (true).

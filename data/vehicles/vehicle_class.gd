@@ -41,6 +41,11 @@ extends Resource
 @export var tree_speed_after_frac: float = 0.5   ## после валки скорость не выше этой доли max_speed
 @export var tree_fell_damage: int = 0
 
+@export_group("Ram")
+## Таран фауны (GDD §5.4): с этой доли max_speed машина таранит зверя. Ниже порога валки деревьев — таран
+## достаётся и в повороте, и на подъёме, и на неровном грунте; после удара — потеря скорости и урон, как у валки.
+@export var ram_speed_frac: float = 0.6
+
 @export_group("Fuel and cargo")
 @export var fuel_max: float = 100.0
 @export var fuel_idle_per_min: float = 3.0

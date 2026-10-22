@@ -25,6 +25,7 @@ fall_damage_base = 20.0
 tree_fell_speed_frac = 0.9
 tree_speed_after_frac = 0.5
 tree_fell_damage = 0
+ram_speed_frac = 0.6
 fuel_max = 100.0
 fuel_idle_per_min = 3.0
 fuel_drive_per_min = 15.0
